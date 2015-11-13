@@ -1,11 +1,12 @@
 .svn
+*.pyc
 *.mode1v3
 *.mode2v3
 *.move1v3
 *.pbxuser
 *.perspective
 *.perspectivev3
-iTerm.xcodeproj/project.pbxproj
+iTerm2.xcodeproj/project.xcworkspace
 .gitignore
 build/
 .DS_Store
@@ -16,3 +17,10 @@ testing.xml
 testing_changes.html
 .gitignore
 iTerm.plist
+DerivedData/
+Intermediates/
+NMSSH.framework.dSYM/
+NMSSH/
+iTerm2.xcodeproj/xcuserdata/
+ColorPicker/ColorPicker.xcodeproj/project.xcworkspace/xcuserdata/
+ColorPicker/ColorPicker.xcodeproj/xcuserdata/
