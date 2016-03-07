@@ -3,6 +3,7 @@
 #import <Cocoa/Cocoa.h>
 #import "ProfileModel.h"
 #import "PTYTabDelegate.h"
+#import "PTYWindow.h"
 
 @class iTermPopupWindowController;
 @class PSMTabBarControl;
@@ -53,9 +54,6 @@ typedef NS_ENUM(NSInteger, BroadcastMode) {
 // Disable blur for window.
 - (void)disableBlur;
 
-// Is the window title transient?
-- (BOOL)tempTitle;
-
 // Force the window size to change to be just large enough to fit this session.
 - (void)fitWindowToTab:(PTYTab*)tab;
 
@@ -67,9 +65,6 @@ typedef NS_ENUM(NSInteger, BroadcastMode) {
 
 // Set the window title to the name of the current session.
 - (void)setWindowTitle;
-
-// Set the window title to non-transient.
-- (void)resetTempTitle;
 
 // Return the foreground tab
 - (PTYTab*)currentTab;
@@ -110,6 +105,7 @@ typedef NS_ENUM(NSInteger, BroadcastMode) {
 
 // Underlying window
 - (NSWindow *)window;
+- (PTYWindow *)ptyWindow;
 
 // Unique identifier
 - (NSString *)terminalGuid;
@@ -168,6 +164,11 @@ typedef NS_ENUM(NSInteger, BroadcastMode) {
 
 - (void)toggleFullScreenMode:(id)sender;
 
+// Is the window title transient?
+- (void)clearTransientTitle;
+- (BOOL)isShowingTransientTitle;
+
+
 #pragma mark - Tabs
 
 // Close a tab and resize/close the window if needed.
@@ -176,6 +177,12 @@ typedef NS_ENUM(NSInteger, BroadcastMode) {
 // Move tabs within ordering.
 - (void)moveTabLeft:(id)sender;
 - (void)moveTabRight:(id)sender;
+
+// Increase and Decrease
+- (void)increaseHeight:(id)sender;
+- (void)decreaseHeight:(id)sender;
+- (void)increaseWidth:(id)sender;
+- (void)decreaseWidth:(id)sender;
 
 // If soft is true, don't kill tmux session. Otherwise is just like closeTab.
 - (void)closeTab:(PTYTab *)aTab soft:(BOOL)soft;

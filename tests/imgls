@@ -19,13 +19,9 @@ function print_st() {
     fi
 }
 
-if [ $# -eq 0 ]; then
-  echo "Usage: image.sh filename [filename...]"
-  exit 1
-fi
-for fn in "$@"
-do
-  dims=$(php -r '$a = getimagesize("$argv[1]"); if ($a==FALSE) exit(1); else { echo $a[0] . "x" .$a[1]; exit(0); }' "$fn")
+function list_file() {
+  fn=$1
+  dims=$(php -r 'if (!is_file($argv[1])) exit(1); $a = getimagesize($argv[1]); if ($a==FALSE) exit(1); else { echo $a[0] . "x" .$a[1]; exit(0); }' "$fn")
   rc=$?
   if [[ $rc == 0 ]] ; then
     print_osc
@@ -52,8 +48,21 @@ do
       printf '\033[A'
     fi
     echo -n "$dims "
-    ls -l "$fn"
+    ls -ld "$fn"
   else
-    ls -l "$fn"
+    ls -ld "$fn"
   fi
-done
+}
+
+if [ $# -eq 0 ]; then
+  for fn in *
+  do
+     list_file "$fn"
+  done < <(ls -ls)
+else
+  for fn in "$@"
+  do
+     list_file "$fn"
+  done
+fi
+

@@ -72,6 +72,8 @@
  */
 
 #import "ITAddressBookMgr.h"
+
+#import "DebugLogging.h"
 #import "iTermKeyBindingMgr.h"
 #import "iTermPasteSpecialViewController.h"
 #import "iTermPreferences.h"
@@ -203,31 +205,20 @@ static NSString *const kFactoryDefaultsGlobalPreset = @"Factory Defaults";
             aString = @".";
             break;
         case NSClearLineFunctionKey:
-            aString = NSLocalizedStringFromTableInBundle(@"Numlock",
-                                                         @"iTerm",
-                                                         [NSBundle bundleForClass: [self class]],
-                                                         @"Key Names");
+            aString = @"Numlock";
             break;
         case NSPageDownFunctionKey:
-            aString = NSLocalizedStringFromTableInBundle(@"Page Down",
-                                                         @"iTerm",
-                                                         [NSBundle bundleForClass: [self class]],
-                                                         @"Key Names");
+            aString = @"Page Down";
             break;
         case NSPageUpFunctionKey:
-            aString = NSLocalizedStringFromTableInBundle(@"Page Up",
-                                                         @"iTerm",
-                                                         [NSBundle bundleForClass: [self class]],
-                                                         @"Key Names");
+            aString = @"Page Up";
             break;
         case 0x3: // 'enter' on numeric key pad
             aString = @"↩";
             break;
+        case NSInsertFunctionKey:  // Fall through
         case NSInsertCharFunctionKey:
-            aString = NSLocalizedStringFromTableInBundle(@"Insert",
-                                                         @"iTerm",
-                                                         [NSBundle bundleForClass: [self class]],
-                                                         @"Key Names");
+            aString = @"Insert";
             break;
 
         default:
@@ -471,6 +462,22 @@ static NSString *const kFactoryDefaultsGlobalPreset = @"Factory Defaults";
                             [self stringForSelectionMovementUnit:auxText.integerValue]];
             break;
 
+        case KEY_ACTION_DECREASE_HEIGHT:
+            actionString = @"Decrease Height";
+            break;
+
+        case KEY_ACTION_INCREASE_HEIGHT:
+            actionString = @"Increase Height";
+            break;
+
+        case KEY_ACTION_DECREASE_WIDTH:
+            actionString = @"Decrease Width";
+            break;
+            
+        case KEY_ACTION_INCREASE_WIDTH:
+            actionString = @"Increase Width";
+            break;
+
         default:
             actionString = [NSString stringWithFormat: @"%@ %d", @"Unknown Action ID", action];
             break;
@@ -487,10 +494,11 @@ static NSString *const kFactoryDefaultsGlobalPreset = @"Factory Defaults";
             return @"By Character";
         case kPTYTextViewSelectionExtensionUnitWord:
             return @"By Word";
-        default:
-            NSLog(@"Unrecognized selection movement unit %@", @(unit));
-            return @"";
+        case kPTYTextViewSelectionExtensionUnitMark:
+            return @"By Mark";
     }
+    ELog(@"Unrecognized selection movement unit %@", @(unit));
+    return @"";
 }
 
 + (BOOL)haveGlobalKeyMappingForKeyString:(NSString*)keyString

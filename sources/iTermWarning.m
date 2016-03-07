@@ -1,5 +1,7 @@
 #import "iTermWarning.h"
 
+#import "DebugLogging.h"
+
 static const NSTimeInterval kTemporarySilenceTime = 600;
 static NSString *const kCancel = @"Cancel";
 static id<iTermWarningHandler> gWarningHandler;
@@ -47,6 +49,40 @@ static BOOL gShowingWarning;
                                    identifier:(NSString *)identifier
                                   silenceable:(iTermWarningType)warningType
                                       heading:(NSString *)heading {
+    return [self showWarningWithTitle:title
+                              actions:actions
+                        actionMapping:nil
+                            accessory:accessory
+                           identifier:identifier
+                          silenceable:warningType
+                              heading:heading];
+}
+
++ (iTermWarningSelection)showWarningWithTitle:(NSString *)title
+                                      actions:(NSArray *)actions
+                                actionMapping:(NSArray<NSNumber *> *)actionToSelectionMap
+                                    accessory:(NSView *)accessory
+                                   identifier:(NSString *)identifier
+                                  silenceable:(iTermWarningType)warningType
+                                      heading:(NSString *)heading {
+    return [self showWarningWithTitle:title
+                              actions:actions
+                        actionMapping:actionToSelectionMap
+                            accessory:accessory
+                           identifier:identifier
+                          silenceable:warningType
+                              heading:heading
+                          cancelLabel:kCancel];
+}
+
++ (iTermWarningSelection)showWarningWithTitle:(NSString *)title
+                                      actions:(NSArray *)actions
+                                actionMapping:(NSArray<NSNumber *> *)actionToSelectionMap
+                                    accessory:(NSView *)accessory
+                                   identifier:(NSString *)identifier
+                                  silenceable:(iTermWarningType)warningType
+                                      heading:(NSString *)heading
+                                  cancelLabel:(NSString *)cancelLabel {
     if (!gWarningHandler &&
         warningType != kiTermWarningTypePersistent &&
         [self identifierIsSilenced:identifier]) {
@@ -60,7 +96,7 @@ static BOOL gShowingWarning;
                          informativeTextWithFormat:@"%@", title];
     int numNonCancelActions = [actions count];
     for (NSString *string in actions) {
-        if ([string isEqualToString:kCancel]) {
+        if ([string isEqualToString:cancelLabel]) {
             --numNonCancelActions;
         }
     }
@@ -101,16 +137,16 @@ static BOOL gShowingWarning;
     iTermWarningSelection selection;
     switch (result) {
         case NSAlertDefaultReturn:
-            selection = kiTermWarningSelection0;
-            remember = ![actions[0] isEqualToString:kCancel];
+            selection = [self remapSelection:kiTermWarningSelection0 withMapping:actionToSelectionMap];
+            remember = ![actions[0] isEqualToString:cancelLabel];
             break;
         case NSAlertAlternateReturn:
-            selection = kiTermWarningSelection1;
-            remember = ![actions[1] isEqualToString:kCancel];
+            selection = [self remapSelection:kiTermWarningSelection1 withMapping:actionToSelectionMap];
+            remember = ![actions[1] isEqualToString:cancelLabel];
             break;
         case NSAlertOtherReturn:
-            selection = kiTermWarningSelection2;
-            remember = ![actions[2] isEqualToString:kCancel];
+            selection = [self remapSelection:kiTermWarningSelection2 withMapping:actionToSelectionMap];
+            remember = ![actions[2] isEqualToString:cancelLabel];
             break;
         default:
             selection = kItermWarningSelectionError;
@@ -132,6 +168,18 @@ static BOOL gShowingWarning;
     }
 
     return selection;
+}
+
++ (iTermWarningSelection)remapSelection:(iTermWarningSelection)pre
+                            withMapping:(NSArray<NSNumber *> *)mapping {
+    if (!mapping) {
+        return pre;
+    }
+    if (pre < 0 || pre >= mapping.count) {
+        ELog(@"Selected value %@ is out of range for mapping %@", @(pre), mapping);
+        return pre;
+    }
+    return [mapping[pre] integerValue];
 }
 
 #pragma mark - Private

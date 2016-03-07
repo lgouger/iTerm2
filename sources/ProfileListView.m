@@ -23,6 +23,8 @@
  */
 
 #import "ProfileListView.h"
+
+#import "DebugLogging.h"
 #import "ITAddressBookMgr.h"
 #import "PTYSession.h"
 #import "ProfileModel.h"
@@ -34,6 +36,8 @@
 #import "NSView+RecursiveDescription.h"
 
 #define kProfileTableViewDataType @"iTerm2ProfileGuid"
+
+NSString *const kProfileWasDeletedNotification = @"kProfileWasDeletedNotification";
 
 const int kSearchWidgetHeight = 22;
 const int kInterWidgetMargin = 10;
@@ -153,6 +157,10 @@ const CGFloat kDefaultTagsWidth = 80;
 
         [searchField_ setArrowHandler:tableView_];
 
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(reloadData)
+                                                     name:kProfileWasDeletedNotification
+                                                   object:nil];
         [[NSNotificationCenter defaultCenter] addObserver:self
                                                  selector:@selector(dataChangeNotification:)
                                                      name:kReloadAddressBookNotification
@@ -350,6 +358,14 @@ const CGFloat kDefaultTagsWidth = 80;
 
 - (void)lockSelection {
     dataSource_.lockedGuid = [self selectedGuid];
+}
+
+- (void)selectLockedSelection {
+    NSInteger theIndex = [dataSource_ indexOfProfileWithGuid:dataSource_.lockedGuid];
+    if (theIndex < 0) {
+        return;
+    }
+    [tableView_ selectRowIndexes:[NSIndexSet indexSetWithIndex:theIndex] byExtendingSelection:NO];
 }
 
 - (void)unlockSelection {
@@ -551,6 +567,8 @@ const CGFloat kDefaultTagsWidth = 80;
     Profile* bookmark = [dataSource_ profileAtIndex:rowIndex];
 
     if (aTableColumn == tableColumn_) {
+        DLog(@"Getting name of profile at row %d. The dictionary's address is %p. Its name is %@",
+             (int)rowIndex, bookmark, bookmark[KEY_NAME]);
         Profile *defaultProfile = [[ProfileModel sharedInstance] defaultBookmark];
         return [self attributedStringForName:bookmark[KEY_NAME]
                                         tags:bookmark[KEY_TAGS]
@@ -660,10 +678,11 @@ const CGFloat kDefaultTagsWidth = 80;
     return [tableView_ selectedRow];
 }
 
-- (void)reloadData
-{
+- (void)reloadData {
+    DLog(@"ProfileListView reloadData called");
     [self _addTags:[[dataSource_ underlyingModel] allTags] toSearchField:searchField_];
     [dataSource_ sync];
+    DLog(@"calling reloadData on the profile tableview");
     [tableView_ reloadData];
     if (self.delegate && ![selectedGuids_ isEqualToSet:[self selectedGuids]]) {
         [selectedGuids_ release];
@@ -755,6 +774,14 @@ const CGFloat kDefaultTagsWidth = 80;
     [self updateResultsForSearch];
 }
 
+- (NSArray *)control:(NSControl *)control
+            textView:(NSTextView *)textView
+         completions:(NSArray *)words
+ forPartialWordRange:(NSRange)charRange
+ indexOfSelectedItem:(NSInteger *)index {
+    return @[];
+}
+
 - (void)updateResultsForSearch
 {
     // search field changed
@@ -787,8 +814,8 @@ const CGFloat kDefaultTagsWidth = 80;
     [tableView_ sizeLastColumnToFit];
 }
 
-- (void)dataChangeNotification:(id)sender
-{
+- (void)dataChangeNotification:(id)sender {
+    DLog(@"Scheduling a delayed perform of reloadData");
     // Use a delayed perform so the underlying model has a chance to parse its journal.
     [self performSelector:@selector(reloadData)
                withObject:nil

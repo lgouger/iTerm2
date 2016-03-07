@@ -31,6 +31,7 @@ NSString *const kSavedCursorOriginKey = @"Origin";
 NSString *const kSavedCursorWraparoundKey = @"Wraparound";
 
 NSString *const kTerminalStateTermTypeKey = @"Term Type";
+NSString *const kTerminalStateAnswerBackStringKey = @"Answerback String";
 NSString *const kTerminalStateStringEncodingKey = @"String Encoding";
 NSString *const kTerminalStateCanonicalEncodingKey = @"Canonical String Encoding";
 NSString *const kTerminalStateReportFocusKey = @"Report Focus";
@@ -226,6 +227,7 @@ static const int kMaxScreenRows = 4096;
     [_output release];
     [_parser release];
     [_termType release];
+    [_answerBackString release];
 
     [super dealloc];
 }
@@ -255,6 +257,9 @@ static const int kMaxScreenRows = 4096;
 
     int r;
 
+    // NOTE: This seems to cause a memory leak. The setter for termTypeIsValid (below) has the
+    // side effect of copying various curses strings, and it depends on this. When I redo output,
+    // fix this disaster.
     setupterm((char *)[_termType UTF8String], fileno(stdout), &r);
     if (r != 1) {
         NSLog(@"Terminal type %s is not defined.", [_termType UTF8String]);
@@ -264,6 +269,11 @@ static const int kMaxScreenRows = 4096;
     self.isAnsi = [_termType rangeOfString:@"ANSI"
                                    options:NSCaseInsensitiveSearch | NSAnchoredSearch ].location !=  NSNotFound;
     [delegate_ terminalTypeDidChange];
+}
+
+- (void)setAnswerBackString:(NSString *)s {
+    s = [s stringByExpandingVimSpecialCharacters];
+    _answerBackString = [s copy];
 }
 
 - (void)setForeground24BitColor:(NSColor *)color {
@@ -537,7 +547,7 @@ static const int kMaxScreenRows = 4096;
                 [delegate_ terminalMouseModeDidChangeTo:_mouseMode];
                 break;
             case 1004:
-                self.reportFocus = mode;
+                self.reportFocus = mode && [delegate_ terminalFocusReportingEnabled];
                 break;
 
             case 1005:
@@ -853,6 +863,10 @@ static const int kMaxScreenRows = 4096;
                 }
                 break;
 
+            case 1337:  // iTerm2 extension
+                [delegate_ terminalSendReport:[self.output reportiTerm2Version]];
+                break;
+                
             case 0: // Response from VT100 -- Ready, No malfuctions detected
             default:
                 break;
@@ -1231,7 +1245,7 @@ static const int kMaxScreenRows = 4096;
 
         //  VT100 CC
         case VT100CC_ENQ:
-            // TODO: Add support for an answerback string here.
+            [delegate_ terminalSendReport:[_answerBackString dataUsingEncoding:self.encoding]];
             break;
         case VT100CC_BEL:
             [delegate_ terminalRingBell];
@@ -1339,16 +1353,18 @@ static const int kMaxScreenRows = 4096;
             [self handleDeviceStatusReportWithToken:token withQuestion:NO];
             break;
         case VT100CSI_DECRQCRA: {
-            VT100GridRect defaultRectangle = VT100GridRectMake(0,
-                                                               0,
-                                                               [delegate_ terminalWidth],
-                                                               [delegate_ terminalHeight]);
-            // xterm incorrectly uses the second parameter for the Pid. Since I use this mostly to
-            // test xterm compatibility, it's handy to be bugwards-compatible.
-            [self sendChecksumReportWithId:token.csi->p[1]
-                                 rectangle:[self rectangleInToken:token
-                                                  startingAtIndex:2
-                                                 defaultRectangle:defaultRectangle]];
+            if ([delegate_ terminalIsTrusted]) {
+                VT100GridRect defaultRectangle = VT100GridRectMake(0,
+                                                                   0,
+                                                                   [delegate_ terminalWidth],
+                                                                   [delegate_ terminalHeight]);
+                // xterm incorrectly uses the second parameter for the Pid. Since I use this mostly to
+                // test xterm compatibility, it's handy to be bugwards-compatible.
+                [self sendChecksumReportWithId:token.csi->p[1]
+                                     rectangle:[self rectangleInToken:token
+                                                      startingAtIndex:2
+                                                     defaultRectangle:defaultRectangle]];
+            }
             break;
         }
         case VT100CSI_DECDSR:
@@ -1918,6 +1934,73 @@ static const int kMaxScreenRows = 4096;
     }
 }
 
+- (void)executeFileCommandWithValue:(NSString *)value {
+    // Takes semicolon-delimited arguments.
+    // File=<arg>;<arg>;...;<arg>
+    // <arg> is one of:
+    //   name=<base64-encoded filename>    Default: Unnamed file
+    //   size=<integer file size>          Default: 0
+    //   width=auto|<integer>px|<integer>  Default: auto
+    //   height=auto|<integer>px|<integer> Default: auto
+    //   preserveAspectRatio=<bool>        Default: yes
+    //   inline=<bool>                     Default: no
+    NSArray *parts = [value componentsSeparatedByString:@";"];
+    NSMutableDictionary *dict = [NSMutableDictionary dictionary];
+    dict[@"size"] = @(0);
+    dict[@"width"] = @"auto";
+    dict[@"height"] = @"auto";
+    dict[@"preserveAspectRatio"] = @YES;
+    dict[@"inline"] = @NO;
+    for (NSString *part in parts) {
+        NSRange eq = [part rangeOfString:@"="];
+        if (eq.location != NSNotFound && eq.location > 0) {
+            NSString *left = [part substringToIndex:eq.location];
+            NSString *right = [part substringFromIndex:eq.location + 1];
+            dict[left] = right;
+        } else {
+            dict[part] = @"";
+        }
+    }
+
+    NSString *widthString = dict[@"width"];
+    VT100TerminalUnits widthUnits = kVT100TerminalUnitsCells;
+    NSString *heightString = dict[@"height"];
+    VT100TerminalUnits heightUnits = kVT100TerminalUnitsCells;
+    int width = [widthString intValue];
+    if ([widthString isEqualToString:@"auto"]) {
+        widthUnits = kVT100TerminalUnitsAuto;
+    } else if ([widthString hasSuffix:@"px"]) {
+        widthUnits = kVT100TerminalUnitsPixels;
+    } else if ([widthString hasSuffix:@"%"]) {
+        widthUnits = kVT100TerminalUnitsPercentage;
+    }
+    int height = [heightString intValue];
+    if ([heightString isEqualToString:@"auto"]) {
+        heightUnits = kVT100TerminalUnitsAuto;
+    } else if ([heightString hasSuffix:@"px"]) {
+        heightUnits = kVT100TerminalUnitsPixels;
+    } else if ([heightString hasSuffix:@"%"]) {
+        heightUnits = kVT100TerminalUnitsPercentage;
+    }
+
+    NSString *name = [dict[@"name"] stringByBase64DecodingStringWithEncoding:NSISOLatin1StringEncoding];
+    if (!name) {
+        name = @"Unnamed file";
+    }
+    if ([dict[@"inline"] boolValue]) {
+        [delegate_ terminalWillReceiveInlineFileNamed:name
+                                               ofSize:[dict[@"size"] intValue]
+                                                width:width
+                                                units:widthUnits
+                                               height:height
+                                                units:heightUnits
+                                  preserveAspectRatio:[dict[@"preserveAspectRatio"] boolValue]];
+    } else {
+        [delegate_ terminalWillReceiveFileNamed:name ofSize:[dict[@"size"] intValue]];
+    }
+    receivingFile_ = YES;
+}
+
 - (NSArray *)keyValuePairInToken:(VT100Token *)token {
   // argument is of the form key=value
   // key: Sequence of characters not = or ^G
@@ -1953,17 +2036,25 @@ static const int kMaxScreenRows = 4096;
     } else if ([key isEqualToString:@"ShellIntegrationVersion"]) {
         [delegate_ terminalSetShellIntegrationVersion:value];
     } else if ([key isEqualToString:@"RemoteHost"]) {
-        [delegate_ terminalSetRemoteHost:value];
+        if ([delegate_ terminalIsTrusted]) {
+            [delegate_ terminalSetRemoteHost:value];
+        }
     } else if ([key isEqualToString:@"SetMark"]) {
         [delegate_ terminalSaveScrollPositionWithArgument:value];
     } else if ([key isEqualToString:@"StealFocus"]) {
-        [delegate_ terminalStealFocus];
+        if ([delegate_ terminalIsTrusted]) {
+            [delegate_ terminalStealFocus];
+        }
     } else if ([key isEqualToString:@"ClearScrollback"]) {
         [delegate_ terminalClearBuffer];
     } else if ([key isEqualToString:@"CurrentDir"]) {
-        [delegate_ terminalCurrentDirectoryDidChangeTo:value];
+        if ([delegate_ terminalIsTrusted]) {
+            [delegate_ terminalCurrentDirectoryDidChangeTo:value];
+        }
     } else if ([key isEqualToString:@"SetProfile"]) {
-        [delegate_ terminalProfileShouldChangeTo:(NSString *)value];
+        if ([delegate_ terminalIsTrusted]) {
+            [delegate_ terminalProfileShouldChangeTo:(NSString *)value];
+        }
     } else if ([key isEqualToString:@"AddNote"] ||  // Deprecated
                [key isEqualToString:@"AddAnnotation"]) {
         [delegate_ terminalAddNote:(NSString *)value show:YES];
@@ -1973,129 +2064,24 @@ static const int kMaxScreenRows = 4096;
     } else if ([key isEqualToString:@"HighlightCursorLine"]) {
         [delegate_ terminalSetHighlightCursorLine:value.length ? [value boolValue] : YES];
     } else if ([key isEqualToString:@"CopyToClipboard"]) {
-        [delegate_ terminalSetPasteboard:value];
+        if ([delegate_ terminalIsTrusted]) {
+            [delegate_ terminalSetPasteboard:value];
+        }
     } else if ([key isEqualToString:@"File"]) {
-        // Takes semicolon-delimited arguments.
-        // File=<arg>;<arg>;...;<arg>
-        // <arg> is one of:
-        //   name=<base64-encoded filename>    Default: Unnamed file
-        //   size=<integer file size>          Default: 0
-        //   width=auto|<integer>px|<integer>  Default: auto
-        //   height=auto|<integer>px|<integer> Default: auto
-        //   preserveAspectRatio=<bool>        Default: yes
-        //   inline=<bool>                     Default: no
-        NSArray *parts = [value componentsSeparatedByString:@";"];
-        NSMutableDictionary *dict = [NSMutableDictionary dictionary];
-        dict[@"size"] = @(0);
-        dict[@"width"] = @"auto";
-        dict[@"height"] = @"auto";
-        dict[@"preserveAspectRatio"] = @YES;
-        dict[@"inline"] = @NO;
-        for (NSString *part in parts) {
-            NSRange eq = [part rangeOfString:@"="];
-            if (eq.location != NSNotFound && eq.location > 0) {
-                NSString *left = [part substringToIndex:eq.location];
-                NSString *right = [part substringFromIndex:eq.location + 1];
-                dict[left] = right;
-            } else {
-                dict[part] = @"";
-            }
-        }
-
-        NSString *widthString = dict[@"width"];
-        VT100TerminalUnits widthUnits = kVT100TerminalUnitsCells;
-        NSString *heightString = dict[@"height"];
-        VT100TerminalUnits heightUnits = kVT100TerminalUnitsCells;
-        int width = [widthString intValue];
-        if ([widthString isEqualToString:@"auto"]) {
-            widthUnits = kVT100TerminalUnitsAuto;
-        } else if ([widthString hasSuffix:@"px"]) {
-            widthUnits = kVT100TerminalUnitsPixels;
-        } else if ([widthString hasSuffix:@"%"]) {
-            widthUnits = kVT100TerminalUnitsPercentage;
-        }
-        int height = [heightString intValue];
-        if ([heightString isEqualToString:@"auto"]) {
-            heightUnits = kVT100TerminalUnitsAuto;
-        } else if ([heightString hasSuffix:@"px"]) {
-            heightUnits = kVT100TerminalUnitsPixels;
-        } else if ([heightString hasSuffix:@"%"]) {
-            heightUnits = kVT100TerminalUnitsPercentage;
-        }
-
-        NSString *name = [dict[@"name"] stringByBase64DecodingStringWithEncoding:NSISOLatin1StringEncoding];
-        if (!name) {
-            name = @"Unnamed file";
-        }
-        if ([dict[@"inline"] boolValue]) {
-            [delegate_ terminalWillReceiveInlineFileNamed:name
-                                                   ofSize:[dict[@"size"] intValue]
-                                                    width:width
-                                                    units:widthUnits
-                                                   height:height
-                                                    units:heightUnits
-                                      preserveAspectRatio:[dict[@"preserveAspectRatio"] boolValue]];
+        if ([delegate_ terminalIsTrusted]) {
+            [self executeFileCommandWithValue:value];
         } else {
-            [delegate_ terminalWillReceiveFileNamed:name ofSize:[dict[@"size"] intValue]];
+            // Enter multitoken mode to avoid showing the base64 gubbins of the image.
+            receivingFile_ = YES;
         }
-        receivingFile_ = YES;
     } else if ([key isEqualToString:@"BeginFile"]) {
-        // DEPRECATED. Use File instead.
-        // Takes 2-5 args separated by newline. First is filename, second is size in bytes.
-        // Arg 3,4 are width,height in cells for an inline image.
-        // Arg 5 is whether to preserve the aspect ratio for an inline image.
-        NSArray *parts = [value componentsSeparatedByString:@"\n"];
-        NSString *name = nil;
-        int size = -1;
-        if (parts.count >= 1) {
-            name = [parts[0] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-        }
-        if (parts.count >= 2) {
-            size = [parts[1] intValue];
-        }
-        int width = 0, height = 0;
-        VT100TerminalUnits widthUnits = kVT100TerminalUnitsCells, heightUnits = kVT100TerminalUnitsCells;
-        if (parts.count >= 4) {
-            NSString *widthString =
-            [parts[2] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-            NSString *heightString =
-            [parts[3] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-            width = [widthString intValue];
-            if ([widthString isEqualToString:@"auto"]) {
-                widthUnits = kVT100TerminalUnitsAuto;
-                width = 1;
-            } else if ([widthString hasSuffix:@"px"]) {
-                widthUnits = kVT100TerminalUnitsPixels;
-            }
-            height = [heightString intValue];
-            if ([heightString isEqualToString:@"auto"]) {
-                heightUnits = kVT100TerminalUnitsAuto;
-                height = 1;
-            } else if ([heightString hasSuffix:@"px"]) {
-                heightUnits = kVT100TerminalUnitsPixels;
-            }
-        }
-        BOOL preserveAspectRatio = YES;
-        if (parts.count >= 5) {
-            preserveAspectRatio = [parts[4] boolValue];
-        }
-        if (width > 0 && height > 0) {
-            [delegate_ terminalWillReceiveInlineFileNamed:name
-                                                   ofSize:size
-                                                    width:width
-                                                    units:widthUnits
-                                                   height:height
-                                                    units:heightUnits
-                                      preserveAspectRatio:preserveAspectRatio];
-        } else {
-            [delegate_ terminalWillReceiveFileNamed:name ofSize:size];
-        }
-        receivingFile_ = YES;
+        ELog(@"Deprecated and unsupported code BeginFile received. Use File instead.");
     } else if ([key isEqualToString:@"EndFile"]) {
-        [delegate_ terminalDidFinishReceivingFile];
-        receivingFile_ = NO;
+        ELog(@"Deprecated and unsupported code EndFile received. Use File instead.");
     } else if ([key isEqualToString:@"EndCopy"]) {
-        [delegate_ terminalCopyBufferToPasteboard];
+        if ([delegate_ terminalIsTrusted]) {
+            [delegate_ terminalCopyBufferToPasteboard];
+        }
     } else if ([key isEqualToString:@"RequestAttention"]) {
         [delegate_ terminalRequestAttention:[value boolValue]];  // true: request, false: cancel
     } else if ([key isEqualToString:@"SetBackgroundImageFile"]) {
@@ -2370,6 +2356,7 @@ static const int kMaxScreenRows = 4096;
 - (NSDictionary *)stateDictionary {
     NSDictionary *dict =
         @{ kTerminalStateTermTypeKey: self.termType ?: [NSNull null],
+           kTerminalStateAnswerBackStringKey: self.answerBackString ?: [NSNull null],
            kTerminalStateStringEncodingKey: @(self.encoding),
            kTerminalStateCanonicalEncodingKey: @(self.canonicalEncoding),
            kTerminalStateReportFocusKey: @(self.reportFocus),
@@ -2405,6 +2392,12 @@ static const int kMaxScreenRows = 4096;
         return;
     }
     self.termType = dict[kTerminalStateTermTypeKey];
+
+    self.answerBackString = dict[kTerminalStateAnswerBackStringKey];
+    if ([self.answerBackString isKindOfClass:[NSNull class]]) {
+        self.answerBackString = nil;
+    }
+
     self.encoding = [dict[kTerminalStateStringEncodingKey] unsignedIntegerValue];
     self.canonicalEncoding = [dict[kTerminalStateCanonicalEncodingKey] unsignedIntegerValue];
     self.reportFocus = [dict[kTerminalStateReportFocusKey] boolValue];

@@ -7,24 +7,21 @@
 
 @implementation PTYWindow (Scripting)
 
-// Object specifier
 - (NSScriptObjectSpecifier *)objectSpecifier {
     NSUInteger anIndex = 0;
     id classDescription = nil;
 
     NSScriptObjectSpecifier *containerRef;
 
-    NSArray *windows = [[iTermApplication sharedApplication] orderedTerminalWindows];
+    NSArray *windows = [iTermApplication.sharedApplication orderedTerminalWindows];
     anIndex = [windows indexOfObjectIdenticalTo:self];
     if (anIndex != NSNotFound) {
         containerRef = [NSApp objectSpecifier];
         classDescription = [NSClassDescription classDescriptionForClass:[NSApp class]];
-        // Create and return the specifier
-        return [[[NSIndexSpecifier alloc]
-                   initWithContainerClassDescription:classDescription
-                                  containerSpecifier:containerRef
-                                                 key:@"orderedTerminalWindows"
-                                               index:anIndex] autorelease];
+        return [[[NSUniqueIDSpecifier alloc] initWithContainerClassDescription:classDescription
+                                                            containerSpecifier:containerRef
+                                                                           key:@"orderedTerminalWindows"
+                                                                      uniqueID:self.windowIdentifier] autorelease];
     } else {
         return nil;
     }
@@ -52,6 +49,7 @@
                                                  withURL:nil
                                                 isHotkey:NO
                                                  makeKey:YES
+                                             canActivate:NO
                                                  command:command
                                                    block:nil];
     return session.tab;
@@ -74,6 +72,7 @@
                                                  withURL:nil
                                                 isHotkey:NO
                                                  makeKey:YES
+                                             canActivate:NO
                                                  command:command
                                                    block:nil];
     return session.tab;

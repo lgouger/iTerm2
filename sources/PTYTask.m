@@ -503,6 +503,8 @@ static int MyForkPty(int *amaster,
         // Wait for serverConnectionFd to be written to.
         dispatch_semaphore_wait(semaphore, DISPATCH_TIME_FOREVER);
 
+        dispatch_release(semaphore);
+
         // Remove the temporary file. The server will create a new socket file
         // if the client dies. That file's name is dependent on its process ID,
         // which we don't know yet, so that's why this temp file dance has to
@@ -1010,6 +1012,7 @@ static int MyForkPty(int *amaster,
 }
 
 - (NSString*)getWorkingDirectory {
+    DLog(@"Using OS magic to get the working directory");
     struct proc_vnodepathinfo vpi;
     int ret;
 
@@ -1027,13 +1030,17 @@ static int MyForkPty(int *amaster,
     }
     if (ret <= 0) {
         // An error occured
+        DLog(@"Failed with error %d", ret);
         return nil;
     } else if (ret != sizeof(vpi)) {
         // Now this is very bad...
+        DLog(@"Got a struct of the wrong size back");
         return nil;
     } else {
         // All is good
-        return [NSString stringWithUTF8String:vpi.pvi_cdir.vip_path];
+        NSString *dir = [NSString stringWithUTF8String:vpi.pvi_cdir.vip_path];
+        DLog(@"Result: %@", dir);
+        return dir;
     }
 }
 

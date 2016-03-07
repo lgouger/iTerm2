@@ -19,7 +19,6 @@
 + (double)hotkeyTermAnimationDuration;
 + (BOOL)hotkeyWindowFloatsAboveOtherWindows;
 + (NSString *)searchCommand;
-+ (double)antiIdleTimerPeriod;
 + (BOOL)dockIconTogglesWindow;
 + (double)timeBetweenBlinks;
 + (BOOL)neverWarnAboutMeta;
@@ -118,6 +117,15 @@
 + (BOOL)requireCmdForDraggingText;
 + (double)tabAutoShowHoldTime;
 + (BOOL)doubleReportScrollWheel;
++ (BOOL)stealKeyFocus;
 + (BOOL)allowDragOfTabIntoNewWindow;
++ (BOOL)typingClearsSelection;
++ (BOOL)focusReportingEnabled;
+
++ (BOOL)hideFromDockAndAppSwitcher;
++ (BOOL)hotkeyWindowIgnoresSpotlight;
++ (BOOL)tabTitlesUseSmartTruncation;
++ (BOOL)serializeOpeningMultipleFullScreenWindows;
++ (BOOL)disablePotentiallyInsecureEscapeSequences;
 
 @end

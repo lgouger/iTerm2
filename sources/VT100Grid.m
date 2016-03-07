@@ -66,6 +66,7 @@ static NSString *const kGridSizeKey = @"Size";
     [lines_ release];
     [lineInfos_ release];
     [cachedDefaultLine_ release];
+    [resultLine_ release];
     [super dealloc];
 }
 
@@ -352,7 +353,8 @@ static NSString *const kGridSizeKey = @"Size";
 
 - (int)scrollUpIntoLineBuffer:(LineBuffer *)lineBuffer
           unlimitedScrollback:(BOOL)unlimitedScrollback
-      useScrollbackWithRegion:(BOOL)useScrollbackWithRegion {
+      useScrollbackWithRegion:(BOOL)useScrollbackWithRegion
+                    softBreak:(BOOL)softBreak {
     const int scrollTop = self.topMargin;
     const int scrollBottom = self.bottomMargin;
     const int scrollLeft = self.leftMargin;
@@ -380,7 +382,8 @@ static NSString *const kGridSizeKey = @"Size";
                                            scrollTop,
                                            scrollRight - scrollLeft + 1,
                                            scrollBottom - scrollTop + 1)
-                    downBy:-1];
+                    downBy:-1
+               softBreak:softBreak];
 
         return numLinesDropped;
     }
@@ -401,7 +404,8 @@ static NSString *const kGridSizeKey = @"Size";
     for (int i = 0; i < numLinesToScroll; i++) {
         numLinesDropped += [self scrollUpIntoLineBuffer:lineBuffer
                                     unlimitedScrollback:unlimitedScrollback
-                                useScrollbackWithRegion:NO];
+                                useScrollbackWithRegion:NO
+                                              softBreak:NO];
     }
     self.cursor = VT100GridCoordMake(0, 0);
 
@@ -443,7 +447,8 @@ static NSString *const kGridSizeKey = @"Size";
         }
         return [self scrollUpIntoLineBuffer:lineBuffer
                         unlimitedScrollback:unlimitedScrollback
-                    useScrollbackWithRegion:useScrollbackWithRegion];
+                    useScrollbackWithRegion:useScrollbackWithRegion
+                                  softBreak:YES];
     }
 }
 
@@ -1027,10 +1032,10 @@ static NSString *const kGridSizeKey = @"Size";
 }
 
 - (void)scrollDown {
-    [self scrollRect:[self scrollRegionRect] downBy:1];
+    [self scrollRect:[self scrollRegionRect] downBy:1 softBreak:NO];
 }
 
-- (void)scrollRect:(VT100GridRect)rect downBy:(int)distance {
+- (void)scrollRect:(VT100GridRect)rect downBy:(int)distance softBreak:(BOOL)softBreak {
     DLog(@"scrollRect:%d,%d %dx%d downBy:%d",
              rect.origin.x, rect.origin.y, rect.size.width, rect.size.height, distance);
     if (distance == 0) {
@@ -1107,9 +1112,10 @@ static NSString *const kGridSizeKey = @"Size";
                 pred[size_.width].code = EOL_HARD;
             }
         }
-        if (rect.origin.x + rect.size.width == size_.width) {
+        if (rect.origin.x + rect.size.width == size_.width && !softBreak) {
             // Clean up continuation mark on last line inside scroll region when scrolling down,
-            // or last last preserved line when scrolling up.
+            // or last last preserved line when scrolling up, unless we were asked to preserve
+            // soft breaks.
             int lastLineOfScrollRegion;
             if (direction > 0) {
                 lastLineOfScrollRegion = rect.origin.y + rect.size.height - 1;
@@ -1777,7 +1783,7 @@ static NSString *const kGridSizeKey = @"Size";
     }
 }
 
-- (VT100GridCoord)coordinateBefore:(VT100GridCoord)coord {
+- (VT100GridCoord)coordinateBefore:(VT100GridCoord)coord movedBackOverDoubleWidth:(BOOL *)dwc {
     // set cx, cy to the char before the given coordinate.
     VT100GridCoord invalid = VT100GridCoordMake(-1, -1);
     int cx = coord.x;
@@ -1815,11 +1821,16 @@ static NSString *const kGridSizeKey = @"Size";
     screen_char_t *line = [self screenCharsAtLineNumber:cy];
     if (line[cx].code == DWC_RIGHT) {
         if (cx > 0) {
+            if (dwc) {
+                *dwc = YES;
+            }
             cx--;
         } else {
             // This should never happen.
             return invalid;
         }
+    } else if (dwc) {
+        *dwc = NO;
     }
 
     return VT100GridCoordMake(cx, cy);
@@ -1847,6 +1858,23 @@ static NSString *const kGridSizeKey = @"Size";
     }
     return YES;
 }
+
+- (NSString *)stringForCharacterAt:(VT100GridCoord)coord {
+    screen_char_t *theLine = [self screenCharsAtLineNumber:coord.y];
+    if (!theLine) {
+        return nil;
+    }
+    screen_char_t theChar = theLine[coord.x];
+    if (theChar.code == 0 && !theChar.complexChar) {
+        return nil;
+    }
+    if (theChar.complexChar) {
+        return ComplexCharToStr(theChar.code);
+    } else {
+        return [NSString stringWithFormat:@"%C", theChar.code];
+    }
+}
+
 
 #ifdef VERBOSE_STRING
 static void DumpBuf(screen_char_t* p, int n) {

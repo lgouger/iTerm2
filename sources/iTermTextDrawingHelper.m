@@ -23,6 +23,8 @@
 #import "iTermTextExtractor.h"
 #import "MovingAverage.h"
 #import "NSColor+iTerm.h"
+#import "NSStringITerm.h"
+#import "RegexKitLite.h"
 #import "VT100ScreenMark.h"
 #import "VT100Terminal.h"  // TODO: Remove this dependency
 
@@ -125,6 +127,10 @@ extern int CGContextGetFontSmoothingStyle(CGContextRef);
         [self clipAndDrawRect:rectArray[i]];
     }
     [self drawCursor];
+
+    if (_showDropTargets) {
+        [self drawDropTargets];
+    }
 
     if (_drawRectDuration) {
         [self stopTiming];
@@ -451,7 +457,8 @@ extern int CGContextGetFontSmoothingStyle(CGContextRef);
     VT100ScreenMark *mark = [self.delegate drawingHelperMarkOnLine:line];
     if (mark.isVisible && self.drawMarkIndicators) {
         NSImage *image = mark.code ? _markErrImage : _markImage;
-        CGFloat offset = (_cellSize.height - _markImage.size.height) / 2.0;
+        const CGFloat verticalSpacing = _cellSize.height - _cellSizeWithoutSpacing.height;
+        CGFloat offset = (_cellSizeWithoutSpacing.height - _markImage.size.height) / 2.0 + verticalSpacing;
         [image drawAtPoint:NSMakePoint(leftMargin.origin.x,
                                        leftMargin.origin.y + offset)
                   fromRect:NSMakeRect(0, 0, _markImage.size.width, _markImage.size.height)
@@ -486,17 +493,18 @@ extern int CGContextGetFontSmoothingStyle(CGContextRef);
     if (!self.isRetina) {
         CGContextSetShouldSmoothFonts(ctx, NO);
     }
+    NSString *previous = nil;
     for (int y = _scrollViewDocumentVisibleRect.origin.y / _cellSize.height;
          y < NSMaxY(_scrollViewDocumentVisibleRect) / _cellSize.height && y < _numberOfLines;
          y++) {
-        [self drawTimestampForLine:y];
+        previous = [self drawTimestampForLine:y previousTimestamp:previous];
     }
     if (!self.isRetina) {
         CGContextSetShouldSmoothFonts(ctx, YES);
     }
 }
 
-- (void)drawTimestampForLine:(int)line {
+- (NSString *)drawTimestampForLine:(int)line previousTimestamp:(NSString *)previousTimestamp {
     NSDate *timestamp = [_delegate drawingHelperTimestampForLine:line];
     NSDateFormatter *fmt = [[[NSDateFormatter alloc] init] autorelease];
     const NSTimeInterval day = -86400;
@@ -517,7 +525,6 @@ extern int CGContextGetFontSmoothingStyle(CGContextRef);
         [fmt setDateFormat:[NSDateFormatter dateFormatFromTemplate:@"EEE hh:mm:ss"
                                                            options:0
                                                             locale:[NSLocale currentLocale]]];
-
     } else {
         // In last 24 hours, just show time
         [fmt setDateFormat:[NSDateFormatter dateFormatFromTemplate:@"hh:mm:ss"
@@ -528,12 +535,15 @@ extern int CGContextGetFontSmoothingStyle(CGContextRef);
     if (self.useTestingTimezone) {
         fmt.timeZone = [NSTimeZone timeZoneForSecondsFromGMT:0];
     }
-    NSString *s = [fmt stringFromDate:timestamp];
+    NSString *theTimestamp = [fmt stringFromDate:timestamp];
     if (!timestamp || ![timestamp timeIntervalSinceReferenceDate]) {
-        s = @"";
+        theTimestamp = @"";
     }
+    NSString *s = theTimestamp;
+    BOOL repeat = [theTimestamp isEqualToString:previousTimestamp];
 
-    NSSize size = [s sizeWithAttributes:@{ NSFontAttributeName: [NSFont systemFontOfSize:10] }];
+    NSString *widest = [s stringByReplacingOccurrencesOfRegex:@"[\\d\\p{Alphabetic}]" withString:@"M"];
+    NSSize size = [widest sizeWithAttributes:@{ NSFontAttributeName: [NSFont systemFontOfSize:10] }];
     int w = size.width + MARGIN;
     int x = MAX(0, _frame.size.width - w);
     CGFloat y = line * _cellSize.height;
@@ -548,7 +558,7 @@ extern int CGContextGetFontSmoothingStyle(CGContextRef);
         shadowColor = [NSColor blackColor];
     }
 
-    const CGFloat alpha = self.isRetina ? 0.75 : 0.9;
+    const CGFloat alpha = 0.9;
     NSGradient *gradient =
         [[[NSGradient alloc] initWithStartingColor:[bgColor colorWithAlphaComponent:0]
                                        endingColor:[bgColor colorWithAlphaComponent:alpha]] autorelease];
@@ -566,15 +576,27 @@ extern int CGContextGetFontSmoothingStyle(CGContextRef);
 
     NSDictionary *attributes;
     if (self.isRetina) {
-        attributes = @{ NSFontAttributeName: [NSFont systemFontOfSize:10],
+        attributes = @{ NSFontAttributeName: [NSFont userFixedPitchFontOfSize:10],
                         NSForegroundColorAttributeName: fgColor,
                         NSShadowAttributeName: shadow };
     } else {
-        attributes = @{ NSFontAttributeName: [NSFont boldSystemFontOfSize:10],
+        NSFont *font = [NSFont userFixedPitchFontOfSize:10];    
+        attributes = @{ NSFontAttributeName: [[NSFontManager sharedFontManager] fontWithFamily:font.familyName
+                                                                                        traits:NSBoldFontMask
+                                                                                        weight:0
+                                                                                          size:font.pointSize],
                         NSForegroundColorAttributeName: fgColor };
     }
     CGFloat offset = (_cellSize.height - size.height) / 2;
-    [s drawAtPoint:NSMakePoint(x, y + offset) withAttributes:attributes];
+    if (s.length && repeat) {
+        [fgColor set];
+        CGFloat center = x + 10;
+        NSRectFill(NSMakeRect(center - 1, y, 1, _cellSize.height));
+        NSRectFill(NSMakeRect(center + 1, y, 1, _cellSize.height));
+    } else {
+        [s drawAtPoint:NSMakePoint(x, y + offset) withAttributes:attributes];
+    }
+    return theTimestamp;
 }
 
 - (NSSize)drawBadgeInRect:(NSRect)rect {
@@ -607,6 +629,80 @@ extern int CGContextGetFontSmoothingStyle(CGContextRef);
     imageSize.width += kBadgeMargin + [iTermAdvancedSettingsModel badgeRightMargin];
 
     return imageSize;
+}
+
+#pragma mark - Drawing: Drop targets
+
+- (void)drawDropTargets {
+    NSColor *scrimColor;
+    NSColor *borderColor;
+    NSColor *labelColor;
+    NSColor *outlineColor;
+    
+    if ([[self defaultBackgroundColor] isDark]) {
+        outlineColor = [NSColor whiteColor];
+        scrimColor = [NSColor whiteColor];
+        borderColor = [NSColor lightGrayColor];
+        labelColor = [NSColor blackColor];
+    } else {
+        outlineColor = [NSColor blackColor];
+        scrimColor = [NSColor blackColor];
+        borderColor = [NSColor darkGrayColor];
+        labelColor = [NSColor whiteColor];
+    }
+    scrimColor = [scrimColor colorWithAlphaComponent:0.6];
+
+    NSDictionary *attributes = @{ NSForegroundColorAttributeName: labelColor,
+                                  NSStrokeWidthAttributeName: @-4,
+                                  NSStrokeColorAttributeName: outlineColor };
+    
+    [self enumerateDropTargets:^(NSString *label, NSRange range) {
+        NSRect rect = NSMakeRect(0,
+                                 range.location * _cellSize.height,
+                                 _scrollViewDocumentVisibleRect.size.width,
+                                 _cellSize.height * range.length);
+        
+        if (NSLocationInRange(_dropLine, range)) {
+            [[[NSColor selectedControlColor] colorWithAlphaComponent:0.7] set];
+        } else {
+            [scrimColor set];
+        }
+        NSRectFillUsingOperation(rect, NSCompositeSourceOver);
+        
+        [borderColor set];
+        NSFrameRect(rect);
+        
+        [label drawInRect:rect withAttributes:[label attributesUsingFont:[NSFont boldSystemFontOfSize:8]
+                                                             fittingSize:rect.size
+                                                              attributes:attributes]];
+    }];
+}
+
+- (void)enumerateDropTargets:(void (^)(NSString *, NSRange))block {
+    NSRect rect = _scrollViewDocumentVisibleRect;
+    VT100GridCoordRange coordRange = [self drawableCoordRangeForRect:rect];
+    CGFloat y = coordRange.start.y * _cellSize.height;
+    NSMutableArray *labels = [NSMutableArray array];
+    NSMutableArray *lineRanges = [NSMutableArray array];
+    int firstLine = coordRange.start.y;
+    for (int line = coordRange.start.y; line <= coordRange.end.y; line++, y += _cellSize.height) {
+        NSString *label = [_delegate drawingHelperLabelForDropTargetOnLine:line];
+        if (!label) {
+            continue;
+        }
+        NSString *previousLabel = labels.lastObject;
+        if ([label isEqualToString:previousLabel]) {
+            [labels removeLastObject];
+            [lineRanges removeLastObject];
+        } else {
+            firstLine = line;
+        }
+        [labels addObject:label];
+        [lineRanges addObject:[NSValue valueWithRange:NSMakeRange(firstLine, line - firstLine + 1)]];
+    }
+    for (NSInteger i = 0; i < labels.count; i++) {
+        block(labels[i], [lineRanges[i] rangeValue]);
+    }
 }
 
 #pragma mark - Drawing: Text
@@ -656,12 +752,25 @@ extern int CGContextGetFontSmoothingStyle(CGContextRef);
     }
 }
 
+- (BOOL)useThinStrokes {
+    switch (self.thinStrokes) {
+        case iTermThinStrokesSettingAlways:
+            return YES;
+            
+        case iTermThinStrokesSettingNever:
+            return NO;
+            
+        case iTermThinStrokesSettingRetinaOnly:
+            return _isRetina;
+    }
+}
 - (void)drawRunsAt:(NSPoint)initialPoint
                run:(CRun *)run
            storage:(CRunStorage *)storage
            context:(CGContextRef)ctx {
     int savedFontSmoothingStyle = 0;
-    if (_thinStrokes) {
+    BOOL useThinStrokes = [self useThinStrokes];
+    if (useThinStrokes) {
         // This seems to be available at least on 10.8 and later. The only reference to it is in
         // WebKit. This causes text to render just a little lighter, which looks nicer.
         savedFontSmoothingStyle = CGContextGetFontSmoothingStyle(ctx);
@@ -674,7 +783,7 @@ extern int CGContextGetFontSmoothingStyle(CGContextRef);
         run = run->next;
     }
 
-    if (_thinStrokes) {
+    if (useThinStrokes) {
         CGContextSetFontSmoothingStyle(ctx, savedFontSmoothingStyle);
     }
 }

@@ -19,6 +19,7 @@
     IBOutlet NSButton *_scrollbackInAlternateScreen;
     IBOutlet NSPopUpButton *_characterEncoding;
     IBOutlet NSComboBox *_terminalType;
+    IBOutlet NSTextField *_answerBackString;
     IBOutlet NSButton *_xtermMouseReporting;
     IBOutlet NSButton *_allowTitleReporting;
     IBOutlet NSButton *_allowTitleSetting;
@@ -73,12 +74,9 @@
     [self populateEncodings];
     info = [self defineControl:_characterEncoding
                            key:KEY_CHARACTER_ENCODING
-                          type:kPreferenceInfoTypePopup];
+                          type:kPreferenceInfoTypeUnsignedIntegerPopup];
     info.onUpdate = ^BOOL() {
-        // Unfortunately, character encoding should have been stored as a NSUInteger all along :(
-        // See notes in PTYSession for more details.
-        NSInteger tag = [self intForKey:info.key];
-        tag &= 0xffffffff;
+        NSUInteger tag = [self unsignedIntegerForKey:info.key];
         [_characterEncoding selectItemWithTag:tag];
         return YES;
     };
@@ -86,6 +84,10 @@
     // It's a combobox, but we can safely treat it as a string text field.
     [self defineControl:_terminalType
                     key:KEY_TERMINAL_TYPE
+                   type:kPreferenceInfoTypeStringTextField];
+
+    [self defineControl:_answerBackString
+                    key:KEY_ANSWERBACK_STRING
                    type:kPreferenceInfoTypeStringTextField];
     
     [self defineControl:_xtermMouseReporting

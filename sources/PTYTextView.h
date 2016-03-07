@@ -1,5 +1,6 @@
 #import <Cocoa/Cocoa.h>
 #import "CharacterRun.h"
+#import "ITAddressBookMgr.h"
 #import "iTerm.h"
 #import "iTermColorMap.h"
 #import "iTermIndicatorsHelper.h"
@@ -57,6 +58,7 @@ typedef NS_ENUM(NSInteger, PTYTextViewSelectionExtensionUnit) {
     kPTYTextViewSelectionExtensionUnitCharacter,
     kPTYTextViewSelectionExtensionUnitWord,
     kPTYTextViewSelectionExtensionUnitLine,
+    kPTYTextViewSelectionExtensionUnitMark,
 };
 
 @protocol PTYTextViewDelegate <NSObject>
@@ -194,7 +196,7 @@ typedef NS_ENUM(NSInteger, PTYTextViewSelectionExtensionUnit) {
 @property(nonatomic, assign) BOOL useBoldFont;
 
 // Draw text with light font smoothing?
-@property(nonatomic, assign) BOOL thinStrokes;
+@property(nonatomic, assign) iTermThinStrokesSetting thinStrokes;
 
 // Use a bright version of the text color for bold text?
 @property(nonatomic, assign) BOOL useBrightBold;
@@ -380,7 +382,8 @@ typedef void (^PTYTextViewDrawingHookBlock)(iTermTextDrawingHelper *);
 // Saving/printing
 - (void)saveDocumentAs:(id)sender;
 - (void)print:(id)sender;
-- (void)printContent:(NSString *)aString;
+// aString is either an NSString or an NSAttributedString.
+- (void)printContent:(id)aString;
 
 // Begins a new search. You may need to call continueFind repeatedly after this.
 - (void)findString:(NSString*)aString

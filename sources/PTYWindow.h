@@ -27,6 +27,7 @@
 
 
 #import <Cocoa/Cocoa.h>
+#import "iTermWeakReference.h"
 
 @protocol PTYWindowDelegateProtocol<NSObject,NSWindowDelegate >
 - (BOOL)lionFullScreen;
@@ -34,10 +35,12 @@
 - (void)toggleTraditionalFullScreenMode;
 @end
 
-@interface PTYWindow : NSWindow
+@interface PTYWindow : NSWindow<iTermWeaklyReferenceable>
 
 @property(nonatomic, readonly) int screenNumber;
 @property(nonatomic, readonly, getter=isTogglingLionFullScreen) BOOL togglingLionFullScreen;
+// A unique identifier that does not get recycled during the program's lifetime.
+@property(nonatomic, readonly) NSString *windowIdentifier;
 
 - (void)smartLayout;
 - (void)setLayoutDone;
@@ -49,6 +52,9 @@
 
 // Returns the approximate fraction of this window that is occluded by other windows in this app.
 - (double)approximateFractionOccluded;
+
+// See comments in iTermDelayedTitleSetter for why this is so.
+- (void)delayedSetTitle:(NSString *)title;
 
 @end
 

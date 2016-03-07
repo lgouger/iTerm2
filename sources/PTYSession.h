@@ -165,6 +165,9 @@ typedef enum {
 // The code to send in the anti idle timer.
 @property(nonatomic, assign) char antiIdleCode;
 
+// The interval between sending anti-idle codes.
+@property(nonatomic, assign) NSTimeInterval antiIdlePeriod;
+
 // If true, close the tab when the session ends.
 @property(nonatomic, assign) BOOL autoClose;
 
@@ -194,7 +197,7 @@ typedef enum {
 @property(nonatomic, assign) float transparency;
 @property(nonatomic, assign) float blend;
 @property(nonatomic, assign) BOOL useBoldFont;
-@property(nonatomic, assign) BOOL thinStrokes;
+@property(nonatomic, assign) iTermThinStrokesSetting thinStrokes;
 @property(nonatomic, assign) BOOL useItalicFont;
 
 @property(nonatomic, readonly) BOOL logging;

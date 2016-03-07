@@ -169,6 +169,7 @@
 #define KEY_SCROLLBACK_LINES                  @"Scrollback Lines"
 #define KEY_UNLIMITED_SCROLLBACK              @"Unlimited Scrollback"
 #define KEY_TERMINAL_TYPE                     @"Terminal Type"
+#define KEY_ANSWERBACK_STRING                 @"Answerback String"
 #define KEY_USE_CANONICAL_PARSER              @"Use Canonical Parser"
 #define KEY_PLACE_PROMPT_AT_FIRST_COLUMN      @"Place Prompt at First Column"
 #define KEY_SHOW_MARK_INDICATORS              @"Show Mark Indicators"
@@ -179,6 +180,7 @@
 #define KEY_LOGDIR                            @"Log Directory"
 #define KEY_SEND_CODE_WHEN_IDLE               @"Send Code When Idle"
 #define KEY_IDLE_CODE                         @"Idle Code"
+#define KEY_IDLE_PERIOD                       @"Idle Period"
 #define KEY_PROMPT_CLOSE_DEPRECATED           @"Prompt Before Closing"  // Deprecated due to bad migration in 8/28 build
 #define KEY_PROMPT_CLOSE                      @"Prompt Before Closing 2"
 #define KEY_JOBS                              @"Jobs to Ignore"
@@ -198,6 +200,9 @@
 
 // Dynamic Profiles (not in prefs ui)
 #define KEY_DYNAMIC_PROFILE_PARENT_NAME      @"Dynamic Profile Parent Name"
+
+// Minimum time between sending anti-idle codes. "1" otherwise results in a flood.
+extern const NSTimeInterval kMinimumAntiIdlePeriod;
 
 // The numerical values for each enum matter because they are used in
 // the UI as "tag" values for each select list item. They are also
@@ -233,6 +238,13 @@ typedef NS_ENUM(NSInteger, iTermObjectType) {
   iTermPaneObject,
 };
 
+// Type for KEY_THIN_STROKES
+typedef NS_ENUM(NSInteger, iTermThinStrokesSetting) {
+    iTermThinStrokesSettingNever,
+    iTermThinStrokesSettingRetinaOnly,
+    iTermThinStrokesSettingAlways,
+};
+
 @interface ITAddressBookMgr : NSObject <NSNetServiceBrowserDelegate, NSNetServiceDelegate>
 
 + (id)sharedInstance;
@@ -250,5 +262,12 @@ typedef NS_ENUM(NSInteger, iTermObjectType) {
                forObjectType:(iTermObjectType)objectType;
 + (NSString*)bookmarkWorkingDirectory:(Profile*)bookmark
                         forObjectType:(iTermObjectType)objectType;
+
+// Indicates if it is safe to remove the profile from the model.
++ (BOOL)canRemoveProfile:(Profile *)profile fromModel:(ProfileModel *)model;
+
+// Removes the profile from the model, removes key mappings that reference this profile, and posts a
+// kProfileWasDeletedNotification notification, then flushes the model to backing store.
++ (void)removeProfile:(Profile *)profile fromModel:(ProfileModel *)model;
 
 @end

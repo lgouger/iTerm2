@@ -360,4 +360,8 @@ typedef NS_ENUM(NSInteger, VT100TerminalUnits) {
 - (void)terminalSetBadgeFormat:(NSString *)badge;
 - (void)terminalSetUserVar:(NSString *)kvp;
 
+- (BOOL)terminalFocusReportingEnabled;
+
+- (BOOL)terminalIsTrusted;
+
 @end

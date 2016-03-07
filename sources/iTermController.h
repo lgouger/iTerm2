@@ -1,5 +1,3 @@
-// -*- mode:objc -*-
-// $Id: iTermController.h,v 1.29 2008-10-08 05:54:50 yfabian Exp $
 /*
  **  iTermController.h
  **
@@ -41,6 +39,7 @@
 @class PTYSession;
 @class PTYTab;
 @class PTYTextView;
+@class PTYWindow;
 
 @interface iTermController : NSObject
 
@@ -51,17 +50,17 @@
 @property(nonatomic, readonly) BOOL willRestoreWindowsAtNextLaunch;
 @property(nonatomic, readonly) BOOL shouldLeaveSessionsRunningOnQuit;
 @property(nonatomic, readonly) BOOL haveTmuxConnection;
-@property(nonatomic, assign) int keyWindowIndexMemo;
 @property(nonatomic, readonly, strong) PTYSession *sessionWithMostRecentSelection;
 @property(nonatomic, nonatomic, assign) PseudoTerminal *currentTerminal;
 @property(nonatomic, readonly) int numberOfTerminals;
 @property(nonatomic, readonly) BOOL hasRestorableSession;
+@property(nonatomic, readonly) BOOL keystrokesBeingStolen;
+@property(nonatomic, readonly) BOOL anyWindowIsMain;
+@property(nonatomic, readonly) PseudoTerminal *hotkeyWindow;
+@property(nonatomic, readonly) NSArray<PTYWindow *> *keyTerminalWindows;
 
 + (iTermController*)sharedInstance;
-+ (void)sharedInstanceRelease;
-+ (BOOL)getSystemVersionMajor:(unsigned *)major
-                        minor:(unsigned *)minor
-                       bugFix:(unsigned *)bugFix;
++ (void)releaseSharedInstance;
 
 + (void)switchToSpaceInBookmark:(NSDictionary*)aDict;
 
@@ -70,8 +69,8 @@
 - (void)newWindow:(id)sender possiblyTmux:(BOOL)possiblyTmux;
 - (void)newSessionWithSameProfile:(id)sender;
 - (void)newSession:(id)sender possiblyTmux:(BOOL)possiblyTmux;
-- (IBAction) previousTerminal:(id)sender;
-- (IBAction) nextTerminal:(id)sender;
+- (void)previousTerminal;
+- (void)nextTerminal;
 - (void)newSessionsInWindow:(id)sender;
 - (void)newSessionsInNewWindow:(id)sender;
 - (void)launchScript:(id)sender;
@@ -95,7 +94,10 @@
               withSelector:(SEL)selector
            openAllSelector:(SEL)openAllSelector
                 startingAt:(int)startingAt;
-- (PseudoTerminal *)openWindowUsingProfile:(Profile *)profile;
+
+// Does not enter fullscreen automatically; that is left to the caller, since tmux has special
+// logic around this.
+- (PseudoTerminal *)openTmuxIntegrationWindowUsingProfile:(Profile *)profile;
 
 // Super-flexible way to create a new window or tab. If |block| is given then it is used to add a
 // new session/tab to the window; otherwise the bookmark is used in conjunction with the optional
@@ -105,6 +107,7 @@
                        withURL:(NSString *)url
                       isHotkey:(BOOL)isHotkey
                        makeKey:(BOOL)makeKey
+                   canActivate:(BOOL)canActivate
                        command:(NSString *)command
                          block:(PTYSession *(^)(PseudoTerminal *))block;
 - (PTYSession *)launchBookmark:(Profile *)profile inTerminal:(PseudoTerminal *)theTerm;
@@ -115,8 +118,6 @@
 
 - (void)dumpViewHierarchy;
 
-- (void)storePreviouslyActiveApp;
-- (void)restorePreviouslyActiveApp;
 - (int)windowTypeForBookmark:(Profile*)aDict;
 
 - (void)reloadAllBookmarks;
@@ -145,6 +146,9 @@
 - (void)addTerminalWindow:(PseudoTerminal *)terminalWindow;
 
 void OnHotKeyEvent(void);
+
+// Does a serialized fullscreening of the term's window. Slated for production in 3.1.
+- (void)makeTerminalWindowFullScreen:(NSWindowController<iTermWindowController> *)term;
 
 @end
 

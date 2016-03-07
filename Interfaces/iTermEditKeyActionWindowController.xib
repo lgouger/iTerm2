@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<document type="com.apple.InterfaceBuilder3.Cocoa.XIB" version="3.0" toolsVersion="8191" systemVersion="15A284" targetRuntime="MacOSX.Cocoa" propertyAccessControl="none">
+<document type="com.apple.InterfaceBuilder3.Cocoa.XIB" version="3.0" toolsVersion="9059" systemVersion="15C50" targetRuntime="MacOSX.Cocoa" propertyAccessControl="none">
     <dependencies>
         <deployment identifier="macosx"/>
-        <plugIn identifier="com.apple.InterfaceBuilder.CocoaPlugin" version="8191"/>
+        <plugIn identifier="com.apple.InterfaceBuilder.CocoaPlugin" version="9059"/>
     </dependencies>
     <objects>
         <customObject id="-2" userLabel="File's Owner" customClass="iTermEditKeyActionWindowController">
@@ -111,6 +111,19 @@
                                             <menuItem title="Next Pane" tag="30" id="pHE-Ud-5v3"/>
                                             <menuItem title="Previous Pane" tag="31" id="Z36-1b-EXY"/>
                                             <menuItem isSeparatorItem="YES" id="KeO-Bs-txv"/>
+                                            <menuItem title="Decrease Height" tag="49" id="EpA-2v-9s0">
+                                                <modifierMask key="keyEquivalentModifierMask"/>
+                                            </menuItem>
+                                            <menuItem title="Increase Height" tag="50" id="76W-hp-334">
+                                                <modifierMask key="keyEquivalentModifierMask"/>
+                                            </menuItem>
+                                            <menuItem title="Decrease Width" tag="51" id="TdK-gh-sNx">
+                                                <modifierMask key="keyEquivalentModifierMask"/>
+                                            </menuItem>
+                                            <menuItem title="Increase Width" tag="52" id="mHj-xJ-MJH">
+                                                <modifierMask key="keyEquivalentModifierMask"/>
+                                            </menuItem>
+                                            <menuItem isSeparatorItem="YES" id="xVG-IF-xul"/>
                                             <menuItem title="Scroll to End" tag="4" id="Mrs-CO-Zqo"/>
                                             <menuItem title="Scroll to Top" tag="5" id="Gnz-HA-ehs"/>
                                             <menuItem title="Scroll One Line Down" tag="6" id="i7U-mp-pzT"/>
@@ -164,10 +177,10 @@
                                             <menuItem isSeparatorItem="YES" id="svX-cj-e8M"/>
                                             <menuItem title="Run Coprocess" tag="35" id="m6l-mc-bhF"/>
                                             <menuItem isSeparatorItem="YES" id="D8m-Tb-i1k"/>
-                                            <menuItem title="Move Start of Selection Left" tag="47" id="YBg-Ld-iyY"/>
-                                            <menuItem title="Move Start of Selection Right" tag="48" id="OUd-6i-YQe"/>
-                                            <menuItem title="Move End of Selection Left" tag="45" id="L33-q3-stz"/>
-                                            <menuItem title="Move End of Selection Right" tag="46" id="xRC-3K-RlB"/>
+                                            <menuItem title="Move Start of Selection Back" tag="47" id="YBg-Ld-iyY"/>
+                                            <menuItem title="Move Start of Selection Forward" tag="48" id="OUd-6i-YQe"/>
+                                            <menuItem title="Move End of Selection Back" tag="45" id="L33-q3-stz"/>
+                                            <menuItem title="Move End of Selection Forward" tag="46" id="xRC-3K-RlB"/>
                                             <menuItem isSeparatorItem="YES" id="c8c-8I-caf"/>
                                             <menuItem title="Select Menu Item..." tag="25" id="haJ-OE-peX"/>
                                         </items>
@@ -260,7 +273,7 @@ Gw
                                 <rect key="frame" x="146" y="58" width="279" height="26"/>
                                 <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
                                 <animations/>
-                                <popUpButtonCell key="cell" type="push" title="Move by Line" bezelStyle="rounded" alignment="left" lineBreakMode="truncatingTail" state="on" borderStyle="borderAndBezel" tag="2" imageScaling="proportionallyDown" inset="2" selectedItem="Ysw-TJ-E0w" id="4Hl-iX-9pJ">
+                                <popUpButtonCell key="cell" type="push" bezelStyle="rounded" alignment="left" lineBreakMode="truncatingTail" borderStyle="borderAndBezel" imageScaling="proportionallyDown" inset="2" id="4Hl-iX-9pJ">
                                     <behavior key="behavior" lightByBackground="YES" lightByGray="YES"/>
                                     <font key="font" metaFont="menu"/>
                                     <menu key="menu" title="OtherViews" id="Xfc-fg-vql">
@@ -271,7 +284,10 @@ Gw
                                             <menuItem title="Move by Word" tag="1" id="Ujq-Yh-FZ2">
                                                 <modifierMask key="keyEquivalentModifierMask"/>
                                             </menuItem>
-                                            <menuItem title="Move by Line" state="on" tag="2" id="Ysw-TJ-E0w" userLabel="Move by Line">
+                                            <menuItem title="Move by Line" tag="2" id="Ysw-TJ-E0w" userLabel="Move by Line">
+                                                <modifierMask key="keyEquivalentModifierMask"/>
+                                            </menuItem>
+                                            <menuItem title="Move by Mark" tag="3" id="cCu-Aq-YHj" userLabel="Move by Mark">
                                                 <modifierMask key="keyEquivalentModifierMask"/>
                                             </menuItem>
                                         </items>

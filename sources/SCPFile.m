@@ -11,15 +11,19 @@
 #import <NMSSH/NMSSHConfig.h>
 #import <NMSSH/NMSSHHostConfig.h>
 #import <NMSSH/libssh2.h>
+
+#import "DebugLogging.h"
+#import "iTermWarning.h"
 #import "NSFileManager+iTerm.h"
 #import "NSObject+iTerm.h"
-#import "NSStringITerm.h"
+#import "NSStringiTerm.h"
 
 @interface NMSSHSession(iTerm)
 - (id)agent;
 @end
 
 static NSString *const kSCPFileErrorDomain = @"com.googlecode.iterm2.SCPFile";
+static NSString *const kSecureCopyConnectionFailedWarning = @"NoSyncSecureCopyConnectionFailedWarning";
 
 static NSError *SCPFileError(NSString *description) {
     return [NSError errorWithDomain:kSCPFileErrorDomain
@@ -187,7 +191,6 @@ static NSError *SCPFileError(NSString *description) {
     NSFileManager *fileManager = [NSFileManager defaultManager];
     NSString *appSupport = [fileManager applicationSupportDirectory];
     NSArray *paths = @[ [appSupport stringByAppendingPathExtension:@"iTerm/ssh_config"],
-                        [@"~/.ssh/ssh_config" stringByExpandingTildeInPath],
                         [@"~/.ssh/config" stringByExpandingTildeInPath],
                         @"/etc/ssh/ssh_config",
                         @"/etc/ssh_config" ];
@@ -198,7 +201,7 @@ static NSError *SCPFileError(NSString *description) {
             if (config) {
                 [configs addObject:config];
             } else {
-                NSLog(@"Could not parse config file at %@", path);
+                ELog(@"Could not parse config file at %@", path);
             }
         }
     }
@@ -247,7 +250,7 @@ static NSError *SCPFileError(NSString *description) {
         self.session.delegate = self;
         [self.session connect];
         if (self.stopped) {
-            NSLog(@"Stop after connect");
+            ELog(@"Stop after connect");
             dispatch_sync(dispatch_get_main_queue(), ^() {
                 [[FileTransferManager sharedInstance] transferrableFileDidStopTransfer:self];
             });
@@ -268,6 +271,18 @@ static NSError *SCPFileError(NSString *description) {
         dispatch_sync(dispatch_get_main_queue(), ^() {
             [[FileTransferManager sharedInstance] transferrableFile:self
                                      didFinishTransmissionWithError:theError];
+            iTermWarningSelection selection =
+                [iTermWarning showWarningWithTitle:[NSString stringWithFormat:@"Failed to connect to %@:%d. Double-check that the host name is correct.", self.hostname, self.port]
+                                           actions:@[ @"Ok", @"Help" ]
+                                     actionMapping:nil
+                                         accessory:nil
+                                        identifier:kSecureCopyConnectionFailedWarning
+                                       silenceable:kiTermWarningTypePermanentlySilenceable
+                                           heading:@"Connection Failed"
+                                       cancelLabel:@"Help"];
+            if (selection == kiTermWarningSelection1) {
+                [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:@"https://iterm2.com/troubleshoot-hostname"]];
+            }
         });
         return;
     }
@@ -288,11 +303,11 @@ static NSError *SCPFileError(NSString *description) {
         }
         for (NSString *authType in authTypes) {
             if (self.stopped) {
-                NSLog(@"Break out of auth loop because stopped");
+                ELog(@"Break out of auth loop because stopped");
                 break;
             }
             if (!self.session.session) {
-                NSLog(@"Break out of auth loop because disconnected");
+                ELog(@"Break out of auth loop because disconnected");
                 break;
             }
             if ([authType isEqualToString:@"password"]) {
@@ -337,7 +352,7 @@ static NSError *SCPFileError(NSString *description) {
                 for (NSString *keyPath in keyPaths) {
                     keyPath = [self filenameByExpandingMetasyntaticVariables:keyPath];
                     if (![fileManager fileExistsAtPath:keyPath]) {
-                        NSLog(@"No key file at %@", keyPath);
+                        ELog(@"No key file at %@", keyPath);
                         continue;
                     }
                     __block NSString *password = nil;
@@ -350,12 +365,23 @@ static NSError *SCPFileError(NSString *description) {
                                                                      keyboardInteractivePrompt:prompt];
                         });
                     }
-                    NSLog(@"Attempting to authenticate with key %@", keyPath);
-                    [self.session authenticateByPublicKey:[keyPath stringByAppendingString:@".pub"]
+                    ELog(@"Attempting to authenticate with key %@", keyPath);
+                    NSString *publicKeyPath = [keyPath stringByAppendingString:@".pub"];
+                    if (![[NSFileManager defaultManager] fileExistsAtPath:publicKeyPath]) {
+                        ELog(@"Warning: no public key at %@. Trying to authenticate with only a private key.", publicKeyPath);
+                        publicKeyPath = nil;
+                    }
+                    [self.session authenticateByPublicKey:publicKeyPath
                                                privateKey:keyPath
                                               andPassword:password];
                 
                     if (self.session.isAuthorized) {
+                        ELog(@"Authorized!");
+                        break;
+                    }
+
+                    if (!self.session.session) {
+                        ELog(@"Disconnected!");
                         break;
                     }
                 }
@@ -366,7 +392,7 @@ static NSError *SCPFileError(NSString *description) {
         }
     }
     if (self.stopped) {
-        NSLog(@"Stop after auth");
+        ELog(@"Stop after auth");
         dispatch_sync(dispatch_get_main_queue(), ^() {
             [[FileTransferManager sharedInstance] transferrableFileDidStopTransfer:self];
         });
@@ -437,7 +463,7 @@ static NSError *SCPFileError(NSString *description) {
                                                     }
                                                 });
                                                 if (self.stopped) {
-                                                    NSLog(@"Stopping mid-download");
+                                                    ELog(@"Stopping mid-download");
                                                 }
                                                 return !self.stopped;
                                             }];
@@ -494,6 +520,7 @@ static NSError *SCPFileError(NSString *description) {
         }
     } else {
         self.status = kTransferrableFileStatusTransferring;
+        DLog(@"Upload “%@” to “%@”", [self localPath], self.path.path);
         BOOL ok = [self.session.channel uploadFile:[self localPath]
                                                 to:self.path.path
                                           progress:^BOOL (NSUInteger bytes) {

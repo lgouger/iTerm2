@@ -119,12 +119,6 @@ static const NSUInteger kPTYTabDeadState = (1 << 3);
 @synthesize broadcasting = broadcasting_;
 @synthesize isMaximized = isMaximized_;
 
-// tab icons
-static NSImage *warningImage;  // bell
-static NSImage *gNewOutputImage;
-static NSImage *gIdleImage;
-static NSImage *gDeadImage;
-
 // Constants for saved window arrangement keys.
 static NSString* TAB_ARRANGEMENT_ROOT = @"Root";
 static NSString* TAB_ARRANGEMENT_VIEW_TYPE = @"View Type";
@@ -147,14 +141,38 @@ static NSString* TAB_ARRANGEMENT_COLOR = @"Tab color";  // DEPRECATED - Each PTY
 
 static const BOOL USE_THIN_SPLITTERS = YES;
 
-+ (void)initialize {
-    warningImage = [[NSImage imageNamed:@"important"] retain];
-    gNewOutputImage = [[NSImage imageNamed:@"NewOutput"] retain];
++ (NSImage *)bellImage {
+    return [NSImage imageNamed:@"important"];
+}
+
++ (NSImage *)newOutputImage {
+    iTermPreferencesTabStyle preferredStyle = [iTermPreferences intForKey:kPreferenceKeyTabStyle];
+    switch (preferredStyle) {
+        case TAB_STYLE_LIGHT:
+            return [NSImage imageNamed:@"NewOutput"];
+        case TAB_STYLE_DARK:
+            return [NSImage imageNamed:@"NewOutputForDarkTheme"];
+    }
+
+    return [NSImage imageNamed:@"NewOutput"];
+}
+
++ (NSImage *)idleImage {
     // There was a separate idle graphic, but I prefer NewOutput. The distinction is already drawn
     // because a spinner is present only while new output is being received. It's still in the git
     // repo, named "Idle.png".
-    gIdleImage = [[NSImage imageNamed:@"NewOutput"] retain];
-    gDeadImage = [[NSImage imageNamed:@"dead"] retain];
+    return [self newOutputImage];
+}
+
++ (NSImage *)deadImage {
+    iTermPreferencesTabStyle preferredStyle = [iTermPreferences intForKey:kPreferenceKeyTabStyle];
+    switch (preferredStyle) {
+        case TAB_STYLE_LIGHT:
+            return [NSImage imageNamed:@"dead"];
+        case TAB_STYLE_DARK:
+            return [NSImage imageNamed:@"DeadForDarkTheme"];
+    }
+    return [NSImage imageNamed:@"dead"];
 }
 
 + (void)_recursiveRegisterSessionsInArrangement:(NSDictionary *)arrangement {
@@ -368,22 +386,25 @@ static const BOOL USE_THIN_SPLITTERS = YES;
 
 - (void)updateIcon {
     if (_state & kPTYTabDeadState) {
-        [self setIcon:gDeadImage];
+        [self setIcon:[PTYTab deadImage]];
     } else if (_state & kPTYTabBellState) {
-        [self setIcon:warningImage];
+        [self setIcon:[PTYTab bellImage]];
     } else if (![iTermPreferences boolForKey:kPreferenceKeyHideTabActivityIndicator] &&
                (_state & (kPTYTabNewOutputState))) {
-        [self setIcon:gNewOutputImage];
+        [self setIcon:[PTYTab newOutputImage]];
     } else if (![iTermPreferences boolForKey:kPreferenceKeyHideTabActivityIndicator] &&
                (_state & kPTYTabIdleState)) {
-        [self setIcon:gIdleImage];
+        [self setIcon:[PTYTab idleImage]];
     } else {
         [self setIcon:nil];
     }
 }
 
-- (void)nameOfSession:(PTYSession*)session didChangeTo:(NSString*)newName
-{
+- (void)loadTitleFromSession {
+    tabViewItem_.label = self.activeSession.name;
+}
+
+- (void)nameOfSession:(PTYSession*)session didChangeTo:(NSString*)newName {
     if ([self activeSession] == session) {
         [tabViewItem_ setLabel:newName];
     }
@@ -535,6 +556,13 @@ static const BOOL USE_THIN_SPLITTERS = YES;
 }
 
 - (void)activateSessionInDirection:(int)offset {
+    DLog(@"offset=%@", @(offset));
+    BOOL maximize = NO;
+    if (isMaximized_ && self.activeSession.isTmuxClient) {
+        DLog(@"Set maximize to YES");
+        maximize = YES;
+        [self.activeSession toggleTmuxZoom];
+    }
     NSArray *orderedSessions = [self orderedSessions];
     NSUInteger index = [orderedSessions indexOfObject:[self activeSession]];
     if (index != NSNotFound) {
@@ -544,6 +572,9 @@ static const BOOL USE_THIN_SPLITTERS = YES;
                              with:[orderedSessions[index] view]];
         }
         [self setActiveSession:orderedSessions[index] updateActivityCounter:NO];
+    }
+    if (maximize) {
+        [self.activeSession toggleTmuxZoom];
     }
 }
 
@@ -685,8 +716,7 @@ static const BOOL USE_THIN_SPLITTERS = YES;
     [_delegate tab:self didChangeIcon:anIcon];
 }
 
-- (BOOL)realIsProcessing
-{
+- (BOOL)realIsProcessing {
     return isProcessing_;
 }
 
@@ -1908,8 +1938,12 @@ static NSString* FormatRect(NSRect r) {
         return NO;
     }
     NSSize temp = [self sessionSizeForViewSize:aSession];
-    int width = temp.width;
-    int height = temp.height;
+    return [self resizeSession:aSession toSize:VT100GridSizeMake(temp.width, temp.height)];
+}
+
+- (BOOL)resizeSession:(PTYSession *)aSession toSize:(VT100GridSize)newSize {
+    int width = newSize.width;
+    int height = newSize.height;
     if ([aSession rows] == height &&
         [aSession columns] == width) {
         PtyLog(@"PTYTab fitSessionToCurrentViewSize: noop");
@@ -1923,7 +1957,7 @@ static NSString* FormatRect(NSRect r) {
     [aSession setWidth:width height:height];
     PtyLog(@"fitSessionToCurrentViewSize -  calling setWidth:%d height:%d", width, height);
     [[aSession scrollview] setLineScroll:[[aSession textview] lineHeight]];
-    [[aSession scrollview] setPageScroll:2*[[aSession textview] lineHeight]];
+    [[aSession scrollview] setPageScroll:2 * [[aSession textview] lineHeight]];
     if ([aSession backgroundImagePath]) {
         [aSession setBackgroundImagePath:[aSession backgroundImagePath]];
     }
@@ -2769,8 +2803,7 @@ static NSString* FormatRect(NSRect r) {
 + (PTYTab *)openTabWithTmuxLayout:(NSMutableDictionary *)parseTree
                        inTerminal:(NSWindowController<iTermWindowController> *)term
                        tmuxWindow:(int)tmuxWindow
-                   tmuxController:(TmuxController *)tmuxController
-{
+                   tmuxController:(TmuxController *)tmuxController {
     [PTYTab setSizesInTmuxParseTree:parseTree inTerminal:term];
     parseTree = [PTYTab parseTreeWithInjectedRootSplit:parseTree];
 
@@ -3192,7 +3225,16 @@ static NSString* FormatRect(NSRect r) {
 }
 
 - (void)setTmuxLayout:(NSMutableDictionary *)parseTree
-       tmuxController:(TmuxController *)tmuxController {
+       tmuxController:(TmuxController *)tmuxController
+               zoomed:(NSNumber *)zoomed {
+    BOOL shouldZoom = isMaximized_;
+    if (isMaximized_) {
+        DLog(@"Unmaximizing");
+        [self unmaximize];
+    }
+    if (zoomed) {
+        shouldZoom = zoomed.boolValue;
+    }
     DLog(@"setTmuxLayout:tmuxController:");
     [PTYTab setSizesInTmuxParseTree:parseTree
                          inTerminal:realParentWindow_];
@@ -3206,6 +3248,7 @@ static NSString* FormatRect(NSRect r) {
             [[self realParentWindow] showHideInstantReplay];
         }
         [self replaceViewHierarchyWithParseTree:parseTree];
+        shouldZoom = NO;
     }
     [self updateFlexibleViewColors];
     [[root_ window] makeFirstResponder:[[self activeSession] textview]];
@@ -3213,6 +3256,11 @@ static NSString* FormatRect(NSRect r) {
     parseTree_ = [parseTree retain];
 
     [self activateJuniorSession];
+
+    if (shouldZoom) {
+        DLog(@"Maximizing");
+        [self maximize];
+    }
 }
 
 // Find a session that is not "senior" to a tmux pane getting split by the user and make it
@@ -3268,15 +3316,12 @@ static NSString* FormatRect(NSRect r) {
     return isMaximized_;
 }
 
-- (void)maximize
-{
+- (void)maximize {
+    DLog(@"maximize");
     for (PTYSession *session in [self sessions]) {
         session.savedRootRelativeOrigin = [self rootRelativeOriginOfSession:session];
     }
-    
-    if ([self isTmuxTab]) {
-        return;
-    }
+
     assert(!savedArrangement_);
     assert(!idMap_);
     assert(!isMaximized_);
@@ -3302,6 +3347,32 @@ static NSString* FormatRect(NSRect r) {
 
     [[root_ window] makeFirstResponder:[activeSession_ textview]];
     [realParentWindow_ invalidateRestorableState];
+
+    if ([self isTmuxTab]) {
+        DLog(@"Is a tmux tab");
+        // Resize the session (VT100Screen, etc.) to the size of the tmux window.
+        VT100GridSize gridSize = VT100GridSizeMake([parseTree_[kLayoutDictWidthKey] intValue],
+                                                   [parseTree_[kLayoutDictHeightKey] intValue]);
+        [self resizeSession:self.activeSession toSize:gridSize];
+
+        // Resize the scroll view
+        [self fitSubviewsToRoot];
+
+        // Resize the SessionView
+        [self resizeTmuxSessionView:self.activeSession.view toGridSize:gridSize];
+    }
+}
+
+- (void)resizeTmuxSessionView:(SessionView *)sessionView toGridSize:(VT100GridSize)gridSize {
+    const BOOL showTitles = [iTermPreferences boolForKey:kPreferenceKeyShowPaneTitles];
+    NSSize size = [PTYTab _sessionSizeWithCellSize:[PTYTab cellSizeForBookmark:[PTYTab tmuxBookmark]]
+                                        dimensions:NSMakeSize(gridSize.width, gridSize.height)
+                                        showTitles:showTitles
+                                        inTerminal:self.realParentWindow];
+    NSRect frame;
+    frame.origin = sessionView.frame.origin;
+    frame.size = size;
+    sessionView.frame = frame;
 }
 
 - (void)unmaximize
@@ -3573,12 +3644,13 @@ static NSString* FormatRect(NSRect r) {
     }
     // Dragging looks a lot better if we turn on resizing subviews temporarily.
     for (SessionView *sv in [self sessionViews]) {
-            [sv setAutoresizesSubviews:YES];
+        [sv setAutoresizesSubviews:YES];
     }
 }
 
-- (void)splitView:(PTYSplitView *)splitView draggingDidEndOfSplit:(int)splitterIndex pixels:(NSSize)pxMoved
-{
+- (void)splitView:(PTYSplitView *)splitView
+  draggingDidEndOfSplit:(int)splitterIndex
+           pixels:(NSSize)pxMoved {
     if (![self isTmuxTab]) {
         // Don't care for non-tmux tabs.
         return;
@@ -4254,8 +4326,9 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize* dest, CGFloat value)
     [self _splitViewDidResizeSubviews:splitView];
 }
 
-- (void)_splitViewDidResizeSubviews:(NSSplitView*)splitView
-{
+// This is the implementation of splitViewDidResizeSubviews. The delegate method isn't called when
+// views are added or adjusted, so we often have to call this ourselves.
+- (void)_splitViewDidResizeSubviews:(NSSplitView*)splitView {
     PtyLog(@"_splitViewDidResizeSubviews running");
     for (NSView* subview in [splitView subviews]) {
         if ([subview isKindOfClass:[SessionView class]]) {
@@ -4328,7 +4401,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize* dest, CGFloat value)
 - (void)setLabelAttributesForDeadSession {
     [self setState:kPTYTabDeadState reset:0];
 
-    if ([self isProcessing]) {
+    if (isProcessing_) {
         [self setIsProcessing:NO];
     }
 }
@@ -4430,7 +4503,6 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize* dest, CGFloat value)
         }
         if (![aSession shouldPostGrowlNotification]) {
             [aSession setHavePostedNewOutputNotification:NO];
-            [aSession setNewOutput:NO];
             shouldResetLabel = YES;
         }
     }

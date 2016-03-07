@@ -12,20 +12,26 @@
 @class VT100ScreenMark;
 @class VT100Terminal;
 
-@protocol PTYTextViewDataSource <NSObject>
+@protocol iTermTextDataSource <NSObject>
+
+- (int)width;
+- (int)numberOfLines;
+// This function is dangerous! It writes to an internal buffer and returns a
+// pointer to it. Better to use getLineAtIndex:withBuffer:.
+- (screen_char_t *)getLineAtIndex:(int)theIndex;
+- (long long)totalScrollbackOverflow;
+
+@end
+
+
+@protocol PTYTextViewDataSource <iTermTextDataSource>
 
 - (VT100Terminal *)terminal;
-- (int)numberOfLines;
-- (int)width;
 - (int)height;
 
 // Cursor position is 1-based (the top left is at 1,1).
 - (int)cursorX;
 - (int)cursorY;
-
-// This function is dangerous! It writes to an internal buffer and returns a
-// pointer to it. Better to use getLineAtIndex:withBuffer:.
-- (screen_char_t *)getLineAtIndex:(int)theIndex;
 
 - (screen_char_t *)getLineAtScreenIndex:(int)theIndex;
 
@@ -34,7 +40,6 @@
 - (int)numberOfScrollbackLines;
 - (int)scrollbackOverflow;
 - (void)resetScrollbackOverflow;
-- (long long)totalScrollbackOverflow;
 - (long long)absoluteLineNumberOfCursor;
 - (BOOL)continueFindAllResults:(NSMutableArray*)results
                      inContext:(FindContext*)context;
@@ -97,6 +102,9 @@
 - (VT100GridCoordRange)coordRangeOfNote:(PTYNoteViewController *)note;
 - (NSArray *)charactersWithNotesOnLine:(int)line;
 - (VT100ScreenMark *)markOnLine:(int)line;
+- (int)lineNumberOfMarkAfterLine:(int)line;
+- (int)lineNumberOfMarkBeforeLine:(int)line;
+
 - (NSString *)workingDirectoryOnLine:(int)line;
 - (SCPPath *)scpPathForFile:(NSString *)filename onLine:(int)line;
 - (VT100RemoteHost *)remoteHostOnLine:(int)line;

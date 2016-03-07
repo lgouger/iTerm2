@@ -10,7 +10,6 @@
 #import "SolidColorView.h"
 
 extern const CGFloat kHorizontalTabBarHeight;
-extern const CGFloat kLeftTabsWidth;
 
 @class iTermTabBarControlView;
 @protocol iTermTabBarControlViewDelegate;
@@ -21,12 +20,11 @@ extern const CGFloat kLeftTabsWidth;
 
 @protocol iTermRootTerminalViewDelegate<iTermTabBarControlViewDelegate>
 - (void)repositionWidgets;
-- (BOOL)_haveTopBorder;
-- (BOOL)_haveBottomBorder;
-- (BOOL)_haveLeftBorder;
-- (BOOL)_haveRightBorder;
+- (BOOL)haveTopBorder;
+- (BOOL)haveBottomBorder;
+- (BOOL)haveLeftBorder;
+- (BOOL)haveRightBorder;
 - (BOOL)anyFullScreen;
-- (BOOL)fullScreenTabControl;
 - (BOOL)exitingLionFullscreen;
 - (BOOL)divisionViewShouldBeVisible;
 - (NSWindow *)window;
@@ -68,6 +66,8 @@ extern const CGFloat kLeftTabsWidth;
 @property(nonatomic, readonly) BOOL tabBarShouldBeVisible;
 
 @property(nonatomic, readonly) CGFloat tabviewWidth;
+
+@property(nonatomic, readonly) CGFloat leftTabBarWidth;
 
 - (instancetype)initWithFrame:(NSRect)frame
                         color:(NSColor *)color

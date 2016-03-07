@@ -7,6 +7,7 @@
 //
 
 #import <Foundation/Foundation.h>
+#import "ITAddressBookMgr.h"
 #import "iTermCursor.h"
 #import "ScreenChar.h"
 #import "VT100GridTypes.h"
@@ -60,6 +61,8 @@
 - (NSData *)drawingHelperMatchesOnLine:(int)line;
 
 - (void)drawingHelperDidFindRunOfAnimatedCellsStartingAt:(VT100GridCoord)coord ofLength:(int)length;
+
+- (NSString *)drawingHelperLabelForDropTargetOnLine:(int)line;
 
 @end
 
@@ -235,10 +238,16 @@
 @property(nonatomic, assign) BOOL drawMarkIndicators;
 
 // Use light font smoothing?
-@property(nonatomic) BOOL thinStrokes;
+@property(nonatomic, assign) iTermThinStrokesSetting thinStrokes;
 
 // Change the cursor to indicate that a search is being performed.
 @property(nonatomic, assign) BOOL showSearchingCursor;
+
+// Should drop targets be indicated?
+@property(nonatomic, assign) BOOL showDropTargets;
+
+// Line number that is being hovered over for drop
+@property(nonatomic, assign) int dropLine;
 
 // Updates self.blinkingFound.
 - (void)drawTextViewContentInRect:(NSRect)rect
