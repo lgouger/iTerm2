@@ -12,6 +12,7 @@
 #import "iTerm.h"
 #import "iTermAdvancedSettingsModel.h"
 #import "iTermApplicationDelegate.h"
+#import "iTermAltScreenMouseScrollInferer.h"
 #import "iTermBadgeLabel.h"
 #import "iTermColorMap.h"
 #import "iTermController.h"
@@ -72,7 +73,6 @@
 #import <WebKit/WebKit.h>
 
 static const int kMaxSelectedTextLengthForCustomActions = 400;
-static const int kMaxSemanticHistoryPrefixOrSuffix = 2000;
 
 // This defines the fraction of a character's width on its right side that is used to
 // select the NEXT character.
@@ -102,6 +102,7 @@ static PTYTextView *gCurrentKeyEventTextView;  // See comment in -keyDown:
 static const int kDragThreshold = 3;
 
 @interface PTYTextView () <
+    iTermAltScreenMouseScrollInfererDelegate,
     iTermTextViewAccessibilityHelperDelegate,
     iTermTextDrawingHelperDelegate,
     iTermFindCursorViewDelegate,
@@ -234,6 +235,9 @@ static const int kDragThreshold = 3;
     int _keyFocusStolenCount;
     
     iTermNSKeyBindingEmulator *_keyBindingEmulator;
+    
+    // Detects when the user is trying to scroll in alt screen with the scroll wheel.
+    iTermAltScreenMouseScrollInferer *_altScreenMouseScrollInferer;
 }
 
 
@@ -332,6 +336,9 @@ static const int kDragThreshold = 3;
 
         _badgeLabel = [[iTermBadgeLabel alloc] init];
         _keyBindingEmulator = [[iTermNSKeyBindingEmulator alloc] init];
+        
+        _altScreenMouseScrollInferer = [[iTermAltScreenMouseScrollInferer alloc] init];
+        _altScreenMouseScrollInferer.delegate = self;
     }
     return self;
 }
@@ -391,6 +398,7 @@ static const int kDragThreshold = 3;
     [_quickLookController release];
     [_savedSelectedText release];
     [_keyBindingEmulator release];
+    [_altScreenMouseScrollInferer release];
 
     [super dealloc];
 }
@@ -501,11 +509,13 @@ static const int kDragThreshold = 3;
 }
 
 - (BOOL)resignFirstResponder {
+    [_altScreenMouseScrollInferer firstResponderDidChange];
     [self removeUnderline];
     return YES;
 }
 
 - (BOOL)becomeFirstResponder {
+    [_altScreenMouseScrollInferer firstResponderDidChange];
     [_delegate textViewDidBecomeFirstResponder];
     return YES;
 }
@@ -1056,10 +1066,8 @@ static const int kDragThreshold = 3;
 - (void)markCursorDirty {
   int currentCursorX = [_dataSource cursorX] - 1;
   int currentCursorY = [_dataSource cursorY] - 1;
-  DLog(@"Mark cursor position %d,%lldld dirty",
-       _previousCursorCoord.x, _previousCursorCoord.y - [_dataSource totalScrollbackOverflow]);
-  [_dataSource setCharDirtyAtCursorX:currentCursorX
-                                   Y:currentCursorY - [_dataSource totalScrollbackOverflow]];
+    DLog(@"Mark cursor position %d, %d dirty.", currentCursorX, currentCursorY);
+  [_dataSource setCharDirtyAtCursorX:currentCursorX Y:currentCursorY];
 }
 
 - (void)setCursorVisible:(BOOL)cursorVisible {
@@ -1319,6 +1327,7 @@ static const int kDragThreshold = 3;
 }
 
 - (void)keyDown:(NSEvent*)event {
+    [_altScreenMouseScrollInferer keyDown:event];
     if (![_delegate textViewShouldAcceptKeyDownEvent:event]) {
         return;
     }
@@ -1489,6 +1498,7 @@ static const int kDragThreshold = 3;
 
 // TODO: disable other, right mouse for inactive panes
 - (void)otherMouseDown:(NSEvent *)event {
+    [_altScreenMouseScrollInferer nonScrollWheelEvent:event];
     [self reportMouseEvent:event];
 
     [pointer_ mouseDown:event
@@ -1498,6 +1508,7 @@ static const int kDragThreshold = 3;
 
 - (void)otherMouseUp:(NSEvent *)event
 {
+    [_altScreenMouseScrollInferer nonScrollWheelEvent:event];
     if ([self reportMouseEvent:event]) {
         return;
     }
@@ -1512,6 +1523,7 @@ static const int kDragThreshold = 3;
 
 - (void)otherMouseDragged:(NSEvent *)event
 {
+    [_altScreenMouseScrollInferer nonScrollWheelEvent:event];
     if ([self reportMouseEvent:event]) {
         return;
     }
@@ -1519,6 +1531,7 @@ static const int kDragThreshold = 3;
 }
 
 - (void)rightMouseDown:(NSEvent*)event {
+    [_altScreenMouseScrollInferer nonScrollWheelEvent:event];
     if ([threeFingerTapGestureRecognizer_ rightMouseDown:event]) {
         DLog(@"Cancel right mouse down");
         return;
@@ -1536,6 +1549,7 @@ static const int kDragThreshold = 3;
 }
 
 - (void)rightMouseUp:(NSEvent *)event {
+    [_altScreenMouseScrollInferer nonScrollWheelEvent:event];
     if ([threeFingerTapGestureRecognizer_ rightMouseUp:event]) {
         return;
     }
@@ -1551,6 +1565,7 @@ static const int kDragThreshold = 3;
 
 - (void)rightMouseDragged:(NSEvent *)event
 {
+    [_altScreenMouseScrollInferer nonScrollWheelEvent:event];
     if ([self reportMouseEvent:event]) {
         return;
     }
@@ -1565,15 +1580,20 @@ static const int kDragThreshold = 3;
     if (event.type != NSScrollWheel) {
         return NO;
     }
-    if (![iTermAdvancedSettingsModel alternateMouseScroll]) {
-        return NO;
-    }
-    if (![self.dataSource showingAlternateScreen]) {
-        return NO;
-    }
     if ([self shouldReportMouseEvent:event at:point] &&
         [[_dataSource terminal] mouseMode] != MOUSE_REPORTING_NONE) {
         // Prefer to report the scroll than to send arrow keys in this mouse reporting mode.
+        return NO;
+    }
+    BOOL alternateMouseScroll = [iTermAdvancedSettingsModel alternateMouseScroll];
+    BOOL showingAlternateScreen = [self.dataSource showingAlternateScreen];
+    if (!alternateMouseScroll && showingAlternateScreen) {
+        [_altScreenMouseScrollInferer scrollWheel:event];
+    }
+    if (!alternateMouseScroll) {
+        return NO;
+    }
+    if (!showingAlternateScreen) {
         return NO;
     }
     return YES;
@@ -1878,6 +1898,7 @@ static const int kDragThreshold = 3;
 }
 
 - (void)mouseDown:(NSEvent *)event {
+    [_altScreenMouseScrollInferer nonScrollWheelEvent:event];
     if ([threeFingerTapGestureRecognizer_ mouseDown:event]) {
         return;
     }
@@ -2132,6 +2153,7 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
 }
 
 - (void)mouseUp:(NSEvent *)event {
+    [_altScreenMouseScrollInferer nonScrollWheelEvent:event];
     if ([threeFingerTapGestureRecognizer_ mouseUp:event]) {
         return;
     }
@@ -2300,6 +2322,7 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
 
 - (void)mouseDragged:(NSEvent *)event
 {
+    [_altScreenMouseScrollInferer nonScrollWheelEvent:event];
     DLog(@"mouseDragged");
     if (_mouseDownIsThreeFingerClick) {
         DLog(@"is three finger click");
@@ -2454,14 +2477,14 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
                 NSString *extendedPrefix = [extractor wrappedStringAt:coord
                                                               forward:NO
                                                   respectHardNewlines:NO
-                                                             maxChars:kMaxSemanticHistoryPrefixOrSuffix
+                                                             maxChars:[iTermAdvancedSettingsModel maxSemanticHistoryPrefixOrSuffix]
                                                     continuationChars:nil
                                                   convertNullsToSpace:YES
                                                                coords:nil];
                 NSString *extendedSuffix = [extractor wrappedStringAt:coord
                                                               forward:YES
                                                   respectHardNewlines:NO
-                                                             maxChars:kMaxSemanticHistoryPrefixOrSuffix
+                                                             maxChars:[iTermAdvancedSettingsModel maxSemanticHistoryPrefixOrSuffix]
                                                     continuationChars:nil
                                                   convertNullsToSpace:YES
                                                                coords:nil];
@@ -4434,8 +4457,7 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
 - (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)sender {
     // NOTE: draggingUpdated: calls this method because they need the same implementation.
     int numValid = -1;
-    NSDragOperation dragOperation = [sender draggingSourceOperationMask];
-    if (dragOperation == NSDragOperationCopy) {  // Option-drag to copy
+    if ([NSEvent modifierFlags] & NSAlternateKeyMask) {  // Option-drag to copy
         _drawingHelper.showDropTargets = YES;
     }
     NSDragOperation operation = [self dragOperationForSender:sender numberOfValidItems:&numValid];
@@ -4525,7 +4547,7 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
     int dropLine = dropPoint.y / _lineHeight;
     SCPPath *dropScpPath = [_dataSource scpPathForFile:@"" onLine:dropLine];
     NSArray *filenames = [pasteboard filenamesOnPasteboardWithShellEscaping:NO];
-    if ([types containsObject:NSFilenamesPboardType] && filenames.count) {
+    if ([types containsObject:NSFilenamesPboardType] && filenames.count && dropScpPath) {
         // This is all so the mouse cursor will change to a plain arrow instead of the
         // drop target cursor.
         [[NSApplication sharedApplication] activateIgnoringOtherApps:YES];
@@ -4590,15 +4612,21 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
     _drawingHelper.showDropTargets = NO;
     NSPasteboard *draggingPasteboard = [sender draggingPasteboard];
     NSDragOperation dragOperation = [sender draggingSourceOperationMask];
-    if (dragOperation == NSDragOperationCopy) {  // Option-drag to copy
-        NSPoint windowDropPoint = [sender draggingLocation];
-        return [self uploadFilenamesOnPasteboard:draggingPasteboard location:windowDropPoint];
-    } else if (dragOperation & NSDragOperationGeneric) {  // Generic drag; either regular or cmd-drag
-        return [self pasteValuesOnPasteboard:draggingPasteboard
-                               cdToDirectory:(dragOperation == NSDragOperationGeneric)];
-    } else {
-        return NO;
+    DLog(@"Perform drag operation");
+    if (dragOperation & (NSDragOperationCopy | NSDragOperationGeneric)) {
+        DLog(@"Drag operation is acceptable");
+        if ([NSEvent modifierFlags] & NSAlternateKeyMask) {
+            DLog(@"Holding option so doing an upload");
+            NSPoint windowDropPoint = [sender draggingLocation];
+            return [self uploadFilenamesOnPasteboard:draggingPasteboard location:windowDropPoint];
+        } else {
+            DLog(@"No option so pasting filename");
+            return [self pasteValuesOnPasteboard:draggingPasteboard
+                                   cdToDirectory:(dragOperation == NSDragOperationGeneric)];
+        }
     }
+    DLog(@"Drag/drop Failing");
+    return NO;
 }
 
 // Save method
@@ -5737,7 +5765,7 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
     NSString *prefix = [extractor wrappedStringAt:coord
                                           forward:NO
                               respectHardNewlines:respectHardNewlines
-                                         maxChars:kMaxSemanticHistoryPrefixOrSuffix
+                                         maxChars:[iTermAdvancedSettingsModel maxSemanticHistoryPrefixOrSuffix]
                                 continuationChars:continuationCharsCoords
                               convertNullsToSpace:NO
                                            coords:prefixCoords];
@@ -5746,7 +5774,7 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
     NSString *suffix = [extractor wrappedStringAt:coord
                                           forward:YES
                               respectHardNewlines:respectHardNewlines
-                                         maxChars:kMaxSemanticHistoryPrefixOrSuffix
+                                         maxChars:[iTermAdvancedSettingsModel maxSemanticHistoryPrefixOrSuffix]
                                 continuationChars:continuationCharsCoords
                               convertNullsToSpace:NO
                                            coords:suffixCoords];
@@ -5983,15 +6011,14 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
     // It's ok to paste if the the drag obejct is either a file or a string.
     BOOL pasteOK = !![[sender draggingPasteboard] availableTypeFromArray:@[ NSFilenamesPboardType, NSStringPboardType ]];
 
-    // The source defines the kind of operations it allows with
-    // -draggingSourceOperationMask. Pressing modifier keys will change its
-    // value by masking out all but one bit (if the sender allows modifiers
-    // to affect dragging).
+    const BOOL optionPressed = ([NSEvent modifierFlags] & NSAlternateKeyMask) != 0;
     NSDragOperation sourceMask = [sender draggingSourceOperationMask];
-    NSDragOperation both = (NSDragOperationCopy | NSDragOperationGeneric);  // Copy or paste
-    if ((sourceMask & both) == both && pasteOK) {
+    DLog(@"source mask=%@, optionPressed=%@, pasteOk=%@", @(sourceMask), @(optionPressed), @(pasteOK));
+    if (!optionPressed && pasteOK && (sourceMask & (NSDragOperationGeneric | NSDragOperationCopy)) != 0) {
+        DLog(@"Allowing a filename drag");
         // No modifier key was pressed and pasting is OK, so select the paste operation.
         NSArray *filenames = [pb filenamesOnPasteboardWithShellEscaping:YES];
+        DLog(@"filenames=%@", filenames);
         if (numberOfValidItemsPtr) {
             if (filenames.count) {
                 *numberOfValidItemsPtr = filenames.count;
@@ -5999,33 +6026,26 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
                 *numberOfValidItemsPtr = 1;
             }
         }
-        return NSDragOperationGeneric;
-    } else if ((sourceMask & NSDragOperationCopy) && uploadOK) {
+        if (sourceMask & NSDragOperationGeneric) {
+            // This is preferred since it doesn't have the green plus indicating a copy
+            return NSDragOperationGeneric;
+        } else {
+            // Even if the source only allows copy, we allow it. See issue 4286.
+            // Such sources are silly and we route around the damage.
+            return NSDragOperationCopy;
+        }
+    } else if (optionPressed && uploadOK && (sourceMask & NSDragOperationCopy) != 0) {
+        DLog(@"Allowing an upload drag");
         // Either Option was pressed or the sender allows Copy but not Generic,
         // and it's ok to upload, so select the upload operation.
         if (numberOfValidItemsPtr) {
             *numberOfValidItemsPtr = [[pb filenamesOnPasteboardWithShellEscaping:NO] count];
         }
+        // You have to press option to get here so Copy is the only possibility.
         return NSDragOperationCopy;
-    } else if ((sourceMask == NSDragOperationGeneric) && uploadOK) {
-        // Cmd-drag only allows one filename.
-        NSArray *filenames = [pb filenamesOnPasteboardWithShellEscaping:YES];
-        if (filenames.count == 0) {
-            // This shouldn't happen.
-            return NSDragOperationNone;
-        } else if (numberOfValidItemsPtr) {
-            *numberOfValidItemsPtr = MIN(1, filenames.count);
-        }
-        return NSDragOperationGeneric;
-    } else if ((sourceMask & NSDragOperationGeneric) && pasteOK) {
-        // Either Command was pressed or the sender allows Generic but not
-        // copy, and it's ok to paste, so select the paste operation.
-        if (numberOfValidItemsPtr) {
-            *numberOfValidItemsPtr = 1;
-        }
-        return NSDragOperationGeneric;
     } else {
         // No luck.
+        DLog(@"Not allowing drag");
         return NSDragOperationNone;
     }
 }
@@ -7001,4 +7021,11 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
     self.savedSelectedText = nil;
 }
 
+#pragma mark - iTermAltScreenMouseScrollInfererDelegate
+
+- (void)altScreenMouseScrollInfererDidInferScrollingIntent:(BOOL)isTrying {
+    [_delegate textViewThinksUserIsTryingToSendArrowKeysWithScrollWheel:isTrying];
+}
+
 @end
+
