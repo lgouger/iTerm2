@@ -826,6 +826,9 @@ extern int CGContextGetFontSmoothingStyle(CGContextRef);
                           at:NSMakePoint(initialPoint.x + currentRun->x, initialPoint.y)];
     }
 
+    // Leaving anti-aliasing off causes the underline to be too thick (issue 4438).
+    CGContextSetShouldAntialias(ctx, YES);
+
     // Draw underline
     if (currentRun->attrs.underline) {
         [self drawUnderlineOfColor:currentRun->attrs.color
@@ -840,13 +843,17 @@ extern int CGContextGetFontSmoothingStyle(CGContextRef);
                         font:(NSFont *)font
                        width:(CGFloat)runWidth {
     [color set];
-    NSRectFill(NSMakeRect(startPoint.x,
-                          (startPoint.y +
-                              _cellSize.height +
-                              font.descender -
-                              font.underlinePosition),
-                          runWidth,
-                          font.underlineThickness));
+    NSBezierPath *path = [NSBezierPath bezierPath];
+
+    NSPoint origin = NSMakePoint(startPoint.x,
+                                 startPoint.y +
+                                     _cellSize.height +
+                                     font.descender -
+                                     font.underlinePosition);
+    [path moveToPoint:origin];
+    [path lineToPoint:NSMakePoint(origin.x + runWidth, origin.y)];
+    [path setLineWidth:font.underlineThickness];
+    [path stroke];
 }
 
 // Note: caller must nil out _selectedFont after the graphics context becomes invalid.
@@ -901,9 +908,7 @@ extern int CGContextGetFontSmoothingStyle(CGContextRef);
 
 - (void)drawImageCellInRun:(CRun *)run atPoint:(NSPoint)point {
     iTermImageInfo *imageInfo = GetImageInfo(run->attrs.imageCode);
-    NSImage *image =
-        [imageInfo imageEmbeddedInRegionOfSize:NSMakeSize(_cellSize.width * imageInfo.size.width,
-                                                          _cellSize.height * imageInfo.size.height)];
+    NSImage *image = [imageInfo imageWithCellSize:_cellSize];
     NSSize chunkSize = NSMakeSize(image.size.width / imageInfo.size.width,
                                   image.size.height / imageInfo.size.height);
 

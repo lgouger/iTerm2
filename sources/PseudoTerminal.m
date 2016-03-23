@@ -1002,21 +1002,28 @@ static NSString* TERMINAL_ARRANGEMENT_HIDING_TOOLBELT_SHOULD_RESIZE_WINDOW = @"H
     }
 }
 
-- (void)closeSession:(PTYSession *)aSession soft:(BOOL)soft
-{
+- (void)closeSession:(PTYSession *)aSession soft:(BOOL)soft {
     if (!soft &&
         [aSession isTmuxClient] &&
         [[aSession tmuxController] isAttached]) {
         [[aSession tmuxController] killWindowPane:[aSession tmuxPane]];
-    } else if ([[[aSession tab] sessions] count] == 1) {
-        [self closeTab:[aSession tab] soft:soft];
     } else {
-        [aSession terminate];
+        PTYTab *tab = [self tabForSession:aSession];
+        if ([[tab sessions] count] == 1) {
+            [self closeTab:tab soft:soft];
+        } else {
+            [aSession terminate];
+        }
     }
 }
 
-- (void)closeSession:(PTYSession *)aSession
-{
+- (PTYTab *)tabForSession:(PTYSession *)session {
+    // This is kind of cheating; we shouldn't assume that a session's delegate
+    // is a tab. But it always is, and it would be slow to search.
+    return (PTYTab *)session.delegate;
+}
+
+- (void)closeSession:(PTYSession *)aSession {
     [self closeSession:aSession soft:NO];
 }
 
@@ -1139,12 +1146,12 @@ static NSString* TERMINAL_ARRANGEMENT_HIDING_TOOLBELT_SHOULD_RESIZE_WINDOW = @"H
             okToClose = [self confirmCloseForSessions:[aTab sessions]
                                            identifier:@"This tab"
                                           genericName:[NSString stringWithFormat:@"tab #%d",
-                                                       [aTab realObjectCount]]];
+                                                       [aTab tabNumber]]];
         } else {
             okToClose = [self confirmCloseForSessions:[aTab sessions]
                                            identifier:@"This multi-pane tab"
                                           genericName:[NSString stringWithFormat:@"tab #%d",
-                                                       [aTab realObjectCount]]];
+                                                       [aTab tabNumber]]];
         }
         return okToClose;
     }
@@ -1306,7 +1313,7 @@ static NSString* TERMINAL_ARRANGEMENT_HIDING_TOOLBELT_SHOULD_RESIZE_WINDOW = @"H
 
 - (void)closeSessionWithConfirmation:(PTYSession *)aSession
 {
-    if ([[[aSession tab] sessions] count] == 1) {
+    if ([[[self tabForSession:aSession] sessions] count] == 1) {
         [self closeCurrentTab:self];
         return;
     }
@@ -1341,7 +1348,7 @@ static NSString* TERMINAL_ARRANGEMENT_HIDING_TOOLBELT_SHOULD_RESIZE_WINDOW = @"H
                                        otherButton:nil
                          informativeTextWithFormat:@"Running jobs will be killed."];
     if (aSession.exited || [alert runModal] == NSAlertDefaultReturn) {
-        [self.currentSession restartSession];
+        [aSession restartSession];
     }
 }
 
@@ -1372,7 +1379,7 @@ static NSString* TERMINAL_ARRANGEMENT_HIDING_TOOLBELT_SHOULD_RESIZE_WINDOW = @"H
 }
 
 - (void)makeSessionActive:(PTYSession *)session {
-    PTYTab *tab = session.tab;
+    PTYTab *tab = [self tabForSession:session];
     if (tab.realParentWindow != self) {
         return;
     }
@@ -1381,11 +1388,11 @@ static NSString* TERMINAL_ARRANGEMENT_HIDING_TOOLBELT_SHOULD_RESIZE_WINDOW = @"H
     } else {
         [self.window makeKeyAndOrderFront:nil];
     }
-    [_contentView.tabView selectTabViewItem:session.tab.tabViewItem];
-    if (session.tab.isMaximized) {
-        [session.tab unmaximize];
+    [_contentView.tabView selectTabViewItem:tab.tabViewItem];
+    if (tab.isMaximized) {
+        [tab unmaximize];
     }
-    [session.tab setActiveSession:session];
+    [tab setActiveSession:session];
 }
 
 - (PTYSession *)currentSession {
@@ -2342,9 +2349,7 @@ static NSString* TERMINAL_ARRANGEMENT_HIDING_TOOLBELT_SHOULD_RESIZE_WINDOW = @"H
     // svn history for the old impl.
 
     // update the cursor
-    if ([[[self currentSession] textview] refresh]) {
-        [[self currentSession] scheduleUpdateIn:[iTermAdvancedSettingsModel timeBetweenBlinks]];
-    }
+    [[self currentSession] refresh];
     [[[self currentSession] textview] setNeedsDisplay:YES];
     [self _loadFindStringFromSharedPasteboard];
 
@@ -3642,13 +3647,14 @@ static NSString* TERMINAL_ARRANGEMENT_HIDING_TOOLBELT_SHOULD_RESIZE_WINDOW = @"H
         return;
     }
 
-    [[session tab] setLockedSession:session];
+    PTYTab *tab = [self tabForSession:session];
+    [tab setLockedSession:session];
     [self safelySetSessionSize:session rows:height columns:width];
     PtyLog(@"sessionInitiatedResize - calling fitWindowToTab");
-    [self fitWindowToTab:[session tab]];
+    [self fitWindowToTab:tab];
     PtyLog(@"sessionInitiatedResize - calling fitTabsToWindow");
     [self fitTabsToWindow];
-    [[session tab] setLockedSession:nil];
+    [tab setLockedSession:nil];
 }
 
 // Contextual menu
@@ -3798,7 +3804,7 @@ static NSString* TERMINAL_ARRANGEMENT_HIDING_TOOLBELT_SHOULD_RESIZE_WINDOW = @"H
         // up to date to avoid a jump when it's shown.
         [[aSession textview] setNeedsDisplay:YES];
         [aSession updateDisplay];
-        [aSession scheduleUpdateIn:kFastTimerIntervalSec];
+        aSession.active = YES;
         [self setDimmingForSession:aSession];
         [[aSession view] setBackgroundDimmed:![[self window] isKeyWindow]];
     }
@@ -3809,14 +3815,15 @@ static NSString* TERMINAL_ARRANGEMENT_HIDING_TOOLBELT_SHOULD_RESIZE_WINDOW = @"H
         }
     }
     PTYSession* aSession = [[tabViewItem identifier] activeSession];
+    PTYTab *tab = [self tabForSession:aSession];
     if (!_fullScreen) {
-        [[aSession tab] updateLabelAttributes];
+        [tab updateLabelAttributes];
         [self setWindowTitle];
     }
 
     [[self window] makeFirstResponder:[[[tabViewItem identifier] activeSession] textview]];
-    if ([[aSession tab] blur]) {
-        [self enableBlur:[[aSession tab] blurRadius]];
+    if ([tab blur]) {
+        [self enableBlur:[tab blurRadius]];
     } else {
         [self disableBlur];
     }
@@ -4269,7 +4276,8 @@ static NSString* TERMINAL_ARRANGEMENT_HIDING_TOOLBELT_SHOULD_RESIZE_WINDOW = @"H
 {
     MovePaneController *movePaneController = [MovePaneController sharedInstance];
     PTYSession *session = [movePaneController session];
-    BOOL tabSurvives = [[[session tab] sessions] count] > 1;
+    PTYTab *tab = [self tabForSession:session];
+    BOOL tabSurvives = [[tab sessions] count] > 1;
     if ([session isTmuxClient] && tabSurvives) {
         // Cause the "normal" drop handle to do nothing.
         [[MovePaneController sharedInstance] clearSession];
@@ -4280,7 +4288,7 @@ static NSString* TERMINAL_ARRANGEMENT_HIDING_TOOLBELT_SHOULD_RESIZE_WINDOW = @"H
         return nil;
     }
     PTYTab *tabToRemove = nil;
-    if (session.tab.realParentWindow == self && session.tab.sessions.count == 1) {
+    if (tab.realParentWindow == self && tab.sessions.count == 1) {
         // This is an edge case brought to light in issue 4189. If you have a window with a single
         // tab and a single session and you drag the session (by holding cmd+opt+shift and dragging)
         // onto the tab bar, the window disappears. The bug describes a crash, but as of 2.9.20160107
@@ -4292,7 +4300,7 @@ static NSString* TERMINAL_ARRANGEMENT_HIDING_TOOLBELT_SHOULD_RESIZE_WINDOW = @"H
         //
         // We can't just do nothing in this case because if there are multiple tabs this is a valid
         // way to reorder tabs.
-        tabToRemove = [[session.tab retain] autorelease];
+        tabToRemove = [[tab retain] autorelease];
         movePaneController.session = nil;
     } else {
         [movePaneController removeAndClearSession];
@@ -4573,7 +4581,7 @@ static NSString* TERMINAL_ARRANGEMENT_HIDING_TOOLBELT_SHOULD_RESIZE_WINDOW = @"H
 
     // Add this session to our term and make it current
     PTYTab *theTab = [tabViewItem identifier];
-    [newSession setTab:theTab];
+    newSession.delegate = theTab;
 
     return newSession;
 }
@@ -4586,7 +4594,7 @@ static NSString* TERMINAL_ARRANGEMENT_HIDING_TOOLBELT_SHOULD_RESIZE_WINDOW = @"H
 
     PTYSession *newSession = [self syntheticSessionForSession:oldSession];
 
-    [oldSession.tab setDvrInSession:newSession];
+    [[self tabForSession:oldSession] setDvrInSession:newSession];
     if (![self inInstantReplay]) {
         [self showHideInstantReplay];
     }
@@ -4611,11 +4619,11 @@ static NSString* TERMINAL_ARRANGEMENT_HIDING_TOOLBELT_SHOULD_RESIZE_WINDOW = @"H
     PTYSession *syntheticSession = [self syntheticSessionForSession:oldSession];
     syntheticSession.textview.cursorVisible = NO;
     [syntheticSession appendLinesInRange:rangeOfLines fromSession:oldSession];
-    [oldSession.tab replaceActiveSessionWithSyntheticSession:syntheticSession];
+    [[self tabForSession:oldSession] replaceActiveSessionWithSyntheticSession:syntheticSession];
 }
 
 - (void)showLiveSession:(PTYSession*)liveSession inPlaceOf:(PTYSession*)replaySession {
-    PTYTab* theTab = [replaySession tab];
+    PTYTab *theTab = [self tabForSession:replaySession];
     [_instantReplayWindowController updateInstantReplayView];
 
     [self sessionInitiatedResize:replaySession
@@ -5043,8 +5051,8 @@ static NSString* TERMINAL_ARRANGEMENT_HIDING_TOOLBELT_SHOULD_RESIZE_WINDOW = @"H
 
 - (void)splitVertically:(BOOL)isVertical
                  before:(BOOL)before
-          addingSession:(PTYSession*)newSession
-          targetSession:(PTYSession*)targetSession
+          addingSession:(PTYSession *)newSession
+          targetSession:(PTYSession *)targetSession
            performSetup:(BOOL)performSetup {
     [self.currentSession.textview refuseFirstResponderAtCurrentMouseLocation];
     NSView *scrollView;
@@ -5060,7 +5068,7 @@ static NSString* TERMINAL_ARRANGEMENT_HIDING_TOOLBELT_SHOULD_RESIZE_WINDOW = @"H
                                                            before:before
                                                     targetSession:targetSession];
     [sessionView setSession:newSession];
-    [newSession setTab:[self currentTab]];
+    newSession.delegate = self.currentTab;
     scrollView = [[[newSession view] subviews] objectAtIndex:0];
     [newSession setView:sessionView];
     NSSize size = [sessionView frame].size;
@@ -5136,7 +5144,7 @@ static NSString* TERMINAL_ARRANGEMENT_HIDING_TOOLBELT_SHOULD_RESIZE_WINDOW = @"H
 
     if (![self runCommandInSession:newSession inCwd:oldCWD forObjectType:iTermPaneObject]) {
         [newSession terminate];
-        [newSession.tab removeSession:newSession];
+        [[self tabForSession:newSession] removeSession:newSession];
     }
     return newSession;
 }
@@ -5761,7 +5769,7 @@ static NSString* TERMINAL_ARRANGEMENT_HIDING_TOOLBELT_SHOULD_RESIZE_WINDOW = @"H
     BOOL canDim = [iTermPreferences boolForKey:kPreferenceKeyDimInactiveSplitPanes];
     if (!canDim) {
         [[aSession view] setDimmed:NO];
-    } else if (aSession == [[aSession tab] activeSession]) {
+    } else if (aSession == [[self tabForSession:aSession] activeSession]) {
         [[aSession view] setDimmed:NO];
     } else if (![self broadcastInputToSession:aSession]) {
         // Session is not the active session and we're not broadcasting to it.
@@ -6873,7 +6881,7 @@ static NSString* TERMINAL_ARRANGEMENT_HIDING_TOOLBELT_SHOULD_RESIZE_WINDOW = @"H
         [oldName retain];
         NSString* guid = [oldBookmark objectForKey:KEY_GUID];
         if ([session reloadProfile]) {
-            [[session tab] recheckBlur];
+            [[self tabForSession:session] recheckBlur];
             NSDictionary *profile = [session profile];
             if (![[profile objectForKey:KEY_NAME] isEqualToString:oldName]) {
                 // Set name, which overrides any session-set icon name.

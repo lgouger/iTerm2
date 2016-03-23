@@ -359,10 +359,6 @@
 - (void)saveToDvr {
 }
 
-- (BOOL)textViewInSameTabAsTextView:(PTYTextView *)other {
-    return YES;
-}
-
 - (void)removeInaccessibleNotes {
 }
 
@@ -2471,7 +2467,7 @@
     return _canPasteFile;
 }
 
-- (void)refreshAndStartTimerIfNeeded {
+- (void)refresh {
     [self registerCall:_cmd];
 }
 
