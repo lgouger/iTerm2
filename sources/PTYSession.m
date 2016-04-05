@@ -644,10 +644,9 @@ ITERM_WEAKLY_REFERENCEABLE
     NSRectFill(frame);
 }
 
-- (void)setSizeFromArrangement:(NSDictionary*)arrangement
-{
-    [self setWidth:[[arrangement objectForKey:SESSION_ARRANGEMENT_COLUMNS] intValue]
-            height:[[arrangement objectForKey:SESSION_ARRANGEMENT_ROWS] intValue]];
+- (void)setSizeFromArrangement:(NSDictionary*)arrangement {
+    [self setSize:VT100GridSizeMake([[arrangement objectForKey:SESSION_ARRANGEMENT_COLUMNS] intValue],
+                                    [[arrangement objectForKey:SESSION_ARRANGEMENT_ROWS] intValue])];
 }
 
 + (PTYSession*)sessionFromArrangement:(NSDictionary *)arrangement
@@ -1119,7 +1118,7 @@ ITERM_WEAKLY_REFERENCEABLE
     if ([iTermAdvancedSettingsModel runJobsInServers]) {
         DLog(@"Attaching to a server...");
         [_shell attachToServer:serverConnection];
-        [_shell setWidth:_screen.width height:_screen.height];
+        [_shell setSize:_screen.size];
         @synchronized(self) {
             _registered = YES;
         }
@@ -1171,11 +1170,10 @@ ITERM_WEAKLY_REFERENCEABLE
          substitutions:substitutions];
 }
 
-- (void)setWidth:(int)width height:(int)height
-{
-    DLog(@"Set session %@ to %dx%d", self, width, height);
-    [_screen resizeWidth:width height:height];
-    [_shell setWidth:width height:height];
+- (void)setSize:(VT100GridSize)size {
+    DLog(@"Set session %@ to %@", self, VT100GridSizeDescription(size));
+    [_screen setSize:size];
+    [_shell setSize:size];
     [_textview clearHighlights];
     [[_delegate realParentWindow] invalidateRestorableState];
 }
@@ -1339,6 +1337,11 @@ ITERM_WEAKLY_REFERENCEABLE
 
     NSString *itermId = [self sessionId];
     env[@"ITERM_SESSION_ID"] = itermId;
+    env[@"TERM_PROGRAM_VERSION"] = [[[NSBundle mainBundle] infoDictionary] objectForKey:@"CFBundleShortVersionString"];
+    env[@"TERM_SESSION_ID"] = itermId;
+    env[@"TERM_PROGRAM"] = @"iTerm.app";
+
+
     if (_profile[KEY_NAME]) {
         env[@"ITERM_PROFILE"] = [_profile[KEY_NAME] stringByPerformingSubstitutions:substitutions];
     }
@@ -2013,8 +2016,7 @@ ITERM_WEAKLY_REFERENCEABLE
     [_shell release];
     _shell = [[PTYTask alloc] init];
     [_shell setDelegate:self];
-    [_shell setWidth:_screen.width
-              height:_screen.height];
+    [_shell setSize:_screen.size];
     [self startProgram:_program
            environment:_environment
                 isUTF8:_isUTF8
@@ -2259,15 +2261,15 @@ ITERM_WEAKLY_REFERENCEABLE
     [self writeTask:[_terminal.output keyPageDown:0]];
 }
 
-+ (NSData *)pasteboardFile
-{
++ (NSData *)pasteboardFile {
     NSPasteboard *board;
 
     board = [NSPasteboard generalPasteboard];
-    assert(board != nil);
+    if (!board) {
+        return nil;
+    }
 
-    NSArray *supportedTypes = [NSArray arrayWithObjects:NSFilenamesPboardType, nil];
-    NSString *bestType = [board availableTypeFromArray:supportedTypes];
+    NSString *bestType = [board availableTypeFromArray:@[ NSFilenamesPboardType ]];
 
     if ([bestType isEqualToString:NSFilenamesPboardType]) {
         NSArray *filenames = [board propertyListForType:NSFilenamesPboardType];
@@ -3180,6 +3182,13 @@ ITERM_WEAKLY_REFERENCEABLE
 
 - (void)clearBuffer {
     [_screen clearBuffer];
+
+    if ([iTermAdvancedSettingsModel jiggleTTYSizeOnClearBuffer]) {
+        VT100GridSize size = _screen.size;
+        size.width++;
+        _shell.size = size;
+        _shell.size = _screen.size;
+    }
 }
 
 - (void)clearScrollbackBuffer
@@ -3411,6 +3420,8 @@ ITERM_WEAKLY_REFERENCEABLE
     const BOOL transientTitle = _delegate.realParentWindow.isShowingTransientTitle;
     const BOOL animationPlaying = _textview.getAndResetDrawingAnimatedImageFlag;
 
+    // Even if "active" isn't changing we need the side effect of setActive: that updates the
+    // cadence since we might have just become idle.
     self.active = (somethingIsBlinking || transientTitle || animationPlaying);
 
     if (_tailFindTimer && [[[_view findViewController] view] isHidden]) {
@@ -3448,17 +3459,12 @@ ITERM_WEAKLY_REFERENCEABLE
     DLog(@"setActive:%@ timerRunning=%@ updateTimer.isValue=%@ lastTimeout=%f session=%@",
          @(active), @(_timerRunning), @(_updateTimer.isValid), _lastTimeout, self);
     active = active && [_delegate sessionBelongsToVisibleTab];
-    if (active == _active) {
-        return;
-    } else {
-        if (active) {
-            DLog(@"Become active for session %@", self);
-        } else {
-            DLog(@"Become inactive for session %@", self);
-        }
-    }
     _active = active;
-    if (active) {
+    [self changeCadenceIfNeeded];
+}
+
+- (void)changeCadenceIfNeeded {
+    if (_active || !self.isIdle) {
         [self setUpdateCadence:kActiveUpdateCadence];
     } else if ([NSApp isActive]) {
         [self setUpdateCadence:kBackgroundUpdateCadence];
@@ -4104,10 +4110,9 @@ ITERM_WEAKLY_REFERENCEABLE
     [_tmuxController toggleZoomForPane:self.tmuxPane];
 }
 
-- (void)resizeFromArrangement:(NSDictionary *)arrangement
-{
-    [self setWidth:[[arrangement objectForKey:SESSION_ARRANGEMENT_COLUMNS] intValue]
-            height:[[arrangement objectForKey:SESSION_ARRANGEMENT_ROWS] intValue]];
+- (void)resizeFromArrangement:(NSDictionary *)arrangement {
+    [self setSize:VT100GridSizeMake([[arrangement objectForKey:SESSION_ARRANGEMENT_COLUMNS] intValue],
+                                    [[arrangement objectForKey:SESSION_ARRANGEMENT_ROWS] intValue])];
 }
 
 - (BOOL)isCompatibleWith:(PTYSession *)otherSession
@@ -5429,8 +5434,7 @@ ITERM_WEAKLY_REFERENCEABLE
     }
 }
 
-- (BOOL)textViewCanPasteFile
-{
+- (BOOL)textViewCanPasteFile {
     return [[self class] pasteboardFile] != nil;
 }
 
@@ -5622,11 +5626,34 @@ ITERM_WEAKLY_REFERENCEABLE
     }
 }
 
+- (VT100GridAbsCoordRange)textViewRangeOfCurrentCommand {
+    DLog(@"Fetching range of current command");
+    if (![[iTermShellHistoryController sharedInstance] commandHistoryHasEverBeenUsed]) {
+        DLog(@"Command history has never been used.");
+        [iTermShellHistoryController showInformationalMessage];
+        return VT100GridAbsCoordRangeMake(-1, -1, -1, -1);
+    } else {
+        VT100GridAbsCoordRange range =
+            VT100GridAbsCoordRangeMake(_commandRange.start.x,
+                                       _commandRange.start.y + _screen.totalScrollbackOverflow,
+                                       _commandRange.end.x,
+                                       _commandRange.end.y + _screen.totalScrollbackOverflow);
+        iTermTextExtractor *extractor = [iTermTextExtractor textExtractorWithDataSource:_screen];
+        return [extractor rangeByTrimmingWhitespaceFromRange:range];
+    }
+}
+
 - (BOOL)textViewCanSelectOutputOfLastCommand {
     // Return YES if command history has never been used so we can show the informational message.
     return (![[iTermShellHistoryController sharedInstance] commandHistoryHasEverBeenUsed] ||
             _screen.lastCommandOutputRange.start.x >= 0);
 
+}
+
+- (BOOL)textViewCanSelectCurrentCommand {
+    // Return YES if command history has never been used so we can show the informational message.
+    return (![[iTermShellHistoryController sharedInstance] commandHistoryHasEverBeenUsed] ||
+            self.isAtShellPrompt);
 }
 
 - (BOOL)textViewUseHFSPlusMapping {

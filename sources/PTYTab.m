@@ -158,8 +158,10 @@ static const BOOL USE_THIN_SPLITTERS = YES;
     iTermPreferencesTabStyle preferredStyle = [iTermPreferences intForKey:kPreferenceKeyTabStyle];
     switch (preferredStyle) {
         case TAB_STYLE_LIGHT:
+        case TAB_STYLE_LIGHT_HIGH_CONTRAST:
             return [NSImage imageNamed:@"NewOutput"];
         case TAB_STYLE_DARK:
+        case TAB_STYLE_DARK_HIGH_CONTRAST:
             return [NSImage imageNamed:@"NewOutputForDarkTheme"];
     }
 
@@ -177,8 +179,10 @@ static const BOOL USE_THIN_SPLITTERS = YES;
     iTermPreferencesTabStyle preferredStyle = [iTermPreferences intForKey:kPreferenceKeyTabStyle];
     switch (preferredStyle) {
         case TAB_STYLE_LIGHT:
+        case TAB_STYLE_LIGHT_HIGH_CONTRAST:
             return [NSImage imageNamed:@"dead"];
         case TAB_STYLE_DARK:
+        case TAB_STYLE_DARK_HIGH_CONTRAST:
             return [NSImage imageNamed:@"DeadForDarkTheme"];
     }
     return [NSImage imageNamed:@"dead"];
@@ -755,8 +759,11 @@ static const BOOL USE_THIN_SPLITTERS = YES;
 }
 
 - (void)setIsProcessing:(BOOL)aFlag {
-    isProcessing_ = aFlag;
-    [_delegate tab:self didChangeProcessingStatus:self.isProcessing];
+    if (aFlag != isProcessing_) {
+        DLog(@"Set processing flag of %@ from %@ to %@", self, @(isProcessing_), @(aFlag));
+        isProcessing_ = aFlag;
+        [_delegate tab:self didChangeProcessingStatus:self.isProcessing];
+    }
 }
 
 - (BOOL)isActiveSession
@@ -1994,20 +2001,18 @@ static NSString* FormatRect(NSRect r) {
 }
 
 - (BOOL)resizeSession:(PTYSession *)aSession toSize:(VT100GridSize)newSize {
-    int width = newSize.width;
-    int height = newSize.height;
-    if ([aSession rows] == height &&
-        [aSession columns] == width) {
+    if ([aSession rows] == newSize.height &&
+        [aSession columns] == newSize.width) {
         PtyLog(@"PTYTab fitSessionToCurrentViewSize: noop");
         return NO;
     }
-    if (width == [aSession columns] && height == [aSession rows]) {
+    if (newSize.width == [aSession columns] && newSize.height == [aSession rows]) {
         PtyLog(@"fitSessionToWindow - terminating early because session size doesn't change");
         return NO;
     }
 
-    [aSession setWidth:width height:height];
-    PtyLog(@"fitSessionToCurrentViewSize -  calling setWidth:%d height:%d", width, height);
+    PtyLog(@"fitSessionToCurrentViewSize -  calling setSize:%@", VT100GridSizeDescription(newSize));
+    [aSession setSize:newSize];
     [[aSession scrollview] setLineScroll:[[aSession textview] lineHeight]];
     [[aSession scrollview] setPageScroll:2 * [[aSession textview] lineHeight]];
     if ([aSession backgroundImagePath]) {
@@ -4524,7 +4529,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize* dest, CGFloat value)
 
 - (void)setLabelAttributesForActiveTab:(BOOL)notify {
     BOOL isBackgroundTab = [[tabViewItem_ tabView] selectedTabViewItem] != [self tabViewItem];
-    [self setIsProcessing:YES];
+    [self setIsProcessing:[self anySessionIsProcessing] && ![self isForegroundTab]];
 
     if (![[self activeSession] havePostedNewOutputNotification] &&
         [[self realParentWindow] broadcastMode] == BROADCAST_OFF &&

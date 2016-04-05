@@ -51,6 +51,8 @@
 #import "ProcessCache.h"
 #import "PseudoTerminalRestorer.h"
 #import "PSMDarkTabStyle.h"
+#import "PSMDarkHighContrastTabStyle.h"
+#import "PSMLightHighContrastTabStyle.h"
 #import "PSMTabStyle.h"
 #import "PSMYosemiteTabStyle.h"
 #import "PTYScrollView.h"
@@ -2432,11 +2434,11 @@ static NSString* TERMINAL_ARRANGEMENT_HIDING_TOOLBELT_SHOULD_RESIZE_WINDOW = @"H
             // Nothing we can do if we're headless.
             return;
         }
-        if ([screens count] < screenNumber) {
+        if ([screens count] <= screenNumber) {
             PtyLog(@"Using screen 0 because the preferred screen isn't around any more");
             screenNumber = 0;
         }
-        screen = [[NSScreen screens] objectAtIndex:screenNumber];
+        screen = screens[screenNumber];
     }
     NSRect frame = [[self window] frame];
     NSRect screenVisibleFrame = [screen visibleFrame];
@@ -5915,17 +5917,23 @@ static NSString* TERMINAL_ARRANGEMENT_HIDING_TOOLBELT_SHOULD_RESIZE_WINDOW = @"H
     iTermPreferencesTabStyle preferredStyle = [iTermPreferences intForKey:kPreferenceKeyTabStyle];
     switch (preferredStyle) {
         case TAB_STYLE_LIGHT:
-            style = [[PSMYosemiteTabStyle alloc] init];
+            style = [[[PSMYosemiteTabStyle alloc] init] autorelease];
             break;
         case TAB_STYLE_DARK:
-            style = [[PSMDarkTabStyle alloc] init];
+            style = [[[PSMDarkTabStyle alloc] init] autorelease];
+            break;
+        case TAB_STYLE_LIGHT_HIGH_CONTRAST:
+            style = [[[PSMLightHighContrastTabStyle alloc] init] autorelease];
+            break;
+        case TAB_STYLE_DARK_HIGH_CONTRAST:
+            style = [[[PSMDarkHighContrastTabStyle alloc] init] autorelease];
             break;
     }
     [_contentView.tabBarControl setStyle:style];
-    [style release];
 }
 
 - (void)hideMenuBar {
+    DLog(@"hideMenuBar called from\n%@", [NSThread callStackSymbols]);
     NSScreen* menubarScreen = nil;
     NSScreen* currentScreen = nil;
 
@@ -5941,8 +5949,10 @@ static NSString* TERMINAL_ARRANGEMENT_HIDING_TOOLBELT_SHOULD_RESIZE_WINDOW = @"H
 
     // If screens have separate spaces (only applicable in Mavericks and later) then all screens have a menu bar.
     if (currentScreen == menubarScreen || (IsMavericksOrLater() && [NSScreen futureScreensHaveSeparateSpaces])) {
+        DLog(@"set flags to auto-hide dock");
         int flags = NSApplicationPresentationAutoHideDock;
         if ([iTermPreferences boolForKey:kPreferenceKeyHideMenuBarInFullscreen]) {
+            DLog(@"Set flags to auto-hide menu bar");
             flags |= NSApplicationPresentationAutoHideMenuBar;
         }
         NSApplicationPresentationOptions presentationOptions =
@@ -5954,6 +5964,7 @@ static NSString* TERMINAL_ARRANGEMENT_HIDING_TOOLBELT_SHOULD_RESIZE_WINDOW = @"H
 }
 
 - (void)showMenuBarHideDock {
+    DLog(@"showMenuBarHideDock called from\n%@", [NSThread callStackSymbols]);
     NSApplicationPresentationOptions presentationOptions =
         [[NSApplication sharedApplication] presentationOptions];
     presentationOptions |= NSApplicationPresentationAutoHideDock;
@@ -5961,8 +5972,8 @@ static NSString* TERMINAL_ARRANGEMENT_HIDING_TOOLBELT_SHOULD_RESIZE_WINDOW = @"H
     [[NSApplication sharedApplication] setPresentationOptions:presentationOptions];
 }
 
-- (void)showMenuBar
-{
+- (void)showMenuBar {
+    DLog(@"showMenuBar called from\n%@", [NSThread callStackSymbols]);
     int flags = NSApplicationPresentationAutoHideDock | NSApplicationPresentationAutoHideMenuBar;
     NSApplicationPresentationOptions presentationOptions =
         [[NSApplication sharedApplication] presentationOptions];
@@ -6327,9 +6338,6 @@ static NSString* TERMINAL_ARRANGEMENT_HIDING_TOOLBELT_SHOULD_RESIZE_WINDOW = @"H
 
 // Push a size change to a session (and on to its shell) but clamps the size to
 // reasonable minimum and maximum limits.
-// Set the session to a size that fits on the screen.
-// Push a size change to a session (and on to its shell) but clamps the size to
-// reasonable minimum and maximum limits.
 - (void)safelySetSessionSize:(PTYSession*)aSession rows:(int)rows columns:(int)columns
 {
     if ([aSession exited]) {
@@ -6377,7 +6385,7 @@ static NSString* TERMINAL_ARRANGEMENT_HIDING_TOOLBELT_SHOULD_RESIZE_WINDOW = @"H
             height -= error;
         }
         PtyLog(@"safelySetSessionSize - set to %dx%d", width, height);
-        [aSession setWidth:width height:height];
+        [aSession setSize:VT100GridSizeMake(width, height)];
         [[aSession scrollview] setHasVerticalScroller:hasScrollbar];
         [[aSession scrollview] setLineScroll:[[aSession textview] lineHeight]];
         [[aSession scrollview] setPageScroll:2*[[aSession textview] lineHeight]];

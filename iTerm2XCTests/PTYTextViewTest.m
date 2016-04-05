@@ -226,6 +226,10 @@
     return NO;
 }
 
+- (BOOL)textViewCanSelectCurrentCommand {
+    return NO;
+}
+
 - (void)textViewCloseWithConfirmation {
 }
 
@@ -363,6 +367,10 @@
 }
 
 - (VT100GridAbsCoordRange)textViewRangeOfLastCommandOutput {
+    return VT100GridAbsCoordRangeMake(0, 0, 0, 0);
+}
+
+- (VT100GridAbsCoordRange)textViewRangeOfCurrentCommand {
     return VT100GridAbsCoordRangeMake(0, 0, 0, 0);
 }
 
@@ -565,7 +573,7 @@
 
     XCTAssert([session setScreenSize:NSMakeRect(0, 0, 200, 200) parent:nil]);
     [session setPreferencesFromAddressBookEntry:profile];
-    [session setWidth:size.width height:size.height];
+    [session setSize:size];
     NSRect theFrame = NSMakeRect(0,
                                  0,
                                  size.width * session.textview.charWidth + MARGIN * 2,

@@ -164,9 +164,6 @@ static BOOL hasBecomeActive = NO;
         [[NSApplication sharedApplication] activateIgnoringOtherApps:YES];
     }
 
-    // set the TERM_PROGRAM environment variable
-    putenv("TERM_PROGRAM=iTerm.app");
-
     [self buildScriptMenu:nil];
 
     // Fix up various user defaults settings.
@@ -224,22 +221,17 @@ static BOOL hasBecomeActive = NO;
             [self showBookmarkWindow:nil];
         }
 
-        if (![[iTermOrphanServerAdopter sharedInstance] haveOrphanServers]) {
-            // We don't respect the startup preference if orphan servers are present.
-            // PseudoTerminalRestorer contains similar logic and will restore sessions.
-            if ([iTermPreferences boolForKey:kPreferenceKeyOpenArrangementAtStartup]) {
-                // Open the saved arrangement at startup.
-                [[iTermController sharedInstance] loadWindowArrangementWithName:[WindowArrangements defaultArrangementName]];
-            } else if (![iTermPreferences boolForKey:kPreferenceKeyOpenNoWindowsAtStartup]) {
-                if (![PseudoTerminalRestorer willOpenWindows]) {
-                    if ([[[iTermController sharedInstance] terminals] count] == 0 &&
-                        ![self isApplescriptTestApp]) {
-                        [self newWindow:nil];
-                    }
-                }
-            }
+        if ([iTermPreferences boolForKey:kPreferenceKeyOpenArrangementAtStartup]) {
+            // Open the saved arrangement at startup.
+            [[iTermController sharedInstance] loadWindowArrangementWithName:[WindowArrangements defaultArrangementName]];
+        } else if (![iTermPreferences boolForKey:kPreferenceKeyOpenNoWindowsAtStartup] &&
+                   ![PseudoTerminalRestorer willOpenWindows] &&
+                   [[[iTermController sharedInstance] terminals] count] == 0 &&
+                   ![self isApplescriptTestApp]) {
+            [self newWindow:nil];
         }
     }
+
     [[iTermController sharedInstance] setStartingUp:NO];
     [PTYSession removeAllRegisteredSessions];
     ranAutoLaunchScript = YES;
