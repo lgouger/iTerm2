@@ -20,6 +20,14 @@
                                                       description:theDescription]; \
 }
 
+#define DEFINE_SETTABLE_BOOL(name, capitalizedName, theDefault, theDescription) \
+DEFINE_BOOL(name, theDefault, theDescription) \
++ (void)set##capitalizedName :(BOOL)newValue { \
+    [[NSUserDefaults standardUserDefaults] setBool:newValue forKey:@#capitalizedName]; \
+    [[NSNotificationCenter defaultCenter] postNotificationName:iTermAdvancedSettingsDidChange \
+                                                        object:nil]; \
+}
+
 #define DEFINE_INT(name, theDefault, theDescription) \
 + (int)name { \
     NSString *theIdentifier = [@#name stringByCapitalizingFirstLetter]; \
@@ -63,6 +71,7 @@ DEFINE_BOOL(useSystemCursorWhenPossible, NO, @"Mouse: Use system cursor icons wh
 DEFINE_BOOL(alwaysAcceptFirstMouse, NO, @"Mouse: Always accept first mouse event on terminal windows.\nThis means clicks will work the same when iTerm2 is active as when it’s inactive.");
 DEFINE_BOOL(doubleReportScrollWheel, NO, @"Mouse: Double-report scroll wheel events to work around tmux scrolling bug.");
 DEFINE_BOOL(stealKeyFocus, NO, @"Mouse: When Focus Follows Mouse is enabled, steal key focus even when inactive.");
+DEFINE_BOOL(cmdClickWhenInactiveInvokesSemanticHistory, NO, @"Mouse: ⌘-click in an active pane while iTerm2 isn't the active app invokes Semantic History.\nBy default, iTerm2 respects the OS standard that ⌘-click in an app that doesn't have keyboard focus behaves like a non-⌘ click that does not raise the window.");
 
 #pragma mark Terminal
 DEFINE_BOOL(traditionalVisualBell, NO, @"Terminal: Visual bell flashes the whole screen, not just a bell icon.");
@@ -104,6 +113,8 @@ DEFINE_BOOL(hideFromDockAndAppSwitcher, NO, @"General: Hide iTerm2 from the dock
 DEFINE_BOOL(disablePotentiallyInsecureEscapeSequences, NO, @"General: Disable potentially insecure escape sequences.\nSome features of iTerm2 expand the surface area for security issues. Consider turning this on when viewing untrusted content. The following custom escape sequences will be disabled: RemoteHost, StealFocus, CurrentDir, SetProfile, CopyToClipboard, EndCopy, File, SetBackgroundImageFile. The following DEC sequences are disabled: DECRQCRA. The following xterm extensions are disabled: Window Title Reporting, Icon Title Reporting.");
 DEFINE_BOOL(performDictionaryLookupOnQuickLook, YES, @"General: Perform dictionary lookups on force press.\nIf this is NO, force press will still preview the Semantic History action; only dictionary lookups can be disabled.");
 DEFINE_BOOL(jiggleTTYSizeOnClearBuffer, NO, @"General: Redraw the screen after the Clear Buffer menu item is selected.\nWhen enabled, the TTY size is briefly changed after clearing the buffer to cause the shell or current app to redraw.");
+DEFINE_BOOL(useAdaptiveFrameRate, NO, @"General: Use adaptive framerate.\nWhen throughput is low, the screen will update at 60 frames per second. When throughput is higher, it will update at 30 frames per second.");
+DEFINE_INT(adaptiveFrameRateThroughputThreshold, 10000, @"General: Throughput threshold for adaptive frame rate.\nIf more than this many bytes per second are received, use the lower frame rate of 30 fps.");
 
 #pragma mark - Semantic History
 DEFINE_BOOL(ignoreHardNewlinesInURLs, NO, @"Semantic History: Ignore hard newlines for the purposes of locating URLs for Semantic History.\nIf a hard newline occurs at the end of a line then cmd-click will not see it all unless this setting is turned on. This is useful for some interactive applications.");
@@ -116,9 +127,11 @@ DEFINE_STRING(pathsToIgnore, @"", @"Semantic History: Paths to ignore for Semant
 DEFINE_BOOL(startDebugLoggingAutomatically, NO, @"Debugging: Start debug logging automatically when iTerm2 is launched.");
 DEFINE_BOOL(logDrawingPerformance, NO, @"Debugging: Log stats about text drawing performance to console.\nUsed for performance testing.");
 
-#pragma mark - Session Restoration
-DEFINE_BOOL(runJobsInServers, YES, @"Session Restoration: Enable session restoration.\nSession restoration runs jobs in separate processes. They will survive crashes, force quits, and upgrades.\nYou must restart iTerm2 for this change to take effect.");
-DEFINE_BOOL(killJobsInServersOnQuit, YES, @"Session Restoration: User-initiated Quit (⌘Q) of iTerm2 will kill all running jobs.\nApplies only when session restoration is on.");
+#pragma mark - Session
+DEFINE_BOOL(runJobsInServers, YES, @"Session: Enable session restoration.\nSession restoration runs jobs in separate processes. They will survive crashes, force quits, and upgrades.\nYou must restart iTerm2 for this change to take effect.");
+DEFINE_BOOL(killJobsInServersOnQuit, YES, @"Session: User-initiated Quit (⌘Q) of iTerm2 will kill all running jobs.\nApplies only when session restoration is on.");
+DEFINE_SETTABLE_BOOL(suppressRestartAnnouncement, SuppressRestartAnnouncement, NO, @"Session: Suppress the Restart Session offer.\nWhen a sessions terminates, it will offer to restart itself. Turn this on to suppress the offer permanently.");
+
 
 #pragma mark - Window
 DEFINE_BOOL(openFileInNewWindows, NO, @"Windows: Open files in new windows, not new tabs.\nThis affects shell scripts opened from Finder, for example.");

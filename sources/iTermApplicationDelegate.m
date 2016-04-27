@@ -123,7 +123,6 @@ static BOOL hasBecomeActive = NO;
     IBOutlet NSMenuItem *irPrev;
     IBOutlet NSMenuItem *windowArrangements_;
 
-    IBOutlet NSMenuItem *secureInput;
     IBOutlet NSMenuItem *showFullScreenTabs;
     IBOutlet NSMenuItem *useTransparency;
     IBOutlet NSMenuItem *maximizePane;
@@ -351,7 +350,8 @@ static BOOL hasBecomeActive = NO;
                                                  name:SUUpdaterWillRestartNotification
                                                object:nil];
 
-    if ([iTermAdvancedSettingsModel runJobsInServers]) {
+    if ([iTermAdvancedSettingsModel runJobsInServers] &&
+        !self.isApplescriptTestApp) {
         [PseudoTerminalRestorer setRestorationCompletionBlock:^{
             [[iTermOrphanServerAdopter sharedInstance] openWindowWithOrphans];
         }];
@@ -467,7 +467,7 @@ static BOOL hasBecomeActive = NO;
 
 /**
  * The following applescript invokes this method before
- * _performStartupActivites is run and prevents it from being run. Scripts can
+ * _performStartupActivities is run and prevents it from being run. Scripts can
  * use it to launch a command in a predictable way if iTerm2 isn't running (and
  * window arrangements won't be restored, etc.)
  *
@@ -476,9 +476,10 @@ static BOOL hasBecomeActive = NO;
  *    // create a terminal if needed, run commands, whatever.
  * end tell
  */
-- (BOOL)application:(NSApplication *)theApplication openFile:(NSString *)filename
-{
+- (BOOL)application:(NSApplication *)theApplication openFile:(NSString *)filename {
+    DLog(@"application:%@ openFile:%@", theApplication, filename);
     if ([filename hasSuffix:@".itermcolors"]) {
+        DLog(@"Importing color presets from %@", filename);
         if ([[PreferencePanel sharedInstance] importColorPresetFromFile:filename]) {
             NSRunAlertPanel(@"Colors Scheme Imported", @"The color scheme was imported and added to presets. You can find it under Preferences>Profiles>Colors>Load Presets….", @"OK", nil, nil);
         }
@@ -512,6 +513,11 @@ static BOOL hasBecomeActive = NO;
 
 - (BOOL)isApplescriptTestApp {
     return [[[NSBundle mainBundle] bundleIdentifier] containsString:@"applescript"];
+}
+
+- (BOOL)isRunningOnTravis {
+    NSString *travis = [[[NSProcessInfo processInfo] environment] objectForKey:@"TRAVIS"];
+    return [travis isEqualToString:@"true"];
 }
 
 - (BOOL)applicationOpenUntitledFile:(NSApplication *)theApplication
@@ -1139,6 +1145,24 @@ static BOOL hasBecomeActive = NO;
     return -1;
 }
 
+- (void)setSecureInput:(BOOL)secure {
+    DLog(@"Before: IsSecureEventInputEnabled returns %d", (int)IsSecureEventInputEnabled());
+    if (secure) {
+        OSErr err = EnableSecureEventInput();
+        DLog(@"EnableSecureEventInput err=%d", (int)err);
+        if (err) {
+            NSLog(@"EnableSecureEventInput failed with error %d", (int)err);
+        }
+    } else {
+        OSErr err = DisableSecureEventInput();
+        DLog(@"DisableSecureEventInput err=%d", (int)err);
+        if (err) {
+            NSLog(@"DisableSecureEventInput failed with error %d", (int)err);
+        }
+    }
+    DLog(@"After: IsSecureEventInputEnabled returns %d", (int)IsSecureEventInputEnabled());
+}
+
 - (BOOL)warnBeforeMultiLinePaste {
     if ([iTermWarning warningHandler]) {
         // In a test.
@@ -1160,24 +1184,13 @@ static BOOL hasBecomeActive = NO;
     [self updateUseTransparencyMenuItem];
 }
 
-- (IBAction)toggleSecureInput:(id)sender
-{
+- (IBAction)toggleSecureInput:(id)sender {
     // Set secureInputDesired_ to the opposite of the current state.
-    secureInputDesired_ = [secureInput state] == NSOffState;
+    secureInputDesired_ = !IsSecureEventInputEnabled();
+    DLog(@"toggleSecureInput called. Setting desired to %d", (int)secureInputDesired_);
 
     // Try to set the system's state of secure input to the desired state.
-    if (secureInputDesired_) {
-        if (EnableSecureEventInput() != noErr) {
-            NSLog(@"Failed to enable secure input.");
-        }
-    } else {
-        if (DisableSecureEventInput() != noErr) {
-            NSLog(@"Failed to disable secure input.");
-        }
-    }
-
-    // Set the state of the control to the new true state.
-    [secureInput setState:(secureInputDesired_ && IsSecureEventInputEnabled()) ? NSOnState : NSOffState];
+    [self setSecureInput:secureInputDesired_];
 
     // Save the preference, independent of whether it succeeded or not.
     [[NSUserDefaults standardUserDefaults] setObject:[NSNumber numberWithBool:secureInputDesired_]
@@ -1187,12 +1200,9 @@ static BOOL hasBecomeActive = NO;
 - (void)applicationDidBecomeActive:(NSNotification *)aNotification {
     hasBecomeActive = YES;
     if (secureInputDesired_) {
-        if (EnableSecureEventInput() != noErr) {
-            NSLog(@"Failed to enable secure input.");
-        }
+        DLog(@"Application becoming active. Enable secure input.");
+        [self setSecureInput:YES];
     }
-    // Set the state of the control to the new true state.
-    [secureInput setState:(secureInputDesired_ && IsSecureEventInputEnabled()) ? NSOnState : NSOffState];
 
     // If focus follows mouse is on, find the textview under the cursor and make it first responder.
     // Make its window key.
@@ -1221,15 +1231,11 @@ static BOOL hasBecomeActive = NO;
     }
 }
 
-- (void)applicationDidResignActive:(NSNotification *)aNotification
-{
+- (void)applicationDidResignActive:(NSNotification *)aNotification {
     if (secureInputDesired_) {
-        if (DisableSecureEventInput() != noErr) {
-            NSLog(@"Failed to disable secure input.");
-        }
+        DLog(@"Application resigning active. Disabling secure input.");
+        [self setSecureInput:NO];
     }
-    // Set the state of the control to the new true state.
-    [secureInput setState:(secureInputDesired_ && IsSecureEventInputEnabled()) ? NSOnState : NSOffState];
 }
 
 - (void)application:(NSApplication *)app willEncodeRestorableState:(NSCoder *)coder {
@@ -1248,6 +1254,9 @@ static BOOL hasBecomeActive = NO;
 }
 
 - (void)application:(NSApplication *)app didDecodeRestorableState:(NSCoder *)coder {
+    if (self.isApplescriptTestApp) {
+        return;
+    }
     NSDictionary *screenCharState = [coder decodeObjectForKey:kScreenCharRestorableStateKey];
     if (screenCharState) {
         ScreenCharDecodeRestorableState(screenCharState);
@@ -1506,8 +1515,7 @@ static BOOL hasBecomeActive = NO;
     return nil;
 }
 
-- (BOOL)validateMenuItem:(NSMenuItem *)menuItem
-{
+- (BOOL)validateMenuItem:(NSMenuItem *)menuItem {
     if ([menuItem action] == @selector(toggleUseBackgroundPatternIndicator:)) {
       [menuItem setState:[self useBackgroundPatternIndicator]];
       return YES;
@@ -1551,6 +1559,9 @@ static BOOL hasBecomeActive = NO;
         return YES;
     } else if ([menuItem action] == @selector(showTipOfTheDay:)) {
         return ![[iTermTipController sharedInstance] showingTip];
+    } else if ([menuItem action] == @selector(toggleSecureInput:)) {
+        menuItem.state = IsSecureEventInputEnabled() ? NSOnState : NSOffState;
+        return YES;
     } else {
         return YES;
     }

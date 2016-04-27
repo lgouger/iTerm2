@@ -131,5 +131,10 @@
 + (BOOL)performDictionaryLookupOnQuickLook;
 + (NSString *)pathsToIgnore;
 + (BOOL)jiggleTTYSizeOnClearBuffer;
++ (BOOL)cmdClickWhenInactiveInvokesSemanticHistory;
++ (BOOL)suppressRestartAnnouncement;
++ (void)setSuppressRestartAnnouncement:(BOOL)value;
++ (BOOL)useAdaptiveFrameRate;
++ (int)adaptiveFrameRateThroughputThreshold;
 
 @end

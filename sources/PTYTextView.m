@@ -38,6 +38,7 @@
 #import "MovePaneController.h"
 #import "MovingAverage.h"
 #import "NSColor+iTerm.h"
+#import "NSData+iTerm.h"
 #import "NSEvent+iTerm.h"
 #import "NSImage+iTerm.h"
 #import "NSMutableAttributedString+iTerm.h"
@@ -751,26 +752,16 @@ static const int kDragThreshold = 3;
     return MAX(visible.size.height - usablePixels + VMARGIN, VMARGIN);  // Never have less than VMARGIN excess, but it can be more (if another tab has a bigger font)
 }
 
-// We override this method since both refresh and window resize can conflict
-// resulting in this happening twice So we do not allow the size to be set
-// larger than what the data source can fill.
-//
-// TODO: This is a freaking horror show.
-// When the session view's frame is set, that triggers an autoresize of the scrollview, which
-// triggers an autoresize of this view, which manually resizes the TextViewWrapper (self.superview),
-// which triggers an autoresize of THIS VIEW AGAIN. WTF.
-// I'm not sure if that horrible flow happens in real life but it does happen in the unit tests.
-- (void)setFrameSize:(NSSize)frameSize {
+- (CGFloat)desiredHeight {
     // Force the height to always be correct
-    frameSize.height = ([_dataSource numberOfLines] * _lineHeight +
-                        [self excess] +
-                        _drawingHelper.numberOfIMELines * _lineHeight);
-    [super setFrameSize:frameSize];
+    return ([_dataSource numberOfLines] * _lineHeight +
+            [self excess] +
+            _drawingHelper.numberOfIMELines * _lineHeight);
+}
 
-    frameSize.height += VMARGIN;  // This causes a margin to be left at the top
-    [[self superview] setFrameSize:frameSize];
+- (void)setFrameSize:(NSSize)newSize {
+    [super setFrameSize:newSize];
     [self recomputeBadgeLabel];
-    [_delegate textViewSizeDidChange];
 }
 
 // This exists to work around an apparent OS bug described in issue 2690. Under some circumstances
@@ -832,26 +823,6 @@ static const int kDragThreshold = 3;
 
 - (BOOL)_isAnythingBlinking {
     return [self isCursorBlinking] || (_blinkAllowed && [self _isTextBlinking]);
-}
-
-// Grow or shrink the height of the frame if the number of lines in the data
-// source + IME has changed.
-- (void)resizeFrameIfNeeded {
-    // Check if the frame size needs to grow or shrink.
-    const CGFloat height = [_dataSource numberOfLines] * _lineHeight;
-    NSRect frame = [self frame];
-    const CGFloat excess = [self excess];
-    const long long numberOfLinesAvailable =
-        height + excess + _drawingHelper.numberOfIMELines * _lineHeight;
-    if (numberOfLinesAvailable != (long long) frame.size.height) {
-        // Grow the frame
-        // Add VMARGIN to include top margin.
-        frame.size.height =
-            height + excess + _drawingHelper.numberOfIMELines * _lineHeight + VMARGIN;
-        [[self superview] setFrame:frame];
-        NSAccessibilityPostNotification(self,
-                                        NSAccessibilityRowCountChangedNotification);
-    }
 }
 
 - (void)handleScrollbackOverflow:(int)scrollbackOverflow userScroll:(BOOL)userScroll {
@@ -933,7 +904,7 @@ static const int kDragThreshold = 3;
     // Get the number of lines that have disappeared if scrollback buffer is full.
     int scrollbackOverflow = [_dataSource scrollbackOverflow];
     [_dataSource resetScrollbackOverflow];
-    [self resizeFrameIfNeeded];
+    [_delegate textViewResizeFrameIfNeeded];
 
     // Perform adjustments if lines were lost from the head of the buffer.
     BOOL userScroll = [(PTYScroller*)([[self enclosingScrollView] verticalScroller]) userScroll];
@@ -1661,7 +1632,7 @@ static const int kDragThreshold = 3;
         changed = [self setCursor:[iTermMouseCursor mouseCursorOfType:iTermMouseCursorTypeIBeam]];
     }
     if (changed) {
-        [[_delegate scrollview] setDocumentCursor:cursor_];
+        [self.enclosingScrollView setDocumentCursor:cursor_];
     }
 }
 
@@ -1684,9 +1655,9 @@ static const int kDragThreshold = 3;
 }
 
 // Update range of underlined chars indicating cmd-clicakble url.
-- (void)updateUnderlinedURLs:(NSEvent *)event
-{
-    if (([event modifierFlags] & NSCommandKeyMask) && self.window.isKeyWindow) {
+- (void)updateUnderlinedURLs:(NSEvent *)event {
+    if (([event modifierFlags] & NSCommandKeyMask) && (self.window.isKeyWindow ||
+                                                       [iTermAdvancedSettingsModel cmdClickWhenInactiveInvokesSemanticHistory])) {
         NSPoint screenPoint = [NSEvent mouseLocation];
         NSRect windowRect = [[self window] convertRectFromScreen:NSMakeRect(screenPoint.x,
                                                                             screenPoint.y,
@@ -1968,7 +1939,7 @@ static const int kDragThreshold = 3;
         // Clicking in an inactive pane with focus follows mouse makes it active.
         // Becuase of how FFM works, this would only happen if another app were key.
         // See issue 3163.
-        DLog(@"Click on inactive pain with focus follows mouse");
+        DLog(@"Click on inactive pane with focus follows mouse");
         _mouseDownWasFirstMouse = YES;
         [[self window] makeFirstResponder:self];
         return NO;
@@ -2026,8 +1997,10 @@ static const int kDragThreshold = 3;
             }
         } else if ([NSApp keyWindow] != [self window]) {
             // A cmd-click in an active session in a non-key window acts like a click without cmd.
+            // This can be changed in advanced settings so cmd-click will still invoke semantic
+            // history even for non-key windows.
             DLog(@"Cmd-click in active session in non-key window");
-            cmdPressed = NO;
+            cmdPressed = [iTermAdvancedSettingsModel cmdClickWhenInactiveInvokesSemanticHistory];
         }
     }
     if (([event modifierFlags] & kDragPaneModifiers) == kDragPaneModifiers) {
@@ -2182,7 +2155,10 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
         return;
     }
     const BOOL cmdActuallyPressed = (([event modifierFlags] & NSCommandKeyMask) != 0);
-    const BOOL cmdPressed = cmdActuallyPressed && !_mouseDownWasFirstMouse;
+    // Make an exception to the first-mouse rule when cmd-click is set to always invoke
+    // semantic history.
+    const BOOL cmdPressed = cmdActuallyPressed && (!_mouseDownWasFirstMouse ||
+                                                   [iTermAdvancedSettingsModel cmdClickWhenInactiveInvokesSemanticHistory]);
     if (mouseDown == NO) {
         DLog(@"Returning from mouseUp because the mouse was never down.");
         return;
@@ -3489,7 +3465,10 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
 }
 
 - (IBAction)pasteBase64Encoded:(id)sender {
-    [_delegate textViewPasteFileWithBase64Encoding];
+    NSData *data = [[NSPasteboard generalPasteboard] dataForFirstFile];
+    if (data) {
+        [_delegate pasteString:[data stringWithBase64EncodingWithLineBreak:@"\r"]];
+    }
 }
 
 - (BOOL)_broadcastToggleable
@@ -3592,7 +3571,7 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
         return [_dataSource textViewRangeOfOutputForCommandMark:[item representedObject]].start.x != -1;
     }
     if ([item action] == @selector(pasteBase64Encoded:)) {
-        return [_delegate textViewCanPasteFile];
+        return [[NSPasteboard generalPasteboard] dataForFirstFile] != nil;
     }
 
     SEL theSel = [item action];
@@ -5200,6 +5179,11 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
     [self setNeedsDisplay:YES];
 }
 
+- (void)setTransparencyAffectsOnlyDefaultBackgroundColor:(BOOL)value {
+    _drawingHelper.transparencyAffectsOnlyDefaultBackgroundColor = value;
+    [self setNeedsDisplay:YES];
+}
+
 - (float)blend {
     return _drawingHelper.blend;
 }
@@ -5275,23 +5259,23 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
     }
 }
 
-- (void)highlightMarkOnLine:(int)line {
+- (void)highlightMarkOnLine:(int)line hasErrorCode:(BOOL)hasErrorCode {
     CGFloat y = line * _lineHeight;
-    NSView *blue = [[[NSView alloc] initWithFrame:NSMakeRect(0, y, self.frame.size.width, _lineHeight)] autorelease];
-    [blue setWantsLayer:YES];
-    [self addSubview:blue];
+    NSView *highlightingView = [[[NSView alloc] initWithFrame:NSMakeRect(0, y, self.frame.size.width, _lineHeight)] autorelease];
+    [highlightingView setWantsLayer:YES];
+    [self addSubview:highlightingView];
 
     // Set up layer's initial state
-    blue.layer.backgroundColor = [[NSColor blueColor] CGColor];
-    blue.layer.opaque = NO;
-    blue.layer.opacity = 0.75;
+    highlightingView.layer.backgroundColor = hasErrorCode ? [[NSColor redColor] CGColor] : [[NSColor blueColor] CGColor];
+    highlightingView.layer.opaque = NO;
+    highlightingView.layer.opacity = 0.75;
 
     // Animate it out, removing from superview when complete.
     [CATransaction begin];
-    [blue retain];
+    [highlightingView retain];
     [CATransaction setCompletionBlock:^{
-        [blue removeFromSuperview];
-        [blue release];
+        [highlightingView removeFromSuperview];
+        [highlightingView release];
     }];
     const NSTimeInterval duration = 0.75;
 
@@ -5302,7 +5286,7 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
     animation.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionLinear];
     animation.removedOnCompletion = NO;
     animation.fillMode = kCAFillModeForwards;
-    [blue.layer addAnimation:animation forKey:@"opacity"];
+    [highlightingView.layer addAnimation:animation forKey:@"opacity"];
 
     [CATransaction commit];
 }

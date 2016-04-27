@@ -3319,7 +3319,7 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
                           kInlineFileHeightUnits: @(heightUnits),
                           kInlineFilePreserveAspectRatio: @(preserveAspectRatio),
                           kInlineFileBase64String: [NSMutableString string],
-                          kInilineFileInset: [NSValue valueWithEdgeInsets:inset] } retain];
+                          kInilineFileInset: [NSValue futureValueWithEdgeInsets:inset] } retain];
 }
 
 - (void)appendImageAtCursorWithName:(NSString *)name
@@ -3455,7 +3455,7 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
                                    height:[inlineFileInfo_[kInlineFileHeight] intValue]
                                     units:(VT100TerminalUnits)[inlineFileInfo_[kInlineFileHeightUnits] intValue]
                       preserveAspectRatio:[inlineFileInfo_[kInlineFilePreserveAspectRatio] boolValue]
-                                    inset:[inlineFileInfo_[kInilineFileInset] edgeInsetsValue]
+                                    inset:[inlineFileInfo_[kInilineFileInset] futureEdgeInsetsValue]
                                     image:image
                                      data:data];
         [inlineFileInfo_ release];
@@ -3630,6 +3630,12 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
 
 - (void)terminalAbortCommand {
     DLog(@"FinalTerm: terminalAbortCommand");
+    VT100ScreenMark *screenMark = [self lastCommandMark];
+    if (screenMark) {
+        DLog(@"Removing last command mark %@", screenMark);
+        [intervalTree_ removeObject:screenMark];
+    }
+
     commandStartX_ = commandStartY_ = -1;
     [delegate_ screenCommandDidEndWithRange:VT100GridCoordRangeMake(-1, -1, -1, -1)];
 }

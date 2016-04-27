@@ -109,6 +109,10 @@ NSString *const kPreferenceKeyPasteSpecialConvertUnicodePunctuation = @"ConvertU
 NSString *const kPreferenceKeyPasteSpecialConvertDosNewlines = @"ConvertDosNewlines";
 NSString *const kPreferenceKeyPasteSpecialRemoveControlCodes = @"RemoveControlCodes";
 NSString *const kPreferenceKeyPasteSpecialBracketedPasteMode = @"BracketedPasteMode";
+NSString *const kPreferencesKeyPasteSpecialUseRegexSubstitution = @"PasteSpecialUseRegexSubstitution";
+NSString *const kPreferencesKeyPasteSpecialRegex = @"PasteSpecialRegex";
+NSString *const kPreferencesKeyPasteSpecialSubstitution = @"PasteSpecialSubstitution";
+NSString *const kPreferenceKeyLeftTabBarWidth = @"LeftTabBarWidth";
 
 NSString *const kPreferenceKeyPasteWarningNumberOfSpacesPerTab = @"PasteTabToStringTabStopSize";
 
@@ -257,9 +261,13 @@ static NSMutableDictionary *gObservers;
                   kPreferenceKeyPasteSpecialConvertDosNewlines: @YES,
                   kPreferenceKeyPasteSpecialRemoveControlCodes: @YES,
                   kPreferenceKeyPasteSpecialBracketedPasteMode: @YES,
+                  kPreferencesKeyPasteSpecialUseRegexSubstitution: @NO,
+                  kPreferencesKeyPasteSpecialRegex: @"",
+                  kPreferencesKeyPasteSpecialSubstitution: @"",
 
                   kPreferenceKeyPasteWarningNumberOfSpacesPerTab: @4,
-                  kPreferenceKeyShowFullscreenTabBar: @YES
+                  kPreferenceKeyShowFullscreenTabBar: @YES,
+                  kPreferenceKeyLeftTabBarWidth: @150,
               };
         [dict retain];
     }
