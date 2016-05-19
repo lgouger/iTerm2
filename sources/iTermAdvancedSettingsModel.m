@@ -64,6 +64,12 @@ DEFINE_FLOAT(tabAutoShowHoldTime, 1.0, @"Tabs: How long in seconds to show tabs 
 DEFINE_BOOL(allowDragOfTabIntoNewWindow, YES, @"Tabs: Allow a tab to be dragged and dropped outside any existing tab bar to create a new window.");
 
 #pragma mark Mouse
+DEFINE_STRING(alternateMouseScrollStringForUp, @"",
+              @"Mouse: Scroll wheel up sends the specified text when in alternate screen mode.\n"
+              @"The value should use Vim syntax, such as \\e for escape.");
+DEFINE_STRING(alternateMouseScrollStringForDown, @"",
+              @"Mouse: Scroll wheel down sends the specified text when in alternate screen mode.\n"
+              @"The value should use Vim syntax, such as \\e for escape.");
 DEFINE_BOOL(alternateMouseScroll, NO, @"Mouse: Scroll wheel sends arrow keys when in alternate screen mode.");
 DEFINE_BOOL(pinchToChangeFontSizeDisabled, NO, @"Mouse: Disable changing font size in response to a pinch gesture.");
 DEFINE_BOOL(useSystemCursorWhenPossible, NO, @"Mouse: Use system cursor icons when possible.");
@@ -162,8 +168,8 @@ DEFINE_BOOL(noSyncReplaceProfileWarning, NO, @"Warnings: Suppress warning about 
 
 #pragma mark Pasteboard
 DEFINE_BOOL(trimWhitespaceOnCopy, YES, @"Pasteboard: Trim whitespace when copying to pasteboard.");
-DEFINE_INT(quickPasteBytesPerCall, 1024, @"Pasteboard: Number of bytes to paste in each chunk when pasting normally.");
-DEFINE_FLOAT(quickPasteDelayBetweenCalls, 0.01, @"Pasteboard: Delay in seconds between chunks when pasting normally.")
+DEFINE_INT(quickPasteBytesPerCall, 667, @"Pasteboard: Number of bytes to paste in each chunk when pasting normally.");
+DEFINE_FLOAT(quickPasteDelayBetweenCalls, 0.01530456, @"Pasteboard: Delay in seconds between chunks when pasting normally.")
 DEFINE_INT(slowPasteBytesPerCall, 16, @"Pasteboard: Number of bytes to paste in each chunk when pasting slowly.");
 DEFINE_FLOAT(slowPasteDelayBetweenCalls, 0.125, @"Pasteboard: Delay in seconds between chunks when pasting slowly");
 DEFINE_BOOL(copyWithStylesByDefault, NO, @"Pasteboard: Copy to pasteboard on selection includes color and font style.");
@@ -191,5 +197,6 @@ DEFINE_BOOL(useAdaptiveFrameRate, NO, @"Experimental Features: Use adaptive fram
 DEFINE_INT(adaptiveFrameRateThroughputThreshold, 10000, @"Experimental Features: Throughput threshold for adaptive frame rate.\nIf more than this many bytes per second are received, use the lower frame rate of 30 fps.");
 DEFINE_BOOL(hotkeyWindowIgnoresSpotlight, NO, @"Experimental Features: Prevent opening Spotlight from auto-closing the hotkey window.\nThis feature is experimental and may have unexpected side-effects.");
 DEFINE_BOOL(tabTitlesUseSmartTruncation, NO, @"Experimental Features: Use “smart truncation” for tab titles.\nIf a tab‘s title is too long to fit, ellipsize the start of the title if more tabs have unique suffixes than prefixes in a given window.");
+DEFINE_BOOL(experimentalKeyHandling, NO, @"Experimental Features: Improved support for input method editors like AquaSKK.");
 
 @end

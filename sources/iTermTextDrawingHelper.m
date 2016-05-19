@@ -470,10 +470,6 @@ extern int CGContextGetFontSmoothingStyle(CGContextRef);
                                  leftMargin.origin.y + verticalSpacing,
                                  MARGIN,
                                  _cellSizeWithoutSpacing.height);
-        NSBezierPath *path;
-        
-        path = [NSBezierPath bezierPath];
-        
         const CGFloat kMaxHeight = 15;
         const CGFloat kMinMargin = 3;
         const CGFloat kMargin = MAX(kMinMargin, (_cellSizeWithoutSpacing.height - kMaxHeight) / 2.0);
@@ -482,7 +478,7 @@ extern int CGContextGetFontSmoothingStyle(CGContextRef);
         NSPoint bottom = NSMakePoint(NSMinX(rect), NSMaxY(rect) - kMargin);
 
         [[NSColor blackColor] set];
-        path = [NSBezierPath bezierPath];
+        NSBezierPath *path = [NSBezierPath bezierPath];
         [path moveToPoint:NSMakePoint(bottom.x, bottom.y)];
         [path lineToPoint:NSMakePoint(right.x, right.y)];
         [path setLineWidth:1.0];
@@ -553,22 +549,22 @@ extern int CGContextGetFontSmoothingStyle(CGContextRef);
     if (timeDelta < day * 180) {
         // More than 180 days ago: include year
         // I tried using 365 but it was pretty confusing to see tomorrow's date.
-        [fmt setDateFormat:[NSDateFormatter dateFormatFromTemplate:@"yyyyMMMd hh:mm:ss"
+        [fmt setDateFormat:[NSDateFormatter dateFormatFromTemplate:@"yyyyMMMd jj:mm:ss"
                                                            options:0
                                                             locale:[NSLocale currentLocale]]];
     } else if (timeDelta < day * 6) {
         // 6 days to 180 days ago: include date without year
-        [fmt setDateFormat:[NSDateFormatter dateFormatFromTemplate:@"MMMd hh:mm:ss"
+        [fmt setDateFormat:[NSDateFormatter dateFormatFromTemplate:@"MMMd jj:mm:ss"
                                                            options:0
                                                             locale:[NSLocale currentLocale]]];
     } else if (timeDelta < day) {
         // 1 day to 6 days ago: include day of week
-        [fmt setDateFormat:[NSDateFormatter dateFormatFromTemplate:@"EEE hh:mm:ss"
+        [fmt setDateFormat:[NSDateFormatter dateFormatFromTemplate:@"EEE jj:mm:ss"
                                                            options:0
                                                             locale:[NSLocale currentLocale]]];
     } else {
         // In last 24 hours, just show time
-        [fmt setDateFormat:[NSDateFormatter dateFormatFromTemplate:@"hh:mm:ss"
+        [fmt setDateFormat:[NSDateFormatter dateFormatFromTemplate:@"jj:mm:ss"
                                                            options:0
                                                             locale:[NSLocale currentLocale]]];
     }

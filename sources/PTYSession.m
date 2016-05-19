@@ -184,7 +184,13 @@ static const NSTimeInterval kBackgroundUpdateCadence = 1;
     iTermSessionViewDelegate>
 @property(nonatomic, retain) Interval *currentMarkOrNotePosition;
 @property(nonatomic, retain) TerminalFile *download;
-@property(nonatomic, readwrite) NSTimeInterval lastOutput;
+
+// Time since reference date when last output was received. New output in a brief period after the
+// session is resized is ignored to avoid making the spinner spin due to resizing.
+@property(nonatomic) NSTimeInterval lastOutputIgnoringOutputAfterResizing;
+
+// Time the window was last resized at.
+@property(nonatomic) NSTimeInterval lastResize;
 @property(atomic, assign) PTYSessionTmuxMode tmuxMode;
 @property(nonatomic, copy) NSString *lastDirectory;
 @property(nonatomic, retain) VT100RemoteHost *lastRemoteHost;  // last remote host at time of setting current directory
@@ -273,10 +279,6 @@ static const NSTimeInterval kBackgroundUpdateCadence = 1;
 
     // Time session was created
     NSDate *_creationDate;
-
-    // After receiving new output, we keep running the updateDisplay timer for a few seconds to catch
-    // changes in job name.
-    NSTimeInterval _updateDisplayUntil;
 
     // If not nil, we're aggregating text to append to a pasteboard. The pasteboard will be
     // updated when this is set to nil.
@@ -401,7 +403,7 @@ static const NSTimeInterval kBackgroundUpdateCadence = 1;
         static const int kMaxOutstandingExecuteCalls = 4;
         _executionSemaphore = dispatch_semaphore_create(kMaxOutstandingExecuteCalls);
 
-        _lastOutput = _lastInput;
+        _lastOutputIgnoringOutputAfterResizing = _lastInput;
         _lastUpdate = _lastInput;
         _pasteHelper = [[iTermPasteHelper alloc] init];
         _pasteHelper.delegate = self;
@@ -1151,6 +1153,7 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (void)setSize:(VT100GridSize)size {
+    self.lastResize = [NSDate timeIntervalSinceReferenceDate];
     DLog(@"Set session %@ to %@", self, VT100GridSizeDescription(size));
     [_screen setSize:size];
     [_shell setSize:size];
@@ -1564,6 +1567,8 @@ ITERM_WEAKLY_REFERENCEABLE
         _screen.terminal = _terminal;
         _terminal.delegate = _screen;
         _shell.paused = NO;
+        _view.findViewController.delegate = self;
+
         [_view autorelease];  // This balances a retain in -terminate prior to calling -makeTerminationUndoable
         return YES;
     } else {
@@ -1782,13 +1787,19 @@ ITERM_WEAKLY_REFERENCEABLE
     STOPWATCH_LAP(executing);
 }
 
+- (BOOL)haveResizedRecently {
+    const NSTimeInterval kGracePeriodAfterResize = 0.25;
+    return [NSDate timeIntervalSinceReferenceDate] < _lastResize + kGracePeriodAfterResize;
+}
+
 - (void)finishedHandlingNewOutputOfLength:(int)length {
     DLog(@"Session %@ is processing", self.name);
-    _lastOutput = [NSDate timeIntervalSinceReferenceDate];
+    if (![self haveResizedRecently]) {
+        _lastOutputIgnoringOutputAfterResizing = [NSDate timeIntervalSinceReferenceDate];
+    }
     _newOutput = YES;
 
     // Make sure the screen gets redrawn soonish
-    _updateDisplayUntil = [NSDate timeIntervalSinceReferenceDate] + 10;
     self.active = YES;
     [[ProcessCache sharedInstance] notifyNewOutput];
 }
@@ -2019,6 +2030,26 @@ ITERM_WEAKLY_REFERENCEABLE
                                    controlSize:NSRegularControlSize
                                  scrollerStyle:scrollerStyle];
     return outerSize;
+}
+
+- (BOOL)setScrollBarVisible:(BOOL)visible style:(NSScrollerStyle)style {
+    BOOL changed = NO;
+    if (self.view.scrollview.hasVerticalScroller != visible) {
+        changed = YES;
+    }
+    [[self.view scrollview] setHasVerticalScroller:visible];
+
+    if (self.view.scrollview.scrollerStyle != style) {
+        changed = YES;
+    }
+    [[self.view scrollview] setScrollerStyle:style];
+    [[self textview] updateScrollerForBackgroundColor];
+
+    if (changed) {
+        [self.view updateLayout];
+    }
+
+    return changed;
 }
 
 - (int)_keyBindingActionForEvent:(NSEvent*)event
@@ -2751,13 +2782,13 @@ ITERM_WEAKLY_REFERENCEABLE
 // You're processing if data was read off the socket in the last "idleTimeSeconds".
 - (BOOL)isProcessing {
     NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
-    return (now - _lastOutput) < _idleTime;
+    return (now - _lastOutputIgnoringOutputAfterResizing) < _idleTime;
 }
 
 // You're idle if it's been one second since isProcessing was true.
 - (BOOL)isIdle {
     NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
-    return (now - _lastOutput) > (_idleTime + 1);
+    return (now - _lastOutputIgnoringOutputAfterResizing) > (_idleTime + 1);
 }
 
 - (NSString*)formattedName:(NSString*)base {
@@ -3365,15 +3396,7 @@ ITERM_WEAKLY_REFERENCEABLE
 - (void)updateDisplay {
     DLog(@"updateDisplay session=%@", self);
     _timerRunning = YES;
-    BOOL active = !self.isIdle;
-
-    if (![NSApp isActive] &&
-        _updateDisplayUntil &&
-        [NSDate timeIntervalSinceReferenceDate] < _updateDisplayUntil) {
-        // We're still in the time window after the last output where updates are needed.
-        active = YES;
-    }
-
+    
     // Set attributes of tab to indicate idle, processing, etc.
     if (![self isTmuxGateway]) {
         [_delegate updateLabelAttributes];
@@ -7067,7 +7090,7 @@ ITERM_WEAKLY_REFERENCEABLE
         return;
     }
     iTermAnnouncementViewController *announcement =
-        [iTermAnnouncementViewController announcementWithTitle:@"This account's Shell Integration scripts are out of date."
+        [iTermAnnouncementViewController announcementWithTitle:@"This account’s Shell Integration scripts are out of date."
                                                          style:kiTermAnnouncementViewStyleWarning
                                                    withActions:@[ @"Upgrade", @"Silence Warning" ]
                                                     completion:^(int selection) {

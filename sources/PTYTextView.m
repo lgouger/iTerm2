@@ -142,7 +142,20 @@ static const int kDragThreshold = 3;
     double _charHeightWithoutSpacing;
 
     // NSTextInputClient support
-    BOOL _inputMethodIsInserting;
+    
+    // When an event is passed to -handleEvent, it may get dispatched to -insertText:replacementRange:
+    // or -doCommandBySelector:. If one of these methods processes the input by sending it to the
+    // delegate then this will be set to YES to prevent it from being handled twice.
+    BOOL _keyPressHandled;
+    
+    // This is used by the experimental feature guarded by [iTermAdvancedSettingsModel experimentalKeyHandling].
+    // Indicates if marked text existed before invoking -handleEvent: for a keypress. If the
+    // input method handles the keypress and causes the IME to finish then the keypress must not
+    // be passed to the delegate. -insertText:replacementRange: and -doCommandBySelector: need to
+    // know if marked text existed prior to -handleEvent so they can avoid passing the event to the
+    // delegate in this case.
+    BOOL _hadMarkedTextBeforeHandlingKeypressEvent;
+
     NSDictionary *_markedTextAttributes;
 
     PTYFontInfo *_primaryFont;
@@ -1300,6 +1313,12 @@ static const int kDragThreshold = 3;
     return [super performKeyEquivalent:theEvent];
 }
 
+// I haven't figured out how to test this code automatically, but a few things to try:
+// * Repeats in US
+// * Repeats in AquaSKK's Hiragana
+// * Press L in AquaSKK's Hiragana to enter AquaSKK's ASCII
+// * "special" keys, like Enter which go through doCommandBySelector
+// * Repeated special keys
 - (void)keyDown:(NSEvent*)event {
     [_altScreenMouseScrollInferer keyDown:event];
     if (![_delegate textViewShouldAcceptKeyDownEvent:event]) {
@@ -1336,13 +1355,13 @@ static const int kDragThreshold = 3;
     }
     unsigned int modflag = [event modifierFlags];
     unsigned short keyCode = [event keyCode];
-    BOOL prev = [self hasMarkedText];
+    _hadMarkedTextBeforeHandlingKeypressEvent = [self hasMarkedText];
     BOOL rightAltPressed = (modflag & NSRightAlternateKeyMask) == NSRightAlternateKeyMask;
     BOOL leftAltPressed = (modflag & NSAlternateKeyMask) == NSAlternateKeyMask && !rightAltPressed;
 
     _keyIsARepeat = [event isARepeat];
     DLog(@"PTYTextView keyDown modflag=%d keycode=%d", modflag, (int)keyCode);
-    DLog(@"prev=%d", (int)prev);
+    DLog(@"_hadMarkedTextBeforeHandlingKeypressEvent=%d", (int)_hadMarkedTextBeforeHandlingKeypressEvent);
     DLog(@"hasActionableKeyMappingForEvent=%d", (int)[delegate hasActionableKeyMappingForEvent:event]);
     DLog(@"modFlag & (NSNumericPadKeyMask | NSFUnctionKeyMask)=%lu", (modflag & (NSNumericPadKeyMask | NSFunctionKeyMask)));
     DLog(@"charactersIgnoringModififiers length=%d", (int)[[event charactersIgnoringModifiers] length]);
@@ -1368,7 +1387,7 @@ static const int kDragThreshold = 3;
     }
 
     // Should we process the event immediately in the delegate?
-    if ((!prev) &&
+    if (!_hadMarkedTextBeforeHandlingKeypressEvent &&
         ([delegate hasActionableKeyMappingForEvent:event] ||       // delegate will do something useful
          (modflag & (NSNumericPadKeyMask | NSFunctionKeyMask)) ||  // is an arrow key, f key, etc.
          ([[event charactersIgnoringModifiers] length] > 0 &&      // Will send Meta/Esc+ (length is 0 if it's a dedicated dead key)
@@ -1393,7 +1412,7 @@ static const int kDragThreshold = 3;
     // Control+Key doesn't work right with custom keyboard layouts. Handle ctrl+key here for the
     // standard combinations.
     BOOL workAroundControlBug = NO;
-    if (!prev &&
+    if (!_hadMarkedTextBeforeHandlingKeypressEvent &&
         (modflag & (NSControlKeyMask | NSCommandKeyMask | NSAlternateKeyMask)) == NSControlKeyMask) {
         DLog(@"Special ctrl+key handler running");
 
@@ -1426,7 +1445,7 @@ static const int kDragThreshold = 3;
 
     if (!workAroundControlBug) {
         // Let the IME process key events
-        _inputMethodIsInserting = NO;
+        _keyPressHandled = NO;
         DLog(@"PTYTextView keyDown send to IME");
 
         // In issue 2743, it is revealed that in OS 10.9 this sometimes calls -insertText on the
@@ -1434,14 +1453,26 @@ static const int kDragThreshold = 3;
         // track the instance of PTYTextView that is currently handling a key event and rerouting
         // calls as needed in -insertText and -doCommandBySelector.
         gCurrentKeyEventTextView = [[self retain] autorelease];
-        [self interpretKeyEvents:[NSArray arrayWithObject:event]];
+
+        if ([iTermAdvancedSettingsModel experimentalKeyHandling]) {
+          // This may cause -insertText:replacementRange: or -doCommandBySelector: to be called.
+          // These methods have a side-effect of setting _keyPressHandled if they dispatched the event
+          // to the delegate. They might not get called: for example, if you hold down certain keys
+          // then repeats might be ignored, or the IME might handle it internally (such as when you press
+          // "L" in AquaSKK's Hiragana mode to enter ASCII mode. See pull request 279 for more on this.
+          [self.inputContext handleEvent:event];
+        } else {
+          [self interpretKeyEvents:[NSArray arrayWithObject:event]];
+        }
         gCurrentKeyEventTextView = nil;
 
-        // If the IME didn't want it, pass it on to the delegate
-        if (!prev &&
-            !_inputMethodIsInserting &&
-            ![self hasMarkedText]) {
-            DLog(@"PTYTextView keyDown IME no, send to delegate");
+        // Handle repeats.
+        BOOL shouldPassToDelegate = (!_hadMarkedTextBeforeHandlingKeypressEvent && !_keyPressHandled && ![self hasMarkedText]);
+        if ([iTermAdvancedSettingsModel experimentalKeyHandling]) {
+            shouldPassToDelegate &= event.isARepeat;
+        }
+        if (shouldPassToDelegate) {
+            DLog(@"PTYTextView keyDown unhandled (likely repeated) keypress with no IME, send to delegate");
             [delegate keyDown:event];
         }
     }
@@ -1546,12 +1577,15 @@ static const int kDragThreshold = 3;
     [super rightMouseDragged:event];
 }
 
-- (BOOL)scrollWheelShouldSendArrowForEvent:(NSEvent *)event at:(NSPoint)point {
+- (BOOL)scrollWheelShouldSendDataForEvent:(NSEvent *)event at:(NSPoint)point {
     NSRect liveRect = [self liveRect];
     if (!NSPointInRect(point, liveRect)) {
         return NO;
     }
     if (event.type != NSScrollWheel) {
+        return NO;
+    }
+    if (![self.dataSource showingAlternateScreen]) {
         return NO;
     }
     if ([self shouldReportMouseEvent:event at:point] &&
@@ -1560,40 +1594,43 @@ static const int kDragThreshold = 3;
         return NO;
     }
     BOOL alternateMouseScroll = [iTermAdvancedSettingsModel alternateMouseScroll];
-    BOOL showingAlternateScreen = [self.dataSource showingAlternateScreen];
-    if (!alternateMouseScroll && showingAlternateScreen) {
+    NSString *upString = [iTermAdvancedSettingsModel alternateMouseScrollStringForUp];
+    NSString *downString = [iTermAdvancedSettingsModel alternateMouseScrollStringForDown];
+
+    if (alternateMouseScroll || upString.length || downString.length) {
+        return YES;
+    } else {
         [_altScreenMouseScrollInferer scrollWheel:event];
-    }
-    if (!alternateMouseScroll) {
         return NO;
     }
-    if (!showingAlternateScreen) {
-        return NO;
-    }
-    return YES;
 }
 
+- (NSData *)dataToSendForScrollEvent:(NSEvent *)event deltaY:(CGFloat)deltaY {
+    const BOOL down = (deltaY < 0);
+
+    if ([iTermAdvancedSettingsModel alternateMouseScroll]) {
+        return down ? [_dataSource.terminal.output keyArrowDown:event.modifierFlags] :
+                      [_dataSource.terminal.output keyArrowUp:event.modifierFlags];
+    } else {
+        NSString *string = down ? [iTermAdvancedSettingsModel alternateMouseScrollStringForDown] :
+                                  [iTermAdvancedSettingsModel alternateMouseScrollStringForUp];
+        return [[string stringByExpandingVimSpecialCharacters] dataUsingEncoding:_delegate.textViewEncoding];
+    }
+}
 
 - (void)scrollWheel:(NSEvent *)event {
     DLog(@"scrollWheel:%@", event);
 
     NSPoint point = [self convertPoint:[event locationInWindow] fromView:nil];
-
-    if ([self scrollWheelShouldSendArrowForEvent:event at:point]) {
-        DLog(@"Scroll wheel sending arrow key");
+    if ([self scrollWheelShouldSendDataForEvent:event at:point]) {
+        DLog(@"Scroll wheel sending data");
 
         PTYScrollView *scrollView = (PTYScrollView *)self.enclosingScrollView;
         CGFloat deltaY = [scrollView accumulateVerticalScrollFromEvent:event];
-
-        NSData *arrowKeyData = nil;
-        if (deltaY > 0) {
-            arrowKeyData = [_dataSource.terminal.output keyArrowUp:event.modifierFlags];
-        } else if (deltaY < 0) {
-            arrowKeyData = [_dataSource.terminal.output keyArrowDown:event.modifierFlags];
-        }
-        if (arrowKeyData) {
+        NSData *dataToSend = [self dataToSendForScrollEvent:event deltaY:deltaY];
+        if (dataToSend) {
             for (int i = 0; i < ceil(fabs(deltaY)); i++) {
-                [_delegate writeTask:arrowKeyData];
+                [_delegate writeTask:dataToSend];
             }
         }
     } else if (![self reportMouseEvent:event]) {
@@ -2669,7 +2706,7 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
 }
 
 - (BOOL)showWebkitPopoverAtPoint:(NSPoint)pointInWindow url:(NSURL *)url {
-    FutureWKWebViewConfiguration *configuration = [[FutureWKWebViewConfiguration alloc] init];
+    FutureWKWebViewConfiguration *configuration = [[[FutureWKWebViewConfiguration alloc] init] autorelease];
     if (configuration) {
         // If you get here, it's OS 10.10 or newer.
         configuration.applicationNameForUserAgent = @"iTerm2";
@@ -2678,20 +2715,20 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
         prefs.javaScriptEnabled = YES;
         prefs.javaScriptCanOpenWindowsAutomatically = NO;
         configuration.preferences = prefs;
-        configuration.processPool = [[FutureWKProcessPool alloc] init];
+        configuration.processPool = [[[FutureWKProcessPool alloc] init] autorelease];
         FutureWKUserContentController *userContentController =
             [[[FutureWKUserContentController alloc] init] autorelease];
         configuration.userContentController = userContentController;
         configuration.websiteDataStore = [FutureWKWebsiteDataStore defaultDataStore];
-        FutureWKWebView *webView = [[FutureWKWebView alloc] initWithFrame:NSMakeRect(0, 0, 800, 600)
-                                                            configuration:configuration];
+        FutureWKWebView *webView = [[[FutureWKWebView alloc] initWithFrame:NSMakeRect(0, 0, 800, 600)
+                                                             configuration:configuration] autorelease];
 
         NSURLRequest *request =
             [[[NSURLRequest alloc] initWithURL:url] autorelease];
         [webView loadRequest:request];
 
-        NSPopover *popover = [[NSPopover alloc] init];
-        NSViewController *viewController = [[iTermWebViewWrapperViewController alloc] initWithWebView:webView];
+        NSPopover *popover = [[[NSPopover alloc] init] autorelease];
+        NSViewController *viewController = [[[iTermWebViewWrapperViewController alloc] initWithWebView:webView] autorelease];
         popover.contentViewController = viewController;
         popover.contentSize = viewController.view.frame.size;
         NSRect rect = NSMakeRect(pointInWindow.x - _charWidth / 2,
@@ -4833,6 +4870,17 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
         [gCurrentKeyEventTextView doCommandBySelector:aSelector];
         return;
     }
+    
+    if ([iTermAdvancedSettingsModel experimentalKeyHandling]) {
+        // Pass the event to the delegate since doCommandBySelector was called instead of
+        // insertText:replacementRange:, unless an IME is in use. An example of when this gets called
+        // but we should not pass the event to the delegate is when there is marked text and you press
+        // Enter.
+        if (![self hasMarkedText] && !_hadMarkedTextBeforeHandlingKeypressEvent) {
+            _keyPressHandled = YES;
+            [self.delegate keyDown:[NSApp currentEvent]];
+        }
+    }
     DLog(@"doCommandBySelector:%@", NSStringFromSelector(aSelector));
 }
 
@@ -4867,7 +4915,7 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
             [super insertText:aString];
         }
 
-        _inputMethodIsInserting = YES;
+        _keyPressHandled = YES;
     }
 
     if ([self hasMarkedText]) {
@@ -5349,7 +5397,8 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
                                                            backing:NSBackingStoreBuffered
                                                              defer:YES] autorelease];
     [_findCursorWindow setLevel:NSFloatingWindowLevel];
-    [_findCursorWindow setFrame:[self cursorScreenFrame] display:YES];
+    NSRect screenFrame = [self cursorScreenFrame];
+    [_findCursorWindow setFrame:screenFrame display:YES];
     _findCursorWindow.backgroundColor = [NSColor clearColor];
     [_findCursorWindow setAlphaValue:0];
     [[_findCursorWindow animator] setAlphaValue:1];
@@ -5357,8 +5406,8 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
     [_findCursorWindow makeKeyAndOrderFront:nil];
     self.findCursorView = [[iTermFindCursorView alloc] initWithFrame:NSMakeRect(0,
                                                                                 0,
-                                                                                [[self window] frame].size.width,
-                                                                                [[self window] frame].size.height)];
+                                                                                screenFrame.size.width,
+                                                                                screenFrame.size.height)];
     _findCursorView.delegate = self;
     NSPoint p = [self cursorCenterInFindCursorWindowCoords];
     _findCursorView.cursorPosition = p;
