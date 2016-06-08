@@ -100,6 +100,11 @@
 + (BOOL)killJobsInServersOnQuit;
 
 + (BOOL)noSyncDoNotWarnBeforeMultilinePaste;
++ (NSString *)noSyncDoNotWarnBeforeMultilinePasteUserDefaultsKey;
++ (void)setNoSyncDoNotWarnBeforeMultilinePaste:(BOOL)value;
++ (BOOL)noSyncDoNotWarnBeforePastingOneLineEndingInNewlineAtShellPrompt;
++ (NSString *)noSyncDoNotWarnBeforePastingOneLineEndingInNewlineAtShellPromptUserDefaultsKey;
++ (void)setNoSyncDoNotWarnBeforePastingOneLineEndingInNewlineAtShellPrompt:(BOOL)value;
 
 + (BOOL)noSyncTipsDisabled;
 + (int)numberOfLinesForAccessibility;
@@ -140,5 +145,9 @@
 + (int)adaptiveFrameRateThroughputThreshold;
 + (BOOL)includePasteHistoryInAdvancedPaste;
 + (BOOL)experimentalKeyHandling;
++ (BOOL)hideStuckTooltips;
++ (BOOL)indicateBellsInDockBadgeLabel;
++ (double)tabFlashAnimationDuration;
++ (NSString *)downloadsDirectory;
 
 @end
