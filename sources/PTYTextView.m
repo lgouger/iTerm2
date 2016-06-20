@@ -1067,7 +1067,7 @@ static const int kDragThreshold = 3;
 - (void)drawRect:(NSRect)rect {
     BOOL savedCursorVisible = _drawingHelper.cursorVisible;
 
-    // Try to use a saved grid if one is available. If it suceeds, that implies that the cursor was
+    // Try to use a saved grid if one is available. If it succeeds, that implies that the cursor was
     // recently hidden and what we're drawing is how the screen looked just before the cursor was
     // hidden. Therefore, we'll temporarily show the cursor, but we'll need to restore cursorVisible's
     // value when we're done.
@@ -1320,7 +1320,8 @@ static const int kDragThreshold = 3;
 // * Press L in AquaSKK's Hiragana to enter AquaSKK's ASCII
 // * "special" keys, like Enter which go through doCommandBySelector
 // * Repeated special keys
-- (void)keyDown:(NSEvent*)event {
+- (void)keyDown:(NSEvent *)event {
+    event = [event eventByChangingYenToBackslash];
     [_altScreenMouseScrollInferer keyDown:event];
     if (![_delegate textViewShouldAcceptKeyDownEvent:event]) {
         return;
@@ -3607,6 +3608,7 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
     if ([item action] == @selector(saveImageAs:) ||
         [item action] == @selector(copyImage:) ||
         [item action] == @selector(openImage:) ||
+        [item action] == @selector(togglePauseAnimatingImage:) ||
         [item action] == @selector(inspectImage:)) {
         return YES;
     }
@@ -4245,6 +4247,18 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
     }
 }
 
+- (void)togglePauseAnimatingImage:(id)sender {
+    iTermImageInfo *imageInfo = [sender representedObject];
+    if (imageInfo) {
+        imageInfo.paused = !imageInfo.paused;
+        if (!imageInfo.paused) {
+            // A redraw is needed to recompute which visible lines are animated
+            // and ensure they keep getting redrawn on a fast cadence.
+            [self setNeedsDisplay:YES];
+        }
+    }
+}
+
 - (iTermImageInfo *)imageInfoAtCoord:(VT100GridCoord)coord {
     if (coord.x < 0 ||
         coord.y < 0 ||
@@ -4362,6 +4376,14 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
                   @"selector": @"openImage:" },
                @{ @"title": @"Inspect",
                   @"selector": @"inspectImage:" } ];
+        if (imageInfo.animated || imageInfo.paused) {
+            NSString *selector = @"togglePauseAnimatingImage:";
+            if (imageInfo.paused) {
+                entryDicts = [entryDicts arrayByAddingObject:@{ @"title": @"Resume Animating", @"selector": selector }];
+            } else {
+                entryDicts = [entryDicts arrayByAddingObject:@{ @"title": @"Stop Animating", @"selector": selector }];
+            }
+        }
         for (NSDictionary *entryDict in entryDicts) {
             NSMenuItem *item;
 

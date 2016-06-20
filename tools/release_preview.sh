@@ -81,7 +81,13 @@ ORIG_DIR=`pwd`
 echo "Build deployment release"
 make clean
 make preview
-Build Deployment "-preview" "OS 10.8+" "This is the recommended beta build for most users. It contains a bunch of bug fixes, including fixes for some crashers." "" "--deep"
+
+BUILDTYPE=Deployment
+pushd build/$BUILDTYPE/iTerm.app/Contents/MacOS
+ln -s iTerm2 iTerm
+popd
+
+Build $BUILDTYPE "-preview" "OS 10.8+" "This is the recommended beta build for most users. It contains a bunch of bug fixes, including fixes for some crashers." "" "--deep"
 
 #set -x
 

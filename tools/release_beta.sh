@@ -31,6 +31,12 @@ function SparkleSign {
 # Fifth arg is a prefix for sparkle files.
 # Sixth arg is extra args for codesign
 function Build {
+  pushd build/$BUILDTYPE/iTerm2.app/Contents/MacOS
+  echo Making link
+  ln -s iTerm2 iTerm
+  ls -l
+  popd
+
   BUILDTYPE=$1
   NAME=$(echo $VERSION | sed -e "s/\\./_/g")$2
   SUMMARY=$3
@@ -49,6 +55,7 @@ function Build {
   # since Sparkle won't accept a name change.
   rm -rf iTerm.app
   mv iTerm2.app iTerm.app
+
   zip -ry iTerm2-${NAME}.zip iTerm.app
  
   # Update the list of changes
@@ -81,7 +88,10 @@ ORIG_DIR=`pwd`
 echo "Build deployment release"
 make clean
 make release
-Build Deployment "" "OS 10.8+" "This is the recommended beta build for most users. It contains a bunch of bug fixes, including fixes for some crashers." "" "--deep"
+
+BUILDTYPE=Deployment
+
+Build $BUILDTYPE "" "OS 10.8+" "This is the recommended beta build for most users. It contains a bunch of bug fixes, including fixes for some crashers." "" "--deep"
 
 echo Update the linky in the version3 release notes page
 sleep 2

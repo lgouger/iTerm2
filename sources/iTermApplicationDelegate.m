@@ -283,13 +283,7 @@ static BOOL hasBecomeActive = NO;
     [PTYSession removeAllRegisteredSessions];
     ranAutoLaunchScript = YES;
 
-    // Wait until startup activity has settled down so there's enough CPU for the animation to
-    // look good.
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)),
-                   dispatch_get_main_queue(),
-                   ^{
-                       [[iTermTipController sharedInstance] applicationDidFinishLaunching];
-                   });
+    [[iTermTipController sharedInstance] applicationDidFinishLaunching];
 }
 
 - (void)createVersionFile {
@@ -864,6 +858,7 @@ static BOOL hasBecomeActive = NO;
 }
 
 - (IBAction)openPasswordManager:(id)sender {
+    DLog(@"Menu item selected");
     [self openPasswordManagerToAccountName:nil inSession:nil];
 }
 
@@ -873,8 +868,10 @@ static BOOL hasBecomeActive = NO;
         term = session.delegate.realParentWindow;
     }
     if (term) {
+        DLog(@"Open password manager as sheet in terminal %@", term);
         return [term openPasswordManagerToAccountName:name inSession:session];
     } else {
+        DLog(@"Open password manager as standalone window");
         if (!_passwordManagerWindowController) {
             _passwordManagerWindowController = [[iTermPasswordManagerWindowController alloc] init];
             _passwordManagerWindowController.delegate = self;

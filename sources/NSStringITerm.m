@@ -335,7 +335,7 @@ static int maximal_subpart_of_row(const unsigned char *datap,
     return bytesInRow;
 }
 
-// This function finds the longest intial sequence of bytes that look like a valid UTF-8 sequence.
+// This function finds the longest initial sequence of bytes that look like a valid UTF-8 sequence.
 // It's used to gobble them up and replace them with a <?> replacement mark in an invalid sequence.
 static int minimal_subpart(const unsigned char *datap, int datalen)
 {
@@ -653,20 +653,22 @@ int decode_utf8_char(const unsigned char *datap,
 }
 
 - (NSString *)stringByRemovingEnclosingBrackets {
-    int index;
-    for (index = 0; 2*index < self.length; index++) {
-      unichar start = [self characterAtIndex:index];
-      unichar end = [self characterAtIndex:self.length-index-1];
-      if (!((start == '(' && end == ')') ||
-            (start == '<' && end == '>') ||
-            (start == '[' && end == ']') ||
-            (start == '{' && end == '}') ||
-            (start == '\'' && end == '\'') ||
-            (start == '"' && end == '"'))) {
-          break;
-      }
+    if (self.length < 2) {
+        return self;
     }
-    return [self substringWithRange:NSMakeRange(index, self.length-2*index)];
+    NSString *trimmed = [self stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+    NSArray *pairs = @[ @[ @"(", @")" ],
+                        @[ @"<", @">" ],
+                        @[ @"[", @"]" ],
+                        @[ @"{", @"}", ],
+                        @[ @"\'", @"\'" ],
+                        @[ @"\"", @"\"" ] ];
+    for (NSArray *pair in pairs) {
+        if ([trimmed hasPrefix:pair[0]] && [trimmed hasSuffix:pair[1]]) {
+            return [[self substringWithRange:NSMakeRange(1, self.length - 2)] stringByRemovingEnclosingBrackets];
+        }
+    }
+    return self;
 }
 
 - (NSString *)stringByRemovingTerminatingPunctuation {

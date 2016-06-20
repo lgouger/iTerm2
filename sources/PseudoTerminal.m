@@ -2845,7 +2845,7 @@ static NSString* TERMINAL_ARRANGEMENT_HIDING_TOOLBELT_SHOULD_RESIZE_WINDOW = @"H
       snapWidth = snapHeight = NO;
     }
 
-    // If resizing a full-width/height X-of-screen window in a direction perpindicular to the screen
+    // If resizing a full-width/height X-of-screen window in a direction perpendicular to the screen
     // edge it's attached to, turn off snapping in the direction parallel to the edge.
     if (windowType_ == WINDOW_TYPE_RIGHT || windowType_ == WINDOW_TYPE_LEFT) {
         if (proposedFrameSize.height == self.window.frame.size.height) {
@@ -4438,10 +4438,14 @@ static NSString* TERMINAL_ARRANGEMENT_HIDING_TOOLBELT_SHOULD_RESIZE_WINDOW = @"H
 
 - (void)openPasswordManagerToAccountName:(NSString *)name
                                inSession:(PTYSession *)session {
+    DLog(@"openPasswordManagerToAccountName:%@ inSession:%@", name, session);
     [session reveal];
     if (self.window.sheets.count > 0) {
+        DLog(@"This window has sheets so not opening pw manager: %@", self.window.sheets);
+        DLog(@"The last sheet's view hierarchy:\n%@", [[[self.window.sheets lastObject] contentView] iterm_recursiveDescription]);
         return;
     }
+    DLog(@"Show the password manager as a sheet");
     iTermPasswordManagerWindowController *passwordManagerWindowController =
         [[iTermPasswordManagerWindowController alloc] init];
     passwordManagerWindowController.delegate = self;
@@ -5205,6 +5209,7 @@ static NSString* TERMINAL_ARRANGEMENT_HIDING_TOOLBELT_SHOULD_RESIZE_WINDOW = @"H
         // instance bookmark with a unique GUID.
         NSMutableDictionary *temp = [[theBookmark mutableCopy] autorelease];
         temp[KEY_GUID] = [ProfileModel freshGuid];
+        temp[KEY_ORIGINAL_GUID] = [[originalBookmark[KEY_GUID] copy] autorelease];
         [[ProfileModel sessionsInstance] addBookmark:temp];
         theBookmark = temp;
     }

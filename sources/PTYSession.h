@@ -169,6 +169,9 @@ typedef enum {
 // Indicates if the splits are currently being dragged. Affects how resizing works for tmux tabs.
 - (BOOL)sessionBelongsToTabWhoseSplitsAreBeingDragged;
 
+// User double clicked on title bar
+- (void)sessionDoubleClickOnTitleBar;
+
 @end
 
 @class SessionView;
@@ -624,7 +627,7 @@ typedef enum {
 - (void)queueAnnouncement:(iTermAnnouncementViewController *)announcement
                identifier:(NSString *)identifier;
 
-- (void)tryToRunShellIntegrationInstaller;
+- (void)tryToRunShellIntegrationInstallerWithPromptCheck:(BOOL)promptCheck;
 
 - (NSDictionary *)arrangementWithContents:(BOOL)includeContents;
 

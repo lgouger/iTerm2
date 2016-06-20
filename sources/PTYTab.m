@@ -2236,7 +2236,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
             NSString *uniqueId = [PTYSession guidInArrangement:arrangement[TAB_ARRANGEMENT_SESSION]];
             if (windowPaneNumber && idMap[windowPaneNumber]) {
                 // Creating splitters for a tmux tab. The arrangement is marked
-                // up with window pane IDs, whcih may or may not already exist.
+                // up with window pane IDs, which may or may not already exist.
                 // When restoring a tmux tab, then all session dicts in the
                 // arrangement have a window pane. The presence of a
                 // TAB_ARRANGEMENT_TMUX_WINDOW_PANE implies that theMap is
@@ -3468,6 +3468,12 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 
     [[root_ window] makeFirstResponder:[activeSession_ textview]];
     [realParentWindow_ invalidateRestorableState];
+    
+    for (SessionView *sessionView in self.sessionViews) {
+        // I don't know why, but this doesn't get called automatically and so focus follows mouse
+        // breaks. Issue 4810.
+        [sessionView updateTrackingAreas];
+    }
 }
 
 - (BOOL)promptOnClose {
@@ -4601,6 +4607,14 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 
 - (BOOL)sessionBelongsToTabWhoseSplitsAreBeingDragged {
     return _isDraggingSplitInTmuxTab;
+}
+
+- (void)sessionDoubleClickOnTitleBar {
+    if (self.isMaximized) {
+        [self unmaximize];
+    } else {
+        [self maximize];
+    }
 }
 
 @end
