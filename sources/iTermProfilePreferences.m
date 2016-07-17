@@ -174,6 +174,8 @@ NSString *const kProfilePreferenceInitialDirectoryAdvancedValue = @"Advanced";
                   KEY_USE_CURSOR_GUIDE: @NO,
                   KEY_TAB_COLOR: [NSNull null],
                   KEY_USE_TAB_COLOR: @NO,
+                  KEY_UNDERLINE_COLOR: [NSNull null],
+                  KEY_USE_UNDERLINE_COLOR: @NO,
                   KEY_SMART_CURSOR_COLOR: @NO,
                   KEY_MINIMUM_CONTRAST: @0.0,
                   KEY_CURSOR_BOOST: @0.0,
@@ -244,6 +246,20 @@ NSString *const kProfilePreferenceInitialDirectoryAdvancedValue = @"Advanced";
                   KEY_APPLICATION_KEYPAD_ALLOWED: @NO,
                   KEY_PLACE_PROMPT_AT_FIRST_COLUMN: @YES,
                   KEY_SHOW_MARK_INDICATORS: @YES,
+                  KEY_HAS_HOTKEY: @NO,
+                  KEY_HOTKEY_MODIFIER_FLAGS: @0,
+                  KEY_HOTKEY_CHARACTERS: @"",
+                  KEY_HOTKEY_CHARACTERS_IGNORING_MODIFIERS: @"",
+                  KEY_HOTKEY_KEY_CODE: @0,
+                  KEY_HOTKEY_AUTOHIDE: @YES,
+                  KEY_HOTKEY_REOPEN_ON_ACTIVATION: @NO,
+                  KEY_HOTKEY_ANIMATE: @YES,
+                  KEY_HOTKEY_FLOAT: @YES,
+                  KEY_HOTKEY_DOCK_CLICK_ACTION: @(iTermHotKeyDockPreferenceDoNotShow),
+                  KEY_HOTKEY_MODIFIER_ACTIVATION: @0,
+                  KEY_HOTKEY_ACTIVATE_WITH_MODIFIER: @NO,
+                  KEY_HOTKEY_ALTERNATE_SHORTCUTS: @[],
+                  KEY_SESSION_HOTKEY: @{},
                 };
         [dict retain];
     }
@@ -263,6 +279,16 @@ NSString *const kProfilePreferenceInitialDirectoryAdvancedValue = @"Advanced";
         inProfile:(Profile *)profile
             model:(ProfileModel *)model {
     [model setObject:object forKey:key inBookmark:profile];
+    [model flush];
+    [[NSNotificationCenter defaultCenter] postNotificationName:kReloadAllProfiles
+                                                        object:nil
+                                                      userInfo:nil];
+}
+
++ (void)setObjectsFromDictionary:(NSDictionary *)dictionary
+                       inProfile:(Profile *)profile
+                           model:(ProfileModel *)model {
+    [model setObjectsFromDictionary:dictionary inProfile:profile];
     [model flush];
     [[NSNotificationCenter defaultCenter] postNotificationName:kReloadAllProfiles
                                                         object:nil

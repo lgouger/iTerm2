@@ -1,8 +1,6 @@
 #import "PTYTextView.h"
 
 #import "AsyncHostLookupController.h"
-#import "CharacterRun.h"
-#import "CharacterRunInline.h"
 #import "charmaps.h"
 #import "FileTransferManager.h"
 #import "FontSizeEstimator.h"
@@ -45,6 +43,7 @@
 #import "NSMutableAttributedString+iTerm.h"
 #import "NSPasteboard+iTerm.h"
 #import "NSStringITerm.h"
+#import "NSURL+iTerm.h"
 #import "NSWindow+PSM.h"
 #import "PasteboardHistory.h"
 #import "PointerController.h"
@@ -465,8 +464,8 @@ static const int kDragThreshold = 3;
     // During initialization, this may be called before the non-ascii font is set so we use a system
     // font as a placeholder.
     NSDictionary *theAttributes =
-        @{ NSBackgroundColorAttributeName: [self defaultBackgroundColor],
-           NSForegroundColorAttributeName: [self defaultTextColor],
+        @{ NSBackgroundColorAttributeName: [self defaultBackgroundColor] ?: [NSColor blackColor],
+           NSForegroundColorAttributeName: [self defaultTextColor] ?: [NSColor whiteColor],
            NSFontAttributeName: self.nonAsciiFont ?: [NSFont systemFontOfSize:12],
            NSUnderlineStyleAttributeName: @(NSUnderlineStyleSingle | NSUnderlineByWordMask) };
 
@@ -726,9 +725,9 @@ static const int kDragThreshold = 3;
 
 - (void)changeFont:(id)fontManager
 {
-    if ([[[PreferencePanel sharedInstance] window] isVisible]) {
+    if ([[[PreferencePanel sharedInstance] windowIfLoaded] isVisible]) {
         [[PreferencePanel sharedInstance] changeFont:fontManager];
-    } else if ([[[PreferencePanel sessionsInstance] window] isVisible]) {
+    } else if ([[[PreferencePanel sessionsInstance] windowIfLoaded] isVisible]) {
         [[PreferencePanel sessionsInstance] changeFont:fontManager];
     }
 }
@@ -779,7 +778,7 @@ static const int kDragThreshold = 3;
 }
 
 // This exists to work around an apparent OS bug described in issue 2690. Under some circumstances
-// (which I cannot reproduce) the key window will be an NSToolbarFullScreenWindow and the PTYWindow
+// (which I cannot reproduce) the key window will be an NSToolbarFullScreenWindow and the iTermTerminalWindow
 // will be one of the main windows. NSToolbarFullScreenWindow doesn't appear to handle keystrokes,
 // so they fall through to the main window. We'd like the cursor to blink and have other key-
 // window behaviors in this case.
@@ -1064,6 +1063,12 @@ static const int kDragThreshold = 3;
     return _drawingHelper.cursorVisible;
 }
 
+- (CGFloat)minimumBaselineOffset {
+    CGFloat asciiOffset = -(floorf(self.font.leading) - floorf(self.font.descender));
+    CGFloat nonasciiOffset = self.useNonAsciiFont ? -(floorf(self.nonAsciiFont.leading) - floorf(self.nonAsciiFont.descender)) : 0;
+    return MIN(asciiOffset, nonasciiOffset);
+}
+
 - (void)drawRect:(NSRect)rect {
     BOOL savedCursorVisible = _drawingHelper.cursorVisible;
 
@@ -1102,7 +1107,8 @@ static const int kDragThreshold = 3;
     _drawingHelper.drawMarkIndicators = [_delegate textViewShouldShowMarkIndicators];
     _drawingHelper.thinStrokes = _thinStrokes;
     _drawingHelper.showSearchingCursor = _showSearchingCursor;
-
+    _drawingHelper.baselineOffset = [self minimumBaselineOffset];
+    
     const NSRect *rectArray;
     NSInteger rectCount;
     [self getRectsBeingDrawn:&rectArray count:&rectCount];
@@ -1339,7 +1345,7 @@ static const int kDragThreshold = 3;
 
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        iTermApplicationDelegate *appDelegate = iTermApplication.sharedApplication.delegate;
+        iTermApplicationDelegate *appDelegate = [iTermApplication.sharedApplication delegate];
         [appDelegate userDidInteractWithASession];
     });
 
@@ -1729,7 +1735,7 @@ static const int kDragThreshold = 3;
                 _drawingHelper.underlineRange = action.range;
 
                 if (action.actionType == kURLActionOpenURL) {
-                    NSURL *url = [NSURL URLWithString:action.string];
+                    NSURL *url = [NSURL URLWithUserSuppliedString:action.string];
                     if (![url.host isEqualToString:self.currentUnderlineHostname]) {
                         if (self.currentUnderlineHostname) {
                             [[AsyncHostLookupController sharedInstance] cancelRequestForHostname:self.currentUnderlineHostname];
@@ -2503,14 +2509,14 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
             case kURLActionOpenExistingFile: {
                 NSString *extendedPrefix = [extractor wrappedStringAt:coord
                                                               forward:NO
-                                                  respectHardNewlines:NO
+                                                  respectHardNewlines:![iTermAdvancedSettingsModel ignoreHardNewlinesInURLs]
                                                              maxChars:[iTermAdvancedSettingsModel maxSemanticHistoryPrefixOrSuffix]
                                                     continuationChars:nil
                                                   convertNullsToSpace:YES
                                                                coords:nil];
                 NSString *extendedSuffix = [extractor wrappedStringAt:coord
                                                               forward:YES
-                                                  respectHardNewlines:NO
+                                                  respectHardNewlines:![iTermAdvancedSettingsModel ignoreHardNewlinesInURLs]
                                                              maxChars:[iTermAdvancedSettingsModel maxSemanticHistoryPrefixOrSuffix]
                                                     continuationChars:nil
                                                   convertNullsToSpace:YES
@@ -2690,7 +2696,8 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
 - (void)showDefinitionForWordAt:(NSPoint)clickPoint {
     iTermTextExtractor *extractor = [iTermTextExtractor textExtractorWithDataSource:_dataSource];
     VT100GridWindowedRange range =
-        [extractor rangeForWordAt:VT100GridCoordMake(clickPoint.x, clickPoint.y)];
+        [extractor rangeForWordAt:VT100GridCoordMake(clickPoint.x, clickPoint.y)
+                    maximumLength:kReasonableMaximumWordLength];
     NSAttributedString *word = [extractor contentInRange:range
                                        attributeProvider:^NSDictionary *(screen_char_t theChar) {
                                            return [self charAttributes:theChar];
@@ -2779,7 +2786,7 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
             break;
 
         case kURLActionOpenURL: {
-            url = [NSURL URLWithString:urlAction.string];
+            url = [NSURL URLWithUserSuppliedString:urlAction.string];
             if (url && [self showWebkitPopoverAtPoint:event.locationInWindow url:url]) {
                 return;
             }
@@ -3019,7 +3026,7 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
 - (IBAction)installShellIntegration:(id)sender {
     iTermWarning *warning = [[[iTermWarning alloc] init] autorelease];
     warning.title = @"Shell Integration comes with an optional Utilities Package, which lets you view images and download files. What would you prefer?";
-    warning.actions = @[ @"Install Shell Integration & Utilities", @"Cancel", @"Shell Integration Only" ];
+    warning.actionLabels = @[ @"Install Shell Integration & Utilities", @"Cancel", @"Shell Integration Only" ];
     warning.identifier = @"NoSyncInstallUtilitiesPackage";
     warning.warningType = kiTermWarningTypePermanentlySilenceable;
     warning.showHelpBlock = ^() {
@@ -3040,10 +3047,25 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
             assert(false);
     }
     if (theCommand) {
-        [_delegate writeTask:theCommand];
+        [self installShellIntegrationWithCommand:theCommand];
     } else {
         assert(false);
     }
+}
+
+- (void)installShellIntegrationWithCommand:(NSString *)theCommand {
+    iTermWarning *warning = [[[iTermWarning alloc] init] autorelease];
+    warning.title = [NSString stringWithFormat:@"Ok to run this command in the current shell?\n\n%@", theCommand];
+    warning.warningActions =
+    @[
+          [iTermWarningAction warningActionWithLabel:@"OK" block:^(iTermWarningSelection selection) {
+              [_delegate writeTask:theCommand];
+          }],
+          [iTermWarningAction warningActionWithLabel:@"Cancel" block:nil]
+      ];
+    warning.identifier = @"NoSyncConfirmShellIntegrationCommand";
+    warning.warningType = kiTermWarningTypePermanentlySilenceable;
+    [warning runModal];
 }
 
 - (IBAction)selectAll:(id)sender
@@ -3657,25 +3679,32 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
     }
 }
 
-- (BOOL)addCustomActionsToMenu:(NSMenu *)theMenu matchingText:(NSString *)textWindow line:(int)line
-{
+- (BOOL)addCustomActionsToMenu:(NSMenu *)theMenu matchingText:(NSString *)textWindow line:(int)line {
     BOOL didAdd = NO;
-    NSArray* rulesArray = _smartSelectionRules ? _smartSelectionRules : [SmartSelectionController defaultRules];
+    NSArray *rulesArray = _smartSelectionRules ? _smartSelectionRules : [SmartSelectionController defaultRules];
     const int numRules = [rulesArray count];
 
+    DLog(@"Looking for custom actions. Evaluating smart selection rules…");
+    DLog(@"text window is: %@", textWindow);
     for (int j = 0; j < numRules; j++) {
         NSDictionary *rule = [rulesArray objectAtIndex:j];
+        NSArray *actions = [SmartSelectionController actionsInRule:rule];
+        if (!actions.count) {
+            DLog(@"Skipping rule with no actions:\n%@", rule);
+            continue;
+        }
+        
+        DLog(@"Evaluating rule:\n%@", rule);
         NSString *regex = [SmartSelectionController regexInRule:rule];
         for (int i = 0; i <= textWindow.length; i++) {
-            NSString* substring = [textWindow substringWithRange:NSMakeRange(i, [textWindow length] - i)];
-            NSError* regexError = nil;
+            NSString *substring = [textWindow substringWithRange:NSMakeRange(i, [textWindow length] - i)];
+            NSError *regexError = nil;
             NSArray *components = [substring captureComponentsMatchedByRegex:regex
                                                                      options:0
                                                                        range:NSMakeRange(0, [substring length])
                                                                        error:&regexError];
             if (components.count) {
-                NSLog(@"Components for %@ are %@", regex, components);
-                NSArray *actions = [SmartSelectionController actionsInRule:rule];
+                DLog(@"Components for %@ are %@", regex, components);
                 for (NSDictionary *action in actions) {
                     SEL mySelector = [self selectorForSmartSelectionAction:action];
                     NSString *theTitle =
@@ -3712,7 +3741,7 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
 
 - (void)contextMenuActionOpenURL:(id)sender
 {
-    NSURL *url = [NSURL URLWithString:[sender representedObject]];
+    NSURL *url = [NSURL URLWithUserSuppliedString:[sender representedObject]];
     if (url) {
         NSLog(@"Open URL: %@", [sender representedObject]);
         [[NSWorkspace sharedWorkspace] openURL:url];
@@ -3790,7 +3819,7 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
         }
         case kPTYTextViewSelectionExtensionUnitWord: {
             VT100GridWindowedRange rangeWithWordBeforeStart =
-                [extractor rangeForWordAt:coordBeforeStart];
+                [extractor rangeForWordAt:coordBeforeStart maximumLength:kUnlimitedMaximumWordLength];
             rangeWithWordBeforeStart.coordRange.end = existingRange.coordRange.end;
             rangeWithWordBeforeStart.columnWindow = existingRange.columnWindow;
             return rangeWithWordBeforeStart;
@@ -3843,7 +3872,7 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
             BOOL startWasOnNull = [extractor characterAt:startCoord].code == 0;
             VT100GridWindowedRange rangeExcludingWordAtStart = existingRange;
             rangeExcludingWordAtStart.coordRange.start =
-            [extractor rangeForWordAt:startCoord].coordRange.end;
+            [extractor rangeForWordAt:startCoord  maximumLength:kUnlimitedMaximumWordLength].coordRange.end;
             // If the start of range moved from a null to a null, skip to the end of the line or past all the nulls.
             if (startWasOnNull &&
                 [extractor characterAt:rangeExcludingWordAtStart.coordRange.start].code == 0) {
@@ -3888,7 +3917,7 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
         case kPTYTextViewSelectionExtensionUnitWord: {
             VT100GridWindowedRange rangeExcludingWordAtEnd = existingRange;
             rangeExcludingWordAtEnd.coordRange.end =
-            [extractor rangeForWordAt:coordBeforeEnd].coordRange.start;
+            [extractor rangeForWordAt:coordBeforeEnd maximumLength:kUnlimitedMaximumWordLength].coordRange.start;
             rangeExcludingWordAtEnd.columnWindow = existingRange.columnWindow;
             return rangeExcludingWordAtEnd;
         }
@@ -3936,9 +3965,9 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
         case kPTYTextViewSelectionExtensionUnitWord: {
             VT100GridWindowedRange rangeWithWordAfterEnd;
             if (endCoord.x > VT100GridRangeMax(existingRange.columnWindow)) {
-                rangeWithWordAfterEnd = [extractor rangeForWordAt:coordAfterEnd];
+                rangeWithWordAfterEnd = [extractor rangeForWordAt:coordAfterEnd maximumLength:kUnlimitedMaximumWordLength];
             } else {
-                rangeWithWordAfterEnd = [extractor rangeForWordAt:endCoord];
+                rangeWithWordAfterEnd = [extractor rangeForWordAt:endCoord maximumLength:kUnlimitedMaximumWordLength];
             }
             rangeWithWordAfterEnd.coordRange.start = existingRange.coordRange.start;
             rangeWithWordAfterEnd.columnWindow = existingRange.columnWindow;
@@ -4673,7 +4702,10 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
     if ([types containsObject:NSFilenamesPboardType] && filenames.count && dropScpPath) {
         // This is all so the mouse cursor will change to a plain arrow instead of the
         // drop target cursor.
-        [[NSApplication sharedApplication] activateIgnoringOtherApps:YES];
+        if (![[self window] isKindOfClass:[NSPanel class]]) {
+            // Can't do this to a floating panel or we switch away from the lion fullscreen app we're over.
+            [[NSApplication sharedApplication] activateIgnoringOtherApps:YES];
+        }
         [[self window] makeKeyAndOrderFront:nil];
         [self performSelector:@selector(maybeUpload:)
                    withObject:@[ filenames, dropScpPath ]
@@ -5246,7 +5278,6 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
 
 - (void)setTransparency:(double)fVal {
     _transparency = fVal;
-    _drawingHelper.transparency = fVal;
     [self setNeedsDisplay:YES];
 }
 
@@ -5504,7 +5535,7 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
     if (respectDividers) {
         [extractor restrictToLogicalWindowIncludingCoord:coord];
     }
-    VT100GridWindowedRange range = [extractor rangeForWordAt:coord];
+    VT100GridWindowedRange range = [extractor rangeForWordAt:coord  maximumLength:kUnlimitedMaximumWordLength];
     if (rangePtr) {
         *rangePtr = range;
     }
@@ -5621,7 +5652,7 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
 }
 
 - (void)useBackgroundIndicatorChanged:(NSNotification *)notification {
-    _showStripesWhenBroadcastingInput = iTermApplication.sharedApplication.delegate.useBackgroundPatternIndicator;
+    _showStripesWhenBroadcastingInput = [iTermApplication.sharedApplication delegate].useBackgroundPatternIndicator;
     [self setNeedsDisplay:YES];
 }
 
@@ -6060,7 +6091,7 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
     DLog(@"URL in string is %@", subUrl);
 
     // If subUrl contains a :, make sure something can handle that scheme.
-    NSURL *url = [NSURL URLWithString:subUrl];
+    NSURL *url = [NSURL URLWithUserSuppliedString:subUrl];
     BOOL openable = (url && [[NSWorkspace sharedWorkspace] URLForApplicationToOpenURL:url] != nil);
     DLog(@"There seems to be a scheme. ruledOut=%d", (int)openable);
 
@@ -6540,9 +6571,9 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
 }
 
 - (NSRect)rectWithHalo:(NSRect)rect {
-    rect.origin.x -= _charWidth;
+    rect.origin.x = 0;
     rect.origin.y -= _lineHeight;
-    rect.size.width += _charWidth * 2;
+    rect.size.width = self.frame.size.width;
     rect.size.height += _lineHeight * 2;
 
     return rect;

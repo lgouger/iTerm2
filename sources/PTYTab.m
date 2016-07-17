@@ -1559,7 +1559,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     double charWidth = cellSize.width;
     double lineHeight = cellSize.height;
     NSSize size;
-    PtyLog(@"    calculating session size based on %dx%d cells", columns, rows);
+    DLog(@"    calculating session size based on %dx%d cells", columns, rows);
     DLog(@"    cell size is %@", NSStringFromSize(NSMakeSize(charWidth, lineHeight)));
     size.width = columns * charWidth + MARGIN * 2;
     size.height = rows * lineHeight + VMARGIN * 2;
@@ -1575,7 +1575,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     if (showTitles) {
         outerSize.height += [SessionView titleHeight];
     }
-    PtyLog(@"session size, including space for the scrollview's decoration, is %@", NSStringFromSize(outerSize));
+    DLog(@"session size, including space for the scrollview's decoration, is %@", NSStringFromSize(outerSize));
     return outerSize;
 }
 
@@ -2964,7 +2964,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
             NSRect sessionViewFrame = [session.view frame];
             NSSize contentSize = [NSScrollView contentSizeForFrameSize:sessionViewFrame.size
                                                horizontalScrollerClass:nil
-                                                 verticalScrollerClass:[[session.view.scrollview verticalScroller] class]
+                                                 verticalScrollerClass:[realParentWindow_ scrollbarShouldBeVisible] ? [[session.view.scrollview verticalScroller] class] : nil
                                                             borderType:session.view.scrollview.borderType
                                                            controlSize:NSRegularControlSize
                                                          scrollerStyle:session.view.scrollview.scrollerStyle];
@@ -4428,6 +4428,13 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 }
 
 - (BOOL)sessionIsActiveInTab:(PTYSession *)session {
+    return [self activeSession] == session;
+}
+
+- (BOOL)sessionIsActiveInSelectedTab:(PTYSession *)session {
+    if ([[tabViewItem_ tabView] selectedTabViewItem] != [self tabViewItem]) {
+        return NO;
+    }
     return [self activeSession] == session;
 }
 

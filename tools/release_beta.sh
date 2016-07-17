@@ -4,6 +4,11 @@ function die {
   exit
 }
 
+if [ $# -ne 1 ]; then
+   echo "Usage: release_beta.sh version"
+   exit 1
+fi
+
 test -f "$PRIVKEY" || die "Set PRIVKEY environment variable to point at a valid private key (not set or nonexistent)"
 # Usage: SparkleSign testing.xml template.xml
 function SparkleSign {
@@ -80,10 +85,15 @@ function Build {
   popd
 }
 
+echo "$1" > version.txt
+echo Set version to
+cat version.txt
+
 COMPACTDATE=$(date +"%Y%m%d")
 VERSION=$(cat version.txt | sed -e "s/%(extra)s/$COMPACTDATE/")
 SVNDIR=~/iterm2-website
 ORIG_DIR=`pwd`
+
 
 echo "Build deployment release"
 make clean
@@ -93,9 +103,7 @@ BUILDTYPE=Deployment
 
 Build $BUILDTYPE "" "OS 10.8+" "This is the recommended beta build for most users. It contains a bunch of bug fixes, including fixes for some crashers." "" "--deep"
 
-echo Update the linky in the version3 release notes page
-sleep 2
-vi ~/iterm2-website/source/version3.md
+git checkout -- version.txt
 #set -x
 
 git tag v${VERSION}

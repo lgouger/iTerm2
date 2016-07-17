@@ -30,6 +30,7 @@
 #import "iTermSemanticHistoryPrefsController.h"
 #import "NSFileManager+iTerm.h"
 #import "NSStringITerm.h"
+#import "NSURL+iTerm.h"
 #import "RegexKitLite.h"
 
 NSString *const kSemanticHistoryPathSubstitutionKey = @"semanticHistory.path";
@@ -328,7 +329,7 @@ NSString *const kSemanticHistoryWorkingDirectorySubstitutionKey = @"semanticHist
         }
         url = [url stringByReplacingVariableReferencesWithVariables:augmentedSubs];
         DLog(@"Open url %@", url);
-        [self openURL:[NSURL URLWithString:url]];
+        [self openURL:[NSURL URLWithUserSuppliedString:url]];
         return YES;
     }
 

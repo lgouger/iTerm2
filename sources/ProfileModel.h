@@ -53,6 +53,10 @@ typedef struct {
     BOOL postChanges_;              // should change notifications be posted?
 }
 
+@property(nonatomic, readonly) NSString *modelName;
+
+- (instancetype)init NS_UNAVAILABLE;
+
 + (ProfileModel*)sharedInstance;
 + (ProfileModel*)sessionsInstance;
 + (NSString*)freshGuid;
@@ -92,6 +96,7 @@ typedef struct {
 - (NSArray*)allTags;
 - (BOOL)bookmark:(Profile*)bookmark hasTag:(NSString*)tag;
 - (Profile*)setObject:(id)object forKey:(NSString*)key inBookmark:(Profile*)bookmark;
+- (Profile *)setObjectsFromDictionary:(NSDictionary *)dictionary inProfile:(Profile *)bookmark;
 - (void)setDefaultByGuid:(NSString*)guid;
 - (void)moveGuid:(NSString*)guid toRow:(int)row;
 - (void)rebuildMenus;
