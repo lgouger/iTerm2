@@ -52,6 +52,7 @@ typedef struct {
     NSColor *foregroundColor;
     BOOL boxDrawing;
     NSFont *font;
+    BOOL bold;
     BOOL fakeBold;
     BOOL fakeItalic;
     BOOL underline;
@@ -71,6 +72,7 @@ enum {
 };
 
 static NSString *const iTermAntiAliasAttribute = @"iTermAntiAliasAttribute";
+static NSString *const iTermBoldAttribute = @"iTermBoldAttribute";
 static NSString *const iTermFakeBoldAttribute = @"iTermFakeBoldAttribute";
 static NSString *const iTermFakeItalicAttribute = @"iTermFakeItalicAttribute";
 static NSString *const iTermImageCodeAttribute = @"iTermImageCodeAttribute";
@@ -173,7 +175,7 @@ typedef struct iTermTextColorContext {
 - (void)drawTextViewContentInRect:(NSRect)rect
                          rectsPtr:(const NSRect *)rectArray
                         rectCount:(NSInteger)rectCount {
-    DLog(@"drawRect:%@ in view %@", [NSValue valueWithRect:rect], _delegate);
+//    NSLog(@"drawRect:%@ in view %@", [NSValue valueWithRect:rect], _delegate);
     if (_debug) {
         [[NSColor redColor] set];
         NSRectFill(rect);
@@ -186,10 +188,46 @@ typedef struct iTermTextColorContext {
         [self startTiming];
     }
 
+    const int haloWidth = 4;
+    NSInteger lastVisibleRow = NSMaxRange([self rangeOfVisibleRows]);
+    NSInteger yLimit = MIN(_numberOfLines, lastVisibleRow);
+
+    VT100GridCoordRange boundingCoordRange = [self coordRangeForRect:rect];
+    boundingCoordRange.start.x = MAX(0, boundingCoordRange.start.x - haloWidth);
+    boundingCoordRange.start.y = MAX(0, boundingCoordRange.start.y - 1);
+    boundingCoordRange.end.x = MIN(_gridSize.width, boundingCoordRange.end.x + haloWidth);
+    boundingCoordRange.end.y = MIN(yLimit, boundingCoordRange.end.y + 1);
+    
+    int numRowsInRect = boundingCoordRange.end.y - boundingCoordRange.start.y;
+    NSMutableData *store = [NSMutableData dataWithLength:numRowsInRect * sizeof(NSRange)];
+    NSRange *ranges = (NSRange *)store.mutableBytes;
     for (int i = 0; i < rectCount; i++) {
-        DLog(@"drawRect - draw sub rectangle %@", [NSValue valueWithRect:rectArray[i]]);
-        [self clipAndDrawRect:rectArray[i]];
+        VT100GridCoordRange coordRange = [self coordRangeForRect:rectArray[i]];
+//        NSLog(@"Have to draw rect %@ (%@)", NSStringFromRect(rectArray[i]), VT100GridCoordRangeDescription(coordRange));
+        int coordRangeMinX = MAX(0, coordRange.start.x - haloWidth);
+        int coordRangeMaxX = MIN(_gridSize.width, coordRange.end.x + haloWidth);
+
+        for (int j = 0; j < numRowsInRect; j++) {
+            NSRange gridRange = ranges[j];
+            if (gridRange.location == 0 && gridRange.length == 0) {
+                ranges[j].location = coordRangeMinX;
+                ranges[j].length = coordRangeMaxX - coordRangeMinX;
+            } else {
+                const int min = MIN(gridRange.location, coordRangeMinX);
+                const int max = MAX(gridRange.location + gridRange.length, coordRangeMaxX);
+                ranges[j].location = min;
+                ranges[j].length = max - min;
+            }
+//            NSLog(@"Set range on line %d to %@", j + boundingCoordRange.start.y, NSStringFromRange(ranges[j]));
+        }
     }
+
+    [self drawRanges:ranges count:numRowsInRect origin:boundingCoordRange.start boundingRect:[self rectForCoordRange:boundingCoordRange]];
+    
+    // The OS may ask us to draw an area outside the visible area, but that looks awful so cover it
+    // up by drawing some background over it.
+    [self drawExcessAtLine:[self coordRangeForRect:rect].end.y];
+
     [self drawCursor];
 
     if (_showDropTargets) {
@@ -201,72 +239,47 @@ typedef struct iTermTextColorContext {
     }
     
     if ([iTermAdvancedSettingsModel logDrawingPerformance]) {
-        iTermPreciseTimerPeriodicLog(_stats, sizeof(_stats) / sizeof(*_stats), 5);
+        iTermPreciseTimerPeriodicLog(_stats, sizeof(_stats) / sizeof(*_stats), 0);
     }
+
+
+//    NSColor *c = [NSColor colorWithCalibratedRed:(rand() % 255) / 255.0
+//                                           green:(rand() % 255) / 255.0
+//                                            blue:(rand() % 255) / 255.0
+//                                           alpha:1];
+//    [c set];
+//    NSFrameRect(rect);
 }
 
-- (void)clipAndDrawRect:(NSRect)rect {
-    NSGraphicsContext *context = [NSGraphicsContext currentContext];
-    [context saveGraphicsState];
-
-    // Compute the coordinate range.
-    VT100GridCoordRange coordRange = [self coordRangeForRect:rect];
-
-    // Clip to the area that needs to be drawn. We re-create the rect from the coord range to ensure
-    // it falls on the boundary of the cells.
-    NSRect innerRect = [self rectForCoordRange:coordRange];
-    NSRectClip(innerRect);
-
-    // Draw an extra ring of characters outside it.
-    NSRect outerRect = [self rectByGrowingRect:innerRect];
-    [self drawOneRect:outerRect];
-
-    [context restoreGraphicsState];
-
-    if (_debug) {
-      NSColor *c = [NSColor colorWithCalibratedRed:(rand() % 255) / 255.0
-                                             green:(rand() % 255) / 255.0
-                                              blue:(rand() % 255) / 255.0
-                                             alpha:1];
-      [c set];
-      NSFrameRect(rect);
-    }
-}
-
-- (void)drawOneRect:(NSRect)rect {
-    // The range of chars in the line that need to be drawn.
-    VT100GridCoordRange coordRange = [self drawableCoordRangeForRect:rect];
-
-    const double curLineWidth = _gridSize.width * _cellSize.width;
-    if (_cellSize.height <= 0 || curLineWidth <= 0) {
-        DLog(@"height or width too small");
-        return;
-    }
-
+- (void)drawRanges:(NSRange *)ranges count:(NSInteger)numRanges origin:(VT100GridCoord)origin boundingRect:(NSRect)boundingRect {
     // Configure graphics
     [[NSGraphicsContext currentContext] setCompositingOperation:NSCompositeCopy];
 
     iTermTextExtractor *extractor = [self.delegate drawingHelperTextExtractor];
     _blinkingFound = NO;
 
-    // We work hard to paint all the backgrounds first and then all the foregrounds. The reason this
-    // is necessary is because sometimes a glyph is larger than its cell. Some fonts draw narrow-
-    // width characters as full-width, some combining marks (e.g., combining enclosing circle) are
-    // necessarily larger than a cell, etc. For example, see issue 3446.
-    //
-    // By drawing characters after backgrounds and also drawing an extra "ring" of characters just
-    // outside the clipping region, we allow oversize characters to draw outside their bounds
-    // without getting painted-over by a background color. Of course if a glyph extends more than
-    // one full cell outside its bounds, it will still get overwritten by a background sometimes.
-
-    // First, find all the background runs. The outer array (backgroundRunArrays) will have one
-    // element per line. That element (a PTYTextViewBackgroundRunArray) contains the line number,
-    // y origin, and an array of PTYTextViewBackgroundRunBox objects.
-    NSRange charRange = NSMakeRange(coordRange.start.x, coordRange.end.x - coordRange.start.x);
-    double y = coordRange.start.y * _cellSize.height;
-    // An array of PTYTextViewBackgroundRunArray objects (one element per line).
     NSMutableArray *backgroundRunArrays = [NSMutableArray array];
-    for (int line = coordRange.start.y; line < coordRange.end.y; line++, y += _cellSize.height) {
+
+    for (NSInteger i = 0; i < numRanges; i++) {
+        const int line = origin.y + i;
+        NSRange charRange = ranges[i];
+        // We work hard to paint all the backgrounds first and then all the foregrounds. The reason this
+        // is necessary is because sometimes a glyph is larger than its cell. Some fonts draw narrow-
+        // width characters as full-width, some combining marks (e.g., combining enclosing circle) are
+        // necessarily larger than a cell, etc. For example, see issue 3446.
+        //
+        // By drawing characters after backgrounds and also drawing an extra "ring" of characters just
+        // outside the clipping region, we allow oversize characters to draw outside their bounds
+        // without getting painted-over by a background color. Of course if a glyph extends more than
+        // one full cell outside its bounds, it will still get overwritten by a background sometimes.
+
+        // First, find all the background runs. The outer array (backgroundRunArrays) will have one
+        // element per line. That element (a PTYTextViewBackgroundRunArray) contains the line number,
+        // y origin, and an array of PTYTextViewBackgroundRunBox objects.
+        const double y = line * _cellSize.height;
+        // An array of PTYTextViewBackgroundRunArray objects (one element per line).
+        
+//        NSLog(@"    draw line %d", line);
         NSData *matches = [_delegate drawingHelperMatchesOnLine:line];
         screen_char_t* theLine = [self.delegate drawingHelperLineAtIndex:line];
         NSIndexSet *selectedIndexes =
@@ -287,7 +300,7 @@ typedef struct iTermTextColorContext {
 
     // If a background image is in use, draw the whole rect at once.
     if (_hasBackgroundImage) {
-        [self.delegate drawingHelperDrawBackgroundImageInRect:rect
+        [self.delegate drawingHelperDrawBackgroundImageInRect:boundingRect
                                        blendDefaultBackground:NO];
     }
 
@@ -300,7 +313,7 @@ typedef struct iTermTextColorContext {
     }
 
     // Draw other background-like stuff that goes behind text.
-    [self drawAccessoriesInRect:rect coordRange:coordRange];
+    [self drawAccessoriesInRect:boundingRect];
 
     // Now iterate over the lines and paint the characters.
     CGContextRef ctx = (CGContextRef)[[NSGraphicsContext currentContext] graphicsPort];
@@ -320,9 +333,6 @@ typedef struct iTermTextColorContext {
         }
     }
 
-    // The OS may ask us to draw an area outside the visible area, but that looks awful so cover it
-    // up by drawing some background over it.
-    [self drawExcessAtLine:coordRange.end.y];
     [self drawTopMargin];
 
     // If the IME is in use, draw its contents over top of the "real" screen
@@ -343,9 +353,12 @@ typedef struct iTermTextColorContext {
 
 - (void)drawBackgroundForLine:(int)line
                           atY:(CGFloat)yOrigin
-                         runs:(NSArray *)runs {
+                         runs:(NSArray<iTermBoxedBackgroundColorRun *> *)runs {
     for (iTermBoxedBackgroundColorRun *box in runs) {
         iTermBackgroundColorRun *run = box.valuePointer;
+
+//        NSLog(@"Paint background row %d range %@", line, NSStringFromRange(run->range));
+        
         NSRect rect = NSMakeRect(floor(MARGIN + run->range.location * _cellSize.width),
                                  yOrigin,
                                  ceil(run->range.length * _cellSize.width),
@@ -501,7 +514,8 @@ typedef struct iTermTextColorContext {
 
 #pragma mark - Drawing: Accessories
 
-- (void)drawAccessoriesInRect:(NSRect)bgRect coordRange:(VT100GridCoordRange)coordRange {
+- (void)drawAccessoriesInRect:(NSRect)bgRect {
+    VT100GridCoordRange coordRange = [self coordRangeForRect:bgRect];
     [self drawBadgeInRect:bgRect];
 
     // Draw red stripes in the background if sending input to all sessions
@@ -544,7 +558,7 @@ typedef struct iTermTextColorContext {
 - (void)drawMarkIfNeededOnLine:(int)line leftMarginRect:(NSRect)leftMargin {
     VT100ScreenMark *mark = [self.delegate drawingHelperMarkOnLine:line];
     if (mark.isVisible && self.drawMarkIndicators) {
-        const CGFloat verticalSpacing = _cellSize.height - _cellSizeWithoutSpacing.height;
+        const CGFloat verticalSpacing = MAX(0, round((_cellSize.height - _cellSizeWithoutSpacing.height) / 2.0));
         CGRect rect = NSMakeRect(leftMargin.origin.x,
                                  leftMargin.origin.y + verticalSpacing,
                                  MARGIN,
@@ -833,7 +847,7 @@ typedef struct iTermTextColorContext {
 
 - (void)drawCharactersForLine:(int)line
                           atY:(CGFloat)y
-               backgroundRuns:(NSArray *)backgroundRuns
+               backgroundRuns:(NSArray<iTermBoxedBackgroundColorRun *> *)backgroundRuns
                       context:(CGContextRef)ctx {
     screen_char_t* theLine = [self.delegate drawingHelperLineAtIndex:line];
     NSData *matches = [_delegate drawingHelperMatchesOnLine:line];
@@ -874,6 +888,8 @@ typedef struct iTermTextColorContext {
         }
     }
 
+//    NSLog(@"Draw text on line %d range %@", row, NSStringFromRange(indexRange));
+
     iTermPreciseTimerStatsStartTimer(&_stats[TIMER_STAT_CONSTRUCTION]);
     NSArray<NSAttributedString *> *attributedStrings = [self attributedStringsForLine:theLine
                                                                                 range:indexRange
@@ -881,7 +897,7 @@ typedef struct iTermTextColorContext {
                                                                       backgroundColor:bgColor
                                                                        forceTextColor:forceTextColor
                                                                           findMatches:matches
-                                                                      underlinedRange:[self underlinedRangeOnLine:row]
+                                                                      underlinedRange:[self underlinedRangeOnLine:row + _totalScrollbackOverflow]
                                                                             positions:positions];
     iTermPreciseTimerStatsMeasureAndRecordTimer(&_stats[TIMER_STAT_CONSTRUCTION]);
     
@@ -920,7 +936,14 @@ typedef struct iTermTextColorContext {
                                           origin:origin
                                        positions:subpositions
                                        inContext:ctx];
+//        [[NSColor colorWithRed:arc4random_uniform(255) / 255.0
+//                         green:arc4random_uniform(255) / 255.0
+//                          blue:arc4random_uniform(255) / 255.0
+//                         alpha:1] set];
+//        NSFrameRect(NSMakeRect(point.x + [subpositions.firstObject doubleValue], point.y, width, _cellSize.height));
+
         origin.x += round(width / _cellSize.width);
+
     }
 
     if (useThinStrokes) {
@@ -990,6 +1013,7 @@ typedef struct iTermTextColorContext {
     NSDictionary *attributes = [attributedString attributesAtIndex:0 effectiveRange:nil];
     NSColor *color = attributes[NSForegroundColorAttributeName];
 
+    BOOL bold = [attributes[iTermBoldAttribute] boolValue];
     BOOL fakeBold = [attributes[iTermFakeBoldAttribute] boolValue];
     BOOL fakeItalic = [attributes[iTermFakeItalicAttribute] boolValue];
     BOOL antiAlias = [attributes[iTermAntiAliasAttribute] boolValue];
@@ -1060,7 +1084,13 @@ typedef struct iTermTextColorContext {
         CTFontRef runFont = CFDictionaryGetValue(CTRunGetAttributes(run), kCTFontAttributeName);
         CTFontDrawGlyphs(runFont, buffer, (NSPoint *)positions, length, cgContext);
 
-        if (fakeBold) {
+        if (bold && !fakeBold) {
+            // If this text is supposed to be bold, but the font is not, use double-struck text. Issue 4956.
+            CTFontSymbolicTraits traits = CTFontGetSymbolicTraits(runFont);
+            fakeBold = !(traits & kCTFontTraitBold);
+        }
+        
+        if (fakeBold && _boldAllowed) {
             CGContextTranslateCTM(cgContext, antiAlias ? _antiAliasedShift : 1, 0);
             CTFontDrawGlyphs(runFont, buffer, (NSPoint *)positions, length, cgContext);
             CGContextTranslateCTM(cgContext, antiAlias ? -_antiAliasedShift : -1, 0);
@@ -1222,6 +1252,7 @@ static BOOL iTermTextDrawingHelperIsCharacterDrawable(screen_char_t *c,
         *combinedAttributesChanged = YES;
         return NO;
     }
+    
     if (likely(!imageAttributes && !previousImageAttributes)) {
         // Not an image cell. Try to quicly check if the attributes are the same, which is the normal case.
         if (likely(!memcmp(previousAttributes, newAttributes, sizeof(*previousAttributes)))) {
@@ -1233,7 +1264,7 @@ static BOOL iTermTextDrawingHelperIsCharacterDrawable(screen_char_t *c,
                                           ![newAttributes->foregroundColor isEqual:previousAttributes->foregroundColor] ||
                                           newAttributes->boxDrawing != previousAttributes->boxDrawing ||
                                           ![newAttributes->font isEqual:previousAttributes->font] ||
-                                          newAttributes->fakeBold != previousAttributes->fakeBold ||
+                                          newAttributes->bold != previousAttributes->bold ||
                                           newAttributes->fakeItalic != previousAttributes->fakeItalic ||
                                           newAttributes->underline != previousAttributes->underline);
         }
@@ -1289,8 +1320,10 @@ static BOOL iTermTextDrawingHelperIsCharacterDrawable(screen_char_t *c,
     const unichar code = c->code;
 
     attributes->boxDrawing = !complex && [[iTermBoxDrawingBezierCurveFactory boxDrawingCharactersWithBezierPaths] characterIsMember:code];
-    attributes->fakeBold = c->bold;
-    attributes->fakeItalic = c->italic;
+    attributes->bold = c->bold;
+
+    attributes->fakeBold = c->bold;  // default value
+    attributes->fakeItalic = c->italic;  // default value
     PTYFontInfo *fontInfo = [_delegate drawingHelperFontForChar:code
                                                       isComplex:complex
                                                      renderBold:&attributes->fakeBold
@@ -1302,12 +1335,13 @@ static BOOL iTermTextDrawingHelperIsCharacterDrawable(screen_char_t *c,
 }
 
 - (NSDictionary *)dictionaryForCharacterAttributes:(iTermCharacterAttributes *)attributes {
-    return @{ (NSString *)kCTLigatureAttributeName: @1,
-              iTermAntiAliasAttribute: @(attributes->shouldAntiAlias),
+    return @{ (NSString *)kCTLigatureAttributeName: @0,
               NSForegroundColorAttributeName: attributes->foregroundColor,
-              iTermIsBoxDrawingAttribute: @(attributes->boxDrawing),
               NSFontAttributeName: attributes->font,
+              iTermAntiAliasAttribute: @(attributes->shouldAntiAlias),
+              iTermIsBoxDrawingAttribute: @(attributes->boxDrawing),
               iTermFakeBoldAttribute: @(attributes->fakeBold),
+              iTermBoldAttribute: @(attributes->bold),
               iTermFakeItalicAttribute: @(attributes->fakeItalic),
               NSUnderlineStyleAttributeName: attributes->underline ? @(NSUnderlineStyleSingle) : @(NSUnderlineStyleNone) };
 }
@@ -1373,9 +1407,7 @@ static BOOL iTermTextDrawingHelperIsCharacterDrawable(screen_char_t *c,
                                                                         _blinkAllowed);
         
         if (!drawable) {
-            code = ' ';
-            charAsString = nil;
-            complex = NO;
+            continue;
         }
 
         [self getAttributesForCharacter:&c
@@ -1659,10 +1691,11 @@ static BOOL iTermTextDrawingHelperIsCharacterDrawable(screen_char_t *c,
 
 - (NSRect)cursorFrame {
     const int rowNumber = _cursorCoord.y + _numberOfLines - _gridSize.height;
+    const CGFloat height = MIN(_cellSize.height, _cellSizeWithoutSpacing.height);
     return NSMakeRect(floor(_cursorCoord.x * _cellSize.width + MARGIN),
-                      rowNumber * _cellSize.height + round((_cellSize.height - _cellSizeWithoutSpacing.height) / 2.0),
+                      rowNumber * _cellSize.height + MAX(0, round((_cellSize.height - _cellSizeWithoutSpacing.height) / 2.0)),
                       MIN(_cellSize.width, _cellSizeWithoutSpacing.width),
-                      _cellSizeWithoutSpacing.height);
+                      height);
 }
 
 - (void)drawCursor {
@@ -1746,37 +1779,37 @@ static BOOL iTermTextDrawingHelperIsCharacterDrawable(screen_char_t *c,
 
 #pragma mark - Text Run Construction
 
-- (NSRange)underlinedRangeOnLine:(int)row {
-    if (_underlineRange.coordRange.start.x < 0) {
+- (NSRange)underlinedRangeOnLine:(long long)row {
+    if (_underlinedRange.coordRange.start.x < 0) {
         return NSMakeRange(0, 0);
     }
 
-    if (row == _underlineRange.coordRange.start.y && row == _underlineRange.coordRange.end.y) {
+    if (row == _underlinedRange.coordRange.start.y && row == _underlinedRange.coordRange.end.y) {
         // Whole underline is on one line.
-        const int start = VT100GridWindowedRangeStart(_underlineRange).x;
-        const int end = VT100GridWindowedRangeEnd(_underlineRange).x;
+        const int start = VT100GridAbsWindowedRangeStart(_underlinedRange).x;
+        const int end = VT100GridAbsWindowedRangeEnd(_underlinedRange).x;
         return NSMakeRange(start, end - start);
-    } else if (row == _underlineRange.coordRange.start.y) {
+    } else if (row == _underlinedRange.coordRange.start.y) {
         // Underline spans multiple lines, starting at this one.
-        const int start = VT100GridWindowedRangeStart(_underlineRange).x;
+        const int start = VT100GridAbsWindowedRangeStart(_underlinedRange).x;
         const int end =
-        _underlineRange.columnWindow.length > 0 ? VT100GridRangeMax(_underlineRange.columnWindow) + 1
-        : _gridSize.width;
+            _underlinedRange.columnWindow.length > 0 ? VT100GridRangeMax(_underlinedRange.columnWindow) + 1
+            : _gridSize.width;
         return NSMakeRange(start, end - start);
-    } else if (row == _underlineRange.coordRange.end.y) {
+    } else if (row == _underlinedRange.coordRange.end.y) {
         // Underline spans multiple lines, ending at this one.
         const int start =
-        _underlineRange.columnWindow.length > 0 ? _underlineRange.columnWindow.location : 0;
-        const int end = VT100GridWindowedRangeEnd(_underlineRange).x;
+            _underlinedRange.columnWindow.length > 0 ? _underlinedRange.columnWindow.location : 0;
+        const int end = VT100GridAbsWindowedRangeEnd(_underlinedRange).x;
         return NSMakeRange(start, end - start);
-    } else if (row > _underlineRange.coordRange.start.y && row < _underlineRange.coordRange.end.y) {
+    } else if (row > _underlinedRange.coordRange.start.y && row < _underlinedRange.coordRange.end.y) {
         // Underline spans multiple lines. This is not the first or last line, so all chars
         // in it are underlined.
         const int start =
-        _underlineRange.columnWindow.length > 0 ? _underlineRange.columnWindow.location : 0;
+            _underlinedRange.columnWindow.length > 0 ? _underlinedRange.columnWindow.location : 0;
         const int end =
-        _underlineRange.columnWindow.length > 0 ? VT100GridRangeMax(_underlineRange.columnWindow) + 1
-        : _gridSize.width;
+            _underlinedRange.columnWindow.length > 0 ? VT100GridRangeMax(_underlinedRange.columnWindow) + 1
+            : _gridSize.width;
         return NSMakeRange(start, end - start);
     } else {
         // No underline on this line.
@@ -1877,7 +1910,7 @@ static BOOL iTermTextDrawingHelperIsCharacterDrawable(screen_char_t *c,
 
 - (NSRect)rectByGrowingRect:(NSRect)innerRect {
     NSSize frameSize = _frame.size;
-    const NSInteger extraWidth = 1;
+    const NSInteger extraWidth = 8;
     const NSInteger extraHeight = 1;
     NSPoint minPoint = NSMakePoint(MAX(0, innerRect.origin.x - extraWidth * _cellSize.width),
                                    MAX(0, innerRect.origin.y - extraHeight * _cellSize.height));

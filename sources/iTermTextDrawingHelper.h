@@ -189,7 +189,7 @@
 @property(nonatomic, assign) BOOL blinkAllowed;
 
 // Underlined selection range (inclusive of all values), indicating clickable url.
-@property(nonatomic, assign) VT100GridWindowedRange underlineRange;
+@property(nonatomic, assign) VT100GridAbsWindowedRange underlinedRange;
 
 // If set, the last-modified time of each line on the screen is shown on the right side of the display.
 @property(nonatomic, assign) BOOL showTimestamps;
@@ -251,6 +251,10 @@
 
 // Smallest of the baseline offset for the available fonts. Is a negative number.
 @property(nonatomic, assign) CGFloat baselineOffset;
+
+// Is bold text allowed? If so, then double struck text may be used when a bold version of the font
+// is not available.
+@property(nonatomic, assign) BOOL boldAllowed;
 
 // Updates self.blinkingFound.
 - (void)drawTextViewContentInRect:(NSRect)rect

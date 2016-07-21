@@ -279,8 +279,8 @@ static const int kDragThreshold = 3;
         _selection = [[iTermSelection alloc] init];
         _selection.delegate = self;
         _oldSelection = [_selection copy];
-        _drawingHelper.underlineRange =
-            VT100GridWindowedRangeMake(VT100GridCoordRangeMake(-1, -1, -1, -1), 0, 0);
+        _drawingHelper.underlinedRange =
+            VT100GridAbsWindowedRangeMake(VT100GridAbsCoordRangeMake(-1, -1, -1, -1), 0, 0);
         _timeOfLastBlink = [NSDate timeIntervalSinceReferenceDate];
         [[self window] useOptimizedDrawing:YES];
 
@@ -1108,7 +1108,8 @@ static const int kDragThreshold = 3;
     _drawingHelper.thinStrokes = _thinStrokes;
     _drawingHelper.showSearchingCursor = _showSearchingCursor;
     _drawingHelper.baselineOffset = [self minimumBaselineOffset];
-    
+    _drawingHelper.boldAllowed = _useBoldFont;
+
     const NSRect *rectArray;
     NSInteger rectCount;
     [self getRectsBeingDrawn:&rectArray count:&rectCount];
@@ -1690,7 +1691,7 @@ static const int kDragThreshold = 3;
 }
 
 - (BOOL)hasUnderline {
-    return _drawingHelper.underlineRange.coordRange.start.x >= 0;
+    return _drawingHelper.underlinedRange.coordRange.start.x >= 0;
 }
 
 // Reset underlined chars indicating cmd-clicakble url.
@@ -1698,8 +1699,8 @@ static const int kDragThreshold = 3;
     if (![self hasUnderline]) {
         return;
     }
-    _drawingHelper.underlineRange =
-        VT100GridWindowedRangeMake(VT100GridCoordRangeMake(-1, -1, -1, -1), 0, 0);
+    _drawingHelper.underlinedRange =
+        VT100GridAbsWindowedRangeMake(VT100GridAbsCoordRangeMake(-1, -1, -1, -1), 0, 0);
     if (self.currentUnderlineHostname) {
         [[AsyncHostLookupController sharedInstance] cancelRequestForHostname:self.currentUnderlineHostname];
     }
@@ -1732,7 +1733,7 @@ static const int kDragThreshold = 3;
                                                          y:y
                                     respectingHardNewlines:![iTermAdvancedSettingsModel ignoreHardNewlinesInURLs]];
             if (action) {
-                _drawingHelper.underlineRange = action.range;
+                _drawingHelper.underlinedRange = VT100GridAbsWindowedRangeFromRelative(action.range, [_dataSource totalScrollbackOverflow]);
 
                 if (action.actionType == kURLActionOpenURL) {
                     NSURL *url = [NSURL URLWithUserSuppliedString:action.string];
@@ -6142,8 +6143,8 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
     if ([[notification object] isEqualToString:self.currentUnderlineHostname]) {
         self.currentUnderlineHostname = nil;
         [self removeUnderline];
-        _drawingHelper.underlineRange =
-            VT100GridWindowedRangeMake(VT100GridCoordRangeMake(-1, -1, -1, -1), 0, 0);
+        _drawingHelper.underlinedRange =
+            VT100GridAbsWindowedRangeMake(VT100GridAbsCoordRangeMake(-1, -1, -1, -1), 0, 0);
         [self setNeedsDisplay:YES];
     }
 }
@@ -6571,9 +6572,10 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
 }
 
 - (NSRect)rectWithHalo:(NSRect)rect {
-    rect.origin.x = 0;
+    return rect;
+    rect.origin.x = rect.origin.x - _charWidth * 1;
     rect.origin.y -= _lineHeight;
-    rect.size.width = self.frame.size.width;
+    rect.size.width = self.frame.size.width + _charWidth * 2;
     rect.size.height += _lineHeight * 2;
 
     return rect;
