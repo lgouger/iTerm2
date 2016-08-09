@@ -255,7 +255,7 @@ static NSMutableDictionary *gObservers;
                   kPreferenceKeyOptionClickMovesCursor: @YES,
                   kPreferenceKeyThreeFingerEmulatesMiddle: @NO,
                   kPreferenceKeyFocusFollowsMouse: @NO,
-                  kPreferenceKeyTripleClickSelectsFullWrappedLines: @NO,
+                  kPreferenceKeyTripleClickSelectsFullWrappedLines: @YES,
                   kPreferenceKeyDoubleClickPerformsSmartSelection: @NO,
 
                   kPreferenceAutoCommandHistory: @NO,
@@ -410,6 +410,14 @@ static NSMutableDictionary *gObservers;
 }
 
 + (void)setInt:(int)value forKey:(NSString *)key {
+    [self setObject:@(value) forKey:key];
+}
+
++ (NSInteger)integerForKey:(NSString *)key {
+    return [(NSNumber *)[self objectForKey:key] integerValue];
+}
+
++ (void)setInteger:(NSInteger)value forKey:(NSString *)key {
     [self setObject:@(value) forKey:key];
 }
 

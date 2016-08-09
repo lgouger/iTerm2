@@ -685,33 +685,14 @@ static const int kDragThreshold = 3;
     self.lineHeight = ceil(_charHeightWithoutSpacing * verticalSpacing);
 
     _primaryFont.font = aFont;
-    _primaryFont.baselineOffset = baseline;
     _primaryFont.boldVersion = [_primaryFont computedBoldVersion];
     _primaryFont.italicVersion = [_primaryFont computedItalicVersion];
     _primaryFont.boldItalicVersion = [_primaryFont computedBoldItalicVersion];
 
     _secondaryFont.font = nonAsciiFont;
-    _secondaryFont.baselineOffset = baseline;
     _secondaryFont.boldVersion = [_secondaryFont computedBoldVersion];
     _secondaryFont.italicVersion = [_secondaryFont computedItalicVersion];
     _secondaryFont.boldItalicVersion = [_secondaryFont computedBoldItalicVersion];
-
-    // Force the secondary font to use the same baseline as the primary font.
-    _secondaryFont.baselineOffset = _primaryFont.baselineOffset;
-    if (_secondaryFont.boldVersion) {
-        if (_primaryFont.boldVersion) {
-            _secondaryFont.boldVersion.baselineOffset = _primaryFont.boldVersion.baselineOffset;
-        } else {
-            _secondaryFont.boldVersion.baselineOffset = _secondaryFont.baselineOffset;
-        }
-    }
-    if (_secondaryFont.italicVersion) {
-        if (_primaryFont.italicVersion) {
-            _secondaryFont.italicVersion.baselineOffset = _primaryFont.italicVersion.baselineOffset;
-        } else {
-            _secondaryFont.italicVersion.baselineOffset = _secondaryFont.baselineOffset;
-        }
-    }
 
     [self updateMarkedTextAttributes];
     [self setNeedsDisplay:YES];
@@ -1064,9 +1045,11 @@ static const int kDragThreshold = 3;
 }
 
 - (CGFloat)minimumBaselineOffset {
-    CGFloat asciiOffset = -(floorf(self.font.leading) - floorf(self.font.descender));
-    CGFloat nonasciiOffset = self.useNonAsciiFont ? -(floorf(self.nonAsciiFont.leading) - floorf(self.nonAsciiFont.descender)) : 0;
-    return MIN(asciiOffset, nonasciiOffset);
+    if (self.useNonAsciiFont) {
+        return MIN(_primaryFont.baselineOffset, _secondaryFont.baselineOffset);
+    } else {
+        return _primaryFont.baselineOffset;
+    }
 }
 
 - (void)drawRect:(NSRect)rect {
@@ -1109,7 +1092,8 @@ static const int kDragThreshold = 3;
     _drawingHelper.showSearchingCursor = _showSearchingCursor;
     _drawingHelper.baselineOffset = [self minimumBaselineOffset];
     _drawingHelper.boldAllowed = _useBoldFont;
-
+    _drawingHelper.unicodeVersion = [_delegate textViewUnicodeVersion];
+    
     const NSRect *rectArray;
     NSInteger rectCount;
     [self getRectsBeingDrawn:&rectArray count:&rectCount];
@@ -5625,7 +5609,8 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
                         [_delegate textViewAmbiguousWidthCharsAreDoubleWidth],
                         NULL,
                         NULL,
-                        [_delegate textViewUseHFSPlusMapping]);
+                        [_delegate textViewUseHFSPlusMapping],
+                        [_delegate textViewUnicodeVersion]);
 
     // Count how many additional cells are needed due to double-width chars
     // that span line breaks being wrapped to the next line.
@@ -6414,11 +6399,11 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
 - (void)setNeedsDisplayOnLine:(int)y inRange:(VT100GridRange)range {
     NSRect dirtyRect;
     const int x = range.location;
-    const int maxX = range.location + range.length - 1;
+    const int maxX = range.location + range.length;
 
     dirtyRect.origin.x = MARGIN + x * _charWidth;
     dirtyRect.origin.y = y * _lineHeight;
-    dirtyRect.size.width = (maxX - x + 1) * _charWidth;
+    dirtyRect.size.width = (maxX - x) * _charWidth;
     dirtyRect.size.height = _lineHeight;
 
     if (_drawingHelper.showTimestamps) {
@@ -6428,7 +6413,7 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
     // Expand the rect in case we're drawing a changed cell with an oversize glyph.
     dirtyRect = [self rectWithHalo:dirtyRect];
 
-    DLog(@"Line %d is dirty from %d to %d, set rect %@ dirty",
+    DLog(@"Line %d is dirty in range [%d, %d), set rect %@ dirty",
          y, x, maxX, [NSValue valueWithRect:dirtyRect]);
     [self setNeedsDisplayInRect:dirtyRect];
 }
@@ -6572,10 +6557,10 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
 }
 
 - (NSRect)rectWithHalo:(NSRect)rect {
-    return rect;
-    rect.origin.x = rect.origin.x - _charWidth * 1;
+    const int kHaloWidth = 4;
+    rect.origin.x = rect.origin.x - _charWidth * kHaloWidth;
     rect.origin.y -= _lineHeight;
-    rect.size.width = self.frame.size.width + _charWidth * 2;
+    rect.size.width = self.frame.size.width + _charWidth * 2 * kHaloWidth;
     rect.size.height += _lineHeight * 2;
 
     return rect;

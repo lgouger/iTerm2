@@ -32,7 +32,6 @@
 #import "VT100Token.h"
 
 #import <apr-1/apr_base64.h>
-#include <string.h>
 
 NSString *const kScreenStateKey = @"Screen State";
 
@@ -1042,7 +1041,8 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
                         [delegate_ screenShouldTreatAmbiguousCharsAsDoubleWidth],
                         NULL,
                         &dwc,
-                        _useHFSPlusMapping);
+                        _useHFSPlusMapping,
+                        [delegate_ screenUnicodeVersion]);
     ssize_t bufferOffset = 0;
     if (augmented && len > 0) {
         screen_char_t *theLine = [self getLineAtScreenIndex:pred.y];
@@ -2543,7 +2543,7 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
     } else {
         lineBuffer = linebuffer_;
     }
-    const int n = [currentGrid_ numberOfNonEmptyLines];
+    const int n = [currentGrid_ numberOfNonEmptyLinesIncludingWhitespaceAsEmpty:YES];
     for (int i = 0; i < n; i++) {
         [self incrementOverflowBy:
             [currentGrid_ scrollWholeScreenUpIntoLineBuffer:lineBuffer
@@ -3844,6 +3844,14 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
     return [delegate_ screenCellSize];
 }
 
+- (void)terminalSetUnicodeVersion:(NSInteger)unicodeVersion {
+    [delegate_ screenSetUnicodeVersion:unicodeVersion];
+}
+
+- (NSInteger)terminalUnicodeVersion {
+    return [delegate_ screenUnicodeVersion];
+}
+
 #pragma mark - Private
 
 - (VT100GridCoordRange)commandRange {
@@ -4242,10 +4250,10 @@ static void SwapInt(int *a, int *b) {
     collectInputForPrinting_ = NO;
 }
 
-- (BOOL)isDoubleWidthCharacter:(unichar)c
-{
+- (BOOL)isDoubleWidthCharacter:(unichar)c {
     return [NSString isDoubleWidthCharacter:c
-                     ambiguousIsDoubleWidth:[delegate_ screenShouldTreatAmbiguousCharsAsDoubleWidth]];
+                     ambiguousIsDoubleWidth:[delegate_ screenShouldTreatAmbiguousCharsAsDoubleWidth]
+                             unicodeVersion:[delegate_ screenUnicodeVersion]];
 }
 
 - (void)popScrollbackLines:(int)linesPushed
@@ -4514,7 +4522,7 @@ static void SwapInt(int *a, int *b) {
            kScreenStateShellIntegrationInstalledKey: @(_shellIntegrationInstalled),
            kScreenStateLastCommandMarkKey: _lastCommandMark.guid ?: [NSNull null],
            kScreenStatePrimaryGridStateKey: primaryGrid_.dictionaryValue ?: @{},
-           kScreenStateAlternateGridStateKey: primaryGrid_.dictionaryValue ?: [NSNull null],
+           kScreenStateAlternateGridStateKey: altGrid_.dictionaryValue ?: [NSNull null],
            kScreenStateNumberOfLinesDroppedKey: @(linesDroppedForBrevity)
            };
     return [dict dictionaryByRemovingNullValues];

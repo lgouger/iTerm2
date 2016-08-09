@@ -9,6 +9,7 @@
 #import "iTermTextDrawingHelper.h"
 
 #import "charmaps.h"
+#import "CVector.h"
 #import "DebugLogging.h"
 #import "iTermAdvancedSettingsModel.h"
 #import "iTermBackgroundColorRun.h"
@@ -56,6 +57,7 @@ typedef struct {
     BOOL fakeBold;
     BOOL fakeItalic;
     BOOL underline;
+    NSInteger ligatureLevel;
 } iTermCharacterAttributes;
 
 enum {
@@ -189,22 +191,27 @@ typedef struct iTermTextColorContext {
     }
 
     const int haloWidth = 4;
-    NSInteger lastVisibleRow = NSMaxRange([self rangeOfVisibleRows]);
-    NSInteger yLimit = MIN(_numberOfLines, lastVisibleRow);
+    NSInteger yLimit = _numberOfLines;
 
     VT100GridCoordRange boundingCoordRange = [self coordRangeForRect:rect];
-    boundingCoordRange.start.x = MAX(0, boundingCoordRange.start.x - haloWidth);
+    // Start at 0 because ligatures can draw incorrectly otherwise. When a font has a ligature for
+    // -> and >-, then a line like ->->-> needs to start at the beginning since drawing only a
+    // suffix of it could draw a >- ligature at the start of the range being drawn. Issue 5030.
+    boundingCoordRange.start.x = 0;
     boundingCoordRange.start.y = MAX(0, boundingCoordRange.start.y - 1);
     boundingCoordRange.end.x = MIN(_gridSize.width, boundingCoordRange.end.x + haloWidth);
     boundingCoordRange.end.y = MIN(yLimit, boundingCoordRange.end.y + 1);
     
-    int numRowsInRect = boundingCoordRange.end.y - boundingCoordRange.start.y;
+    int numRowsInRect = MAX(0, boundingCoordRange.end.y - boundingCoordRange.start.y);
+    if (numRowsInRect == 0) {
+        return;
+    }
     NSMutableData *store = [NSMutableData dataWithLength:numRowsInRect * sizeof(NSRange)];
     NSRange *ranges = (NSRange *)store.mutableBytes;
     for (int i = 0; i < rectCount; i++) {
         VT100GridCoordRange coordRange = [self coordRangeForRect:rectArray[i]];
 //        NSLog(@"Have to draw rect %@ (%@)", NSStringFromRect(rectArray[i]), VT100GridCoordRangeDescription(coordRange));
-        int coordRangeMinX = MAX(0, coordRange.start.x - haloWidth);
+        int coordRangeMinX = 0;
         int coordRangeMaxX = MIN(_gridSize.width, coordRange.end.x + haloWidth);
 
         for (int j = 0; j < numRowsInRect; j++) {
@@ -243,12 +250,27 @@ typedef struct iTermTextColorContext {
     }
 
 
-//    NSColor *c = [NSColor colorWithCalibratedRed:(rand() % 255) / 255.0
-//                                           green:(rand() % 255) / 255.0
-//                                            blue:(rand() % 255) / 255.0
-//                                           alpha:1];
-//    [c set];
-//    NSFrameRect(rect);
+    if (_debug) {
+        NSColor *c = [NSColor colorWithCalibratedRed:(rand() % 255) / 255.0
+                                               green:(rand() % 255) / 255.0
+                                                blue:(rand() % 255) / 255.0
+                                               alpha:1];
+        [c set];
+        NSFrameRect(rect);
+    }
+}
+
+- (NSInteger)numberOfEquivalentBackgroundColorLinesInRunArrays:(NSArray<iTermBackgroundColorRunsInLine *> *)backgroundRunArrays
+                                                     fromIndex:(NSInteger)startIndex {
+    NSInteger count = 1;
+    iTermBackgroundColorRunsInLine *reference = backgroundRunArrays[startIndex];
+    for (NSInteger i = startIndex + 1; i < backgroundRunArrays.count; i++) {
+        if (![backgroundRunArrays[i].array isEqualToArray:reference.array]) {
+            break;
+        }
+        ++count;
+    }
+    return count;
 }
 
 - (void)drawRanges:(NSRange *)ranges count:(NSInteger)numRanges origin:(VT100GridCoord)origin boundingRect:(NSRect)boundingRect {
@@ -258,7 +280,7 @@ typedef struct iTermTextColorContext {
     iTermTextExtractor *extractor = [self.delegate drawingHelperTextExtractor];
     _blinkingFound = NO;
 
-    NSMutableArray *backgroundRunArrays = [NSMutableArray array];
+    NSMutableArray<iTermBackgroundColorRunsInLine *> *backgroundRunArrays = [NSMutableArray array];
 
     for (NSInteger i = 0; i < numRanges; i++) {
         const int line = origin.y + i;
@@ -305,11 +327,17 @@ typedef struct iTermTextColorContext {
     }
 
     // Now iterate over the lines and paint the backgrounds.
-    for (iTermBackgroundColorRunsInLine *runArray in backgroundRunArrays) {
+    for (NSInteger i = 0; i < backgroundRunArrays.count; ) {
+        NSInteger rows = [self numberOfEquivalentBackgroundColorLinesInRunArrays:backgroundRunArrays fromIndex:i];
+        iTermBackgroundColorRunsInLine *runArray = backgroundRunArrays[i];
         [self drawBackgroundForLine:runArray.line
                                 atY:runArray.y
-                               runs:runArray.array];
-        [self drawMarginsAndMarkForLine:runArray.line y:runArray.y];
+                               runs:runArray.array
+                     equivalentRows:rows];
+        for (NSInteger j = i; j < i + rows; j++) {
+            [self drawMarginsAndMarkForLine:backgroundRunArrays[j].line y:backgroundRunArrays[j].y];
+        }
+        i += rows;
     }
 
     // Draw other background-like stuff that goes behind text.
@@ -353,7 +381,8 @@ typedef struct iTermTextColorContext {
 
 - (void)drawBackgroundForLine:(int)line
                           atY:(CGFloat)yOrigin
-                         runs:(NSArray<iTermBoxedBackgroundColorRun *> *)runs {
+                         runs:(NSArray<iTermBoxedBackgroundColorRun *> *)runs
+               equivalentRows:(NSInteger)rows {
     for (iTermBoxedBackgroundColorRun *box in runs) {
         iTermBackgroundColorRun *run = box.valuePointer;
 
@@ -362,7 +391,7 @@ typedef struct iTermTextColorContext {
         NSRect rect = NSMakeRect(floor(MARGIN + run->range.location * _cellSize.width),
                                  yOrigin,
                                  ceil(run->range.length * _cellSize.width),
-                                 _cellSize.height);
+                                 _cellSize.height * rows);
         NSColor *color = [self unprocessedColorForBackgroundRun:run];
         // The unprocessed color is needed for minimum contrast computation for text color.
         box.unprocessedBackgroundColor = color;
@@ -509,7 +538,11 @@ typedef struct iTermTextColorContext {
     }
     NSColor *color = [NSColor colorWithPatternImage:_backgroundStripesImage];
     [color set];
+
+    [NSGraphicsContext saveGraphicsState];
+    [[NSGraphicsContext currentContext] setPatternPhase:NSMakePoint(0, 0)];
     NSRectFillUsingOperation(rect, NSCompositeSourceOver);
+    [NSGraphicsContext restoreGraphicsState];
 }
 
 #pragma mark - Drawing: Accessories
@@ -861,6 +894,7 @@ typedef struct iTermTextColorContext {
                           startingAtPoint:textOrigin
                                bgselected:run->selected
                                   bgColor:box.unprocessedBackgroundColor
+                 processedBackgroundColor:box.backgroundColor
                                   matches:matches
                            forceTextColor:nil
                                   context:ctx];
@@ -873,11 +907,14 @@ typedef struct iTermTextColorContext {
                     startingAtPoint:(NSPoint)initialPoint
                          bgselected:(BOOL)bgselected
                             bgColor:(NSColor *)bgColor
+           processedBackgroundColor:(NSColor *)processedBackgroundColor
                             matches:(NSData *)matches
                      forceTextColor:(NSColor *)forceTextColor  // optional
                             context:(CGContextRef)ctx {
-    NSMutableArray<NSNumber *> *positions = [NSMutableArray array];
-    
+    CTVector(CGFloat) positions;
+    CTVectorCreate(&positions, _gridSize.width);
+
+
     if (indexRange.location > 0) {
         screen_char_t firstCharacter = theLine[indexRange.location];
         if (firstCharacter.code == DWC_RIGHT && !firstCharacter.complexChar) {
@@ -898,56 +935,48 @@ typedef struct iTermTextColorContext {
                                                                        forceTextColor:forceTextColor
                                                                           findMatches:matches
                                                                       underlinedRange:[self underlinedRangeOnLine:row + _totalScrollbackOverflow]
-                                                                            positions:positions];
+                                                                            positions:&positions];
     iTermPreciseTimerStatsMeasureAndRecordTimer(&_stats[TIMER_STAT_CONSTRUCTION]);
     
     iTermPreciseTimerStatsStartTimer(&_stats[TIMER_STAT_DRAW]);
     [self drawMultipartAttributedString:attributedStrings
                                 atPoint:initialPoint
                                  origin:VT100GridCoordMake(indexRange.location, row)
-                              positions:positions
-                              inContext:ctx];
+                              positions:&positions
+                              inContext:ctx
+                        backgroundColor:processedBackgroundColor];
+    
+    CTVectorDestroy(&positions);
     iTermPreciseTimerStatsMeasureAndRecordTimer(&_stats[TIMER_STAT_DRAW]);
 }
 
 - (void)drawMultipartAttributedString:(NSArray<NSAttributedString *> *)attributedStrings
                               atPoint:(NSPoint)initialPoint
                                origin:(VT100GridCoord)initialOrigin
-                            positions:(NSArray<NSNumber *> *)positions
-                            inContext:(CGContextRef)ctx {
-    int savedFontSmoothingStyle = 0;
-    BOOL useThinStrokes = [self useThinStrokes];
-    if (useThinStrokes) {
-        // This seems to be available at least on 10.8 and later. The only reference to it is in
-        // WebKit. This causes text to render just a little lighter, which looks nicer.
-        savedFontSmoothingStyle = CGContextGetFontSmoothingStyle(ctx);
-        CGContextSetFontSmoothingStyle(ctx, 16);
-    }
-    
+                            positions:(CTVector(CGFloat) *)positions
+                            inContext:(CGContextRef)ctx
+                      backgroundColor:(NSColor *)backgroundColor {
     NSPoint point = initialPoint;
     VT100GridCoord origin = initialOrigin;
     NSInteger start = 0;
     for (NSAttributedString *singlePartAttributedString in attributedStrings) {
-        NSArray *subpositions = [positions subarrayWithRange:NSMakeRange(start, singlePartAttributedString.length)];
+        CGFloat *subpositions = CTVectorElementsFromIndex(positions, start);
         start += singlePartAttributedString.length;
         CGFloat width =
             [self drawSinglePartAttributedString:singlePartAttributedString
                                          atPoint:point
                                           origin:origin
                                        positions:subpositions
-                                       inContext:ctx];
+                                       inContext:ctx
+                                 backgroundColor:backgroundColor];
 //        [[NSColor colorWithRed:arc4random_uniform(255) / 255.0
 //                         green:arc4random_uniform(255) / 255.0
 //                          blue:arc4random_uniform(255) / 255.0
 //                         alpha:1] set];
-//        NSFrameRect(NSMakeRect(point.x + [subpositions.firstObject doubleValue], point.y, width, _cellSize.height));
+//        NSFrameRect(NSMakeRect(point.x + positions->elements[0], point.y, width, _cellSize.height));
 
         origin.x += round(width / _cellSize.width);
 
-    }
-
-    if (useThinStrokes) {
-        CGContextSetFontSmoothingStyle(ctx, savedFontSmoothingStyle);
     }
 }
 
@@ -972,8 +1001,9 @@ typedef struct iTermTextColorContext {
 - (CGFloat)drawSinglePartAttributedString:(NSAttributedString *)attributedString
                                   atPoint:(NSPoint)point
                                    origin:(VT100GridCoord)origin
-                                positions:(NSArray<NSNumber *> *)positions
-                                inContext:(CGContextRef)ctx {
+                                positions:(CGFloat *)positions
+                                inContext:(CGContextRef)ctx
+                          backgroundColor:(NSColor *)backgroundColor {
     NSDictionary *attributes = [attributedString attributesAtIndex:0 effectiveRange:nil];
     if (attributes[iTermImageCodeAttribute]) {
         // Handle cells that are part of an image.
@@ -988,27 +1018,31 @@ typedef struct iTermTextColorContext {
     } else if ([attributes[iTermIsBoxDrawingAttribute] boolValue]) {
         // Special box-drawing cells don't use the font so they look prettier.
         [attributedString.string enumerateComposedCharacters:^(NSRange range, unichar simple, NSString *complexString, BOOL *stop) {
-            NSPoint p = NSMakePoint(point.x + [positions[range.location] doubleValue], point.y);
+            NSPoint p = NSMakePoint(point.x + positions[range.location], point.y);
             [self drawBoxDrawingCharacter:simple
                            withAttributes:[attributedString attributesAtIndex:range.location
                                                                effectiveRange:nil]
                                        at:p];
         }];
         return _cellSize.width * attributedString.length;
-    } else {
-        CGFloat width = [[positions lastObject] doubleValue] + _cellSize.width;
+    } else if (attributedString.length > 0) {
+        CGFloat width = positions[attributedString.length - 1] + _cellSize.width;
         NSPoint offsetPoint = point;
         offsetPoint.y -= round((_cellSize.height - _cellSizeWithoutSpacing.height) / 2.0);
-        [self drawTextOnlyAttributedString:attributedString atPoint:offsetPoint positions:positions width:width];
+        [self drawTextOnlyAttributedString:attributedString atPoint:offsetPoint positions:positions width:width backgroundColor:backgroundColor];
         DLog(@"Return width of %d", (int)round(width));
         return width;
+    } else {
+        // attributedString is empty
+        return 0;
     }
 }
 
 - (void)drawTextOnlyAttributedString:(NSAttributedString *)attributedString
                                 atPoint:(NSPoint)origin
-                           positions:(NSArray<NSNumber *> *)stringPositions
-                               width:(CGFloat)width {
+                           positions:(CGFloat *)stringPositions
+                               width:(CGFloat)width
+                     backgroundColor:(NSColor *)backgroundColor {
     DLog(@"Draw attributed string beginning at %d", (int)round(origin.x));
     NSDictionary *attributes = [attributedString attributesAtIndex:0 effectiveRange:nil];
     NSColor *color = attributes[NSForegroundColorAttributeName];
@@ -1039,6 +1073,16 @@ typedef struct iTermTextColorContext {
         c = 0.2;
     }
 
+    int savedFontSmoothingStyle = 0;
+    BOOL useThinStrokes = [self thinStrokes] && ([backgroundColor brightnessComponent] < [color brightnessComponent]);
+    if (useThinStrokes) {
+        CGContextSetShouldSmoothFonts(cgContext, YES);
+        // This seems to be available at least on 10.8 and later. The only reference to it is in
+        // WebKit. This causes text to render just a little lighter, which looks nicer.
+        savedFontSmoothingStyle = CGContextGetFontSmoothingStyle(cgContext);
+        CGContextSetFontSmoothingStyle(cgContext, 16);
+    }
+    
     const CGFloat ty = origin.y + _baselineOffset + _cellSize.height;
     CGAffineTransform textMatrix = CGAffineTransformMake(1.0, 0.0,
                                                          c, -1.0,
@@ -1074,9 +1118,9 @@ typedef struct iTermTextColorContext {
         CGFloat positionOfFirstGlyphInCluster = positions[0].x;
         for (size_t glyphIndex = 0; glyphIndex < length; glyphIndex++) {
             CFIndex characterIndex = glyphIndexToCharacterIndex[glyphIndex];
-            if (characterIndex != previousCharacterIndex && [stringPositions[characterIndex] doubleValue] != cellOrigin) {
+            if (characterIndex != previousCharacterIndex && stringPositions[characterIndex] != cellOrigin) {
                 positionOfFirstGlyphInCluster = positions[glyphIndex].x;
-                cellOrigin = [stringPositions[characterIndex] doubleValue];
+                cellOrigin = stringPositions[characterIndex];
             }
             positions[glyphIndex].x += cellOrigin - positionOfFirstGlyphInCluster;
         }
@@ -1097,6 +1141,11 @@ typedef struct iTermTextColorContext {
         }
     }
     CFRelease(lineRef);
+    
+    if (useThinStrokes) {
+        CGContextSetFontSmoothingStyle(cgContext, savedFontSmoothingStyle);
+    }
+
     [ctx restoreGraphicsState];
     
 
@@ -1109,9 +1158,9 @@ typedef struct iTermTextColorContext {
                                       NSColor *underline = [self.colorMap colorForKey:kColorMapUnderline];
                                       NSColor *color = (underline ? underline : attributes[NSForegroundColorAttributeName]);
                                       [self drawUnderlineOfColor:color
-                                                    atCellOrigin:NSMakePoint(origin.x + [stringPositions[range.location] doubleValue], origin.y)
+                                                    atCellOrigin:NSMakePoint(origin.x + stringPositions[range.location], origin.y)
                                                             font:attributes[NSFontAttributeName]
-                                                           width:[stringPositions[NSMaxRange(range) - 1] doubleValue] + self.cellSize.width - [stringPositions[range.location] doubleValue]];
+                                                           width:stringPositions[NSMaxRange(range) - 1] + self.cellSize.width - stringPositions[range.location]];
                                   }
                               }];
 }
@@ -1264,6 +1313,7 @@ static BOOL iTermTextDrawingHelperIsCharacterDrawable(screen_char_t *c,
                                           ![newAttributes->foregroundColor isEqual:previousAttributes->foregroundColor] ||
                                           newAttributes->boxDrawing != previousAttributes->boxDrawing ||
                                           ![newAttributes->font isEqual:previousAttributes->font] ||
+                                          newAttributes->ligatureLevel != previousAttributes->ligatureLevel ||
                                           newAttributes->bold != previousAttributes->bold ||
                                           newAttributes->fakeItalic != previousAttributes->fakeItalic ||
                                           newAttributes->underline != previousAttributes->underline);
@@ -1330,12 +1380,12 @@ static BOOL iTermTextDrawingHelperIsCharacterDrawable(screen_char_t *c,
                                                    renderItalic:&attributes->fakeItalic];
 
     attributes->font = fontInfo.font;
-    
+    attributes->ligatureLevel = fontInfo.ligatureLevel;
     attributes->underline = (c->underline || inUnderlinedRange);
 }
 
 - (NSDictionary *)dictionaryForCharacterAttributes:(iTermCharacterAttributes *)attributes {
-    return @{ (NSString *)kCTLigatureAttributeName: @0,
+    return @{ (NSString *)kCTLigatureAttributeName: @(attributes->ligatureLevel),
               NSForegroundColorAttributeName: attributes->foregroundColor,
               NSFontAttributeName: attributes->font,
               iTermAntiAliasAttribute: @(attributes->shouldAntiAlias),
@@ -1363,7 +1413,7 @@ static BOOL iTermTextDrawingHelperIsCharacterDrawable(screen_char_t *c,
                                              forceTextColor:(NSColor *)forceTextColor
                                                 findMatches:(NSData *)findMatches
                                             underlinedRange:(NSRange)underlinedRange
-                                                  positions:(NSMutableArray<NSNumber *> *)positions {
+                                                  positions:(CTVector(CGFloat) *)positions {
     NSMutableArray<NSAttributedString *> *attributedStrings = [NSMutableArray array];
     iTermColorMap *colorMap = self.colorMap;
     iTermTextColorContext textColorContext = {
@@ -1466,7 +1516,7 @@ static BOOL iTermTextDrawingHelperIsCharacterDrawable(screen_char_t *c,
         // Append to positions.
         CGFloat offset = (i - indexRange.location) * _cellSize.width;
         for (NSUInteger j = 0; j < length; j++) {
-            [positions addObject:@(offset)];
+            CTVectorAppend(positions, offset);
         }
         iTermPreciseTimerStatsAccumulate(&_stats[TIMER_ADVANCES]);
     }
@@ -1576,7 +1626,8 @@ static BOOL iTermTextDrawingHelperIsCharacterDrawable(screen_char_t *c,
                             _ambiguousIsDoubleWidth,
                             &cursorIndex,
                             NULL,
-                            _useHFSPlusMapping);
+                            _useHFSPlusMapping,
+                            self.unicodeVersion);
         int cursorX = 0;
         int baseX = floor(xStart * _cellSize.width + MARGIN);
         int i;
@@ -1616,6 +1667,7 @@ static BOOL iTermTextDrawingHelperIsCharacterDrawable(screen_char_t *c,
                               startingAtPoint:NSMakePoint(x, y)
                                    bgselected:NO
                                       bgColor:nil
+                     processedBackgroundColor:[self defaultBackgroundColor]
                                       matches:nil
                                forceTextColor:[self defaultTextColor]
                                       context:ctx];
@@ -1700,10 +1752,6 @@ static BOOL iTermTextDrawingHelperIsCharacterDrawable(screen_char_t *c,
 
 - (void)drawCursor {
     DLog(@"drawCursor");
-
-    if (![self cursorInVisibleRow]) {
-        return;
-    }
 
     // Update the last time the cursor moved.
     NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
@@ -1827,12 +1875,6 @@ static BOOL iTermTextDrawingHelperIsCharacterDrawable(screen_char_t *c,
     }
 }
 
-- (BOOL)cursorInVisibleRow {
-    NSRange range = [self rangeOfVisibleRows];
-    int cursorLine = _numberOfLines - _gridSize.height + _cursorCoord.y;
-    return NSLocationInRange(cursorLine, range);
-}
-
 - (BOOL)shouldShowCursor {
     if (_cursorBlinking &&
         self.isInKeyWindow &&
@@ -1933,24 +1975,7 @@ static BOOL iTermTextDrawingHelperIsCharacterDrawable(screen_char_t *c,
     return charRange;
 }
 
-- (NSRange)rangeOfVisibleRows {
-    int visibleRows = floor((_scrollViewContentSize.height - VMARGIN * 2) / _cellSize.height);
-    CGFloat top = _scrollViewDocumentVisibleRect.origin.y;
-    int firstVisibleRow = floor(top / _cellSize.height);
-    if (firstVisibleRow < 0) {
-        // I'm pretty sure this will never happen, but safety first when
-        // dealing with unsigned integers.
-        visibleRows += firstVisibleRow;
-        firstVisibleRow = 0;
-    }
-    if (visibleRows >= 0) {
-        return NSMakeRange(firstVisibleRow, visibleRows);
-    } else {
-        return NSMakeRange(0, 0);
-    }
-}
-
-// Not inclusive of end.x or end.y. Range of coords clipped to visible area and addressable lines.
+// Not inclusive of end.x or end.y. Range of coords clipped to addressable lines.
 - (VT100GridCoordRange)drawableCoordRangeForRect:(NSRect)rect {
     VT100GridCoordRange range;
     NSRange charRange = [self rangeOfColumnsFrom:rect.origin.x ofWidth:rect.size.width];
@@ -1962,12 +1987,8 @@ static BOOL iTermTextDrawingHelperIsCharacterDrawable(screen_char_t *c,
     int lineEnd = ceil((rect.origin.y + rect.size.height) / _cellSize.height);
 
     // Ensure valid line ranges
-    lineStart = MAX(0, lineStart);
-    lineEnd = MIN(lineEnd, _numberOfLines);
-
-    // Ensure lineEnd isn't beyond the bottom of the visible area.
-    range.start.y = lineStart;
-    range.end.y = MIN(lineEnd, NSMaxRange([self rangeOfVisibleRows]));
+    range.start.y = MAX(0, lineStart);
+    range.end.y = MIN(lineEnd, _numberOfLines);
 
     return range;
 }
@@ -2097,6 +2118,7 @@ static BOOL iTermTextDrawingHelperIsCharacterDrawable(screen_char_t *c,
                       startingAtPoint:NSMakePoint(MARGIN, row * _cellSize.height)
                            bgselected:NO
                               bgColor:backgroundColor
+             processedBackgroundColor:backgroundColor
                               matches:nil
                        forceTextColor:overrideColor
                               context:ctx];
