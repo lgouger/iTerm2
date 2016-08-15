@@ -231,10 +231,6 @@ typedef struct iTermTextColorContext {
 
     [self drawRanges:ranges count:numRowsInRect origin:boundingCoordRange.start boundingRect:[self rectForCoordRange:boundingCoordRange]];
     
-    // The OS may ask us to draw an area outside the visible area, but that looks awful so cover it
-    // up by drawing some background over it.
-    [self drawExcessAtLine:[self coordRangeForRect:rect].end.y];
-
     [self drawCursor];
 
     if (_showDropTargets) {
@@ -281,9 +277,13 @@ typedef struct iTermTextColorContext {
     _blinkingFound = NO;
 
     NSMutableArray<iTermBackgroundColorRunsInLine *> *backgroundRunArrays = [NSMutableArray array];
+    NSRange visibleLines = [self rangeOfVisibleRows];
 
     for (NSInteger i = 0; i < numRanges; i++) {
         const int line = origin.y + i;
+        if (line >= NSMaxRange(visibleLines)) {
+            continue;
+        }
         NSRange charRange = ranges[i];
         // We work hard to paint all the backgrounds first and then all the foregrounds. The reason this
         // is necessary is because sometimes a glyph is larger than its cell. Some fonts draw narrow-
@@ -330,6 +330,7 @@ typedef struct iTermTextColorContext {
     for (NSInteger i = 0; i < backgroundRunArrays.count; ) {
         NSInteger rows = [self numberOfEquivalentBackgroundColorLinesInRunArrays:backgroundRunArrays fromIndex:i];
         iTermBackgroundColorRunsInLine *runArray = backgroundRunArrays[i];
+        runArray.numberOfEquivalentRows = rows;
         [self drawBackgroundForLine:runArray.line
                                 atY:runArray.y
                                runs:runArray.array
@@ -340,15 +341,27 @@ typedef struct iTermTextColorContext {
         i += rows;
     }
 
+    // Draw default background color over the line under the last drawn line so the tops of
+    // characters aren't visible there. If there is an IME, that could be many lines tall.
+    VT100GridCoordRange drawableCoordRange = [self drawableCoordRangeForRect:_visibleRect];
+    [self drawExcessAtLine:drawableCoordRange.end.y];
+    
     // Draw other background-like stuff that goes behind text.
     [self drawAccessoriesInRect:boundingRect];
 
     // Now iterate over the lines and paint the characters.
     CGContextRef ctx = (CGContextRef)[[NSGraphicsContext currentContext] graphicsPort];
+    iTermBackgroundColorRunsInLine *representativeRunArray = nil;
+    NSInteger count = 0;
     for (iTermBackgroundColorRunsInLine *runArray in backgroundRunArrays) {
+        if (count == 0) {
+            representativeRunArray = runArray;
+            count = runArray.numberOfEquivalentRows;
+        }
+        count--;
         [self drawCharactersForLine:runArray.line
                                 atY:runArray.y
-                     backgroundRuns:runArray.array
+                     backgroundRuns:representativeRunArray.array
                             context:ctx];
         [self drawNoteRangesOnLine:runArray.line];
 
@@ -1160,7 +1173,7 @@ typedef struct iTermTextColorContext {
                                       [self drawUnderlineOfColor:color
                                                     atCellOrigin:NSMakePoint(origin.x + stringPositions[range.location], origin.y)
                                                             font:attributes[NSFontAttributeName]
-                                                           width:stringPositions[NSMaxRange(range) - 1] + self.cellSize.width - stringPositions[range.location]];
+                                                           width:stringPositions[NSMaxRange(range)] - stringPositions[range.location]];
                                   }
                               }];
 }
@@ -1437,7 +1450,8 @@ static BOOL iTermTextDrawingHelperIsCharacterDrawable(screen_char_t *c,
     NSTimeInterval totalBuilderTime = 0;
     iTermCharacterAttributes characterAttributes = { 0 };
     iTermCharacterAttributes previousCharacterAttributes = { 0 };
-    
+    NSInteger lastDrawableIndex = -1;
+
     for (int i = indexRange.location; i < NSMaxRange(indexRange); i++) {
         iTermPreciseTimerStatsStartTimer(&_stats[TIMER_ATTRS_FOR_CHAR]);
         screen_char_t c = line[i];
@@ -1457,9 +1471,12 @@ static BOOL iTermTextDrawingHelperIsCharacterDrawable(screen_char_t *c,
                                                                         _blinkAllowed);
         
         if (!drawable) {
+            if (c.code == DWC_RIGHT && !c.complexChar) {
+                lastDrawableIndex = i;
+            }
             continue;
         }
-
+        lastDrawableIndex = i;
         [self getAttributesForCharacter:&c
                                 atIndex:i
                          forceTextColor:forceTextColor
@@ -1526,7 +1543,10 @@ static BOOL iTermTextDrawingHelperIsCharacterDrawable(screen_char_t *c,
         totalBuilderTime += iTermPreciseTimerMeasure(&buildTimer);
         [attributedStrings addObject:mutableAttributedString];
     }
-
+    // Append one last position so we'll know where the last character in the run ends. This is
+    // needed for underlines.
+    CTVectorAppend(positions, (lastDrawableIndex - indexRange.location + 1) * _cellSize.width);
+    
     iTermPreciseTimerStatsRecord(&_stats[TIMER_STAT_BUILD_MUTABLE_ATTRIBUTED_STRING],
                                  totalBuilderTime);
     iTermPreciseTimerStatsRecordTimer(&_stats[TIMER_ATTRS_FOR_CHAR]);
@@ -1558,10 +1578,7 @@ static BOOL iTermTextDrawingHelperIsCharacterDrawable(screen_char_t *c,
     NSBezierPath *path = [NSBezierPath bezierPath];
 
     NSPoint origin = NSMakePoint(startPoint.x,
-                                 startPoint.y +
-                                     _cellSize.height +
-                                     font.descender -
-                                     font.underlinePosition);
+                                 startPoint.y + _cellSize.height + _underlineOffset);
     [path moveToPoint:origin];
     [path lineToPoint:NSMakePoint(origin.x + runWidth, origin.y)];
     [path setLineWidth:font.underlineThickness];
@@ -1917,6 +1934,13 @@ static BOOL iTermTextDrawingHelperIsCharacterDrawable(screen_char_t *c,
     int width = _gridSize.width;
     int height = _gridSize.height;
 
+    int cursorRow = row + _numberOfScrollbackLines;
+    if (!NSLocationInRange(cursorRow, [self rangeOfVisibleRows])) {
+        // Don't draw a cursor that isn't in one of the rows that's being drawn (e.g., if it's on a
+        // row that's just below the last visible row, don't draw it, or else the top of the cursor
+        // will be visible at the bottom of the window).
+        return NO;
+    }
     // Draw the regular cursor only if there's not an IME open as it draws its
     // own cursor. Also, it must be not blinked-out, and it must be within the expected bounds of
     // the screen (which is just a sanity check, really).
@@ -1935,6 +1959,23 @@ static BOOL iTermTextDrawingHelperIsCharacterDrawable(screen_char_t *c,
 }
 
 #pragma mark - Coord/Rect Utilities
+
+- (NSRange)rangeOfVisibleRows {
+    int visibleRows = floor((_scrollViewContentSize.height - VMARGIN * 2) / _cellSize.height);
+    CGFloat top = _scrollViewDocumentVisibleRect.origin.y;
+    int firstVisibleRow = floor(top / _cellSize.height);
+    if (firstVisibleRow < 0) {
+        // I'm pretty sure this will never happen, but safety first when
+        // dealing with unsigned integers.
+        visibleRows += firstVisibleRow;
+        firstVisibleRow = 0;
+    }
+    if (visibleRows >= 0) {
+        return NSMakeRange(firstVisibleRow, visibleRows);
+    } else {
+        return NSMakeRange(0, 0);
+    }
+}
 
 - (VT100GridCoordRange)coordRangeForRect:(NSRect)rect {
     return VT100GridCoordRangeMake(floor((rect.origin.x - MARGIN) / _cellSize.width),
