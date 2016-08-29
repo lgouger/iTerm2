@@ -104,7 +104,7 @@ const int kColorMapAnsiBrightModifier = 8;
         _backgroundBlue = [theColor blueComponent];
     }
 
-    theColor = [theColor colorUsingColorSpaceName:NSCalibratedRGBColorSpace];
+    theColor = [theColor colorUsingColorSpace:[NSColorSpace sRGBColorSpace]];
 
     if (theKey == kColorMapBackground) {
         _backgroundBrightness = [theColor perceivedBrightness];
@@ -295,7 +295,9 @@ const int kColorMapAnsiBrightModifier = 8;
              fabs(backgroundRgb[1] - defaultBackgroundComponents[1]) < 0.01 &&
              fabs(backgroundRgb[2] - defaultBackgroundComponents[2]) < 0.01);
         if (!isDefaultBackgroundColor) {
-            memmove(grayRgb, defaultBackgroundComponents, sizeof(grayRgb));
+            for (int j = 0; j < 3; j++) {
+                grayRgb[j] = _backgroundBrightness;
+            }
             shouldDim = YES;
         }
     }
