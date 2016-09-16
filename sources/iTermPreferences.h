@@ -84,6 +84,7 @@ extern NSString *const kPreferenceKeyShowPaneTitles;
 extern NSString *const kPreferenceKeyHideMenuBarInFullscreen;
 extern NSString *const kPreferenceKeyUIElement;
 extern NSString *const kPreferenceKeyFlashTabBarInFullscreen;
+extern NSString *const kPreferenceKeyStretchTabsToFillBar;
 extern NSString *const kPreferenceKeyShowWindowNumber;
 extern NSString *const kPreferenceKeyShowJobName;
 extern NSString *const kPreferenceKeyShowProfileName;
@@ -93,6 +94,7 @@ extern NSString *const kPreferenceKeyDimInactiveSplitPanes;
 extern NSString *const kPreferenceKeyShowWindowBorder;
 extern NSString *const kPreferenceKeyHideScrollbar;
 extern NSString *const kPreferenceKeyDisableFullscreenTransparencyByDefault;
+extern NSString *const kPreferenceKeyEnableDivisionView;
 extern NSString *const kPreferenceKeyDimBackgroundWindows;
 
 // Keys

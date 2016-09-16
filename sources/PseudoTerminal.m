@@ -782,7 +782,8 @@ ITERM_WEAKLY_REFERENCEABLE
     // are cases in fullscreen (e.g., when entering Lion fullscreen) when the
     // window doesn't have a title bar but also isn't borderless we also check
     // if we're in fullscreen.
-    return (!togglingFullScreen_ &&
+    return ([iTermPreferences boolForKey:kPreferenceKeyEnableDivisionView] &&
+            !togglingFullScreen_ &&
             (self.window.styleMask & NSTitledWindowMask) &&
             ![self anyFullScreen] &&
             ![self tabBarVisibleOnTop]);
@@ -4605,6 +4606,7 @@ ITERM_WEAKLY_REFERENCEABLE
     [[newSession screen] setMaxScrollbackLines:0];
     [self setupSession:newSession title:nil withSize:nil];
     [[newSession view] setViewId:[[oldSession view] viewId]];
+    [[newSession view] setShowTitle:[[oldSession view] showTitle] adjustScrollView:YES];
 
     // Add this session to our term and make it current
     PTYTab *theTab = [tabViewItem identifier];
@@ -7209,7 +7211,7 @@ ITERM_WEAKLY_REFERENCEABLE
         lastArrangement_ = [[self arrangementExcludingTmuxTabs:YES
                                              includingContents:includeContents] retain];
         NSTimeInterval end = [NSDate timeIntervalSinceReferenceDate];
-        NSLog(@"Time to encode state for window %@: %@", self, @(end - start));
+        DLog(@"Time to encode state for window %@: %@", self, @(end - start));
     }
     // For whatever reason, setting the value in the coder here doesn't work but
     // doing it in PTYWindow immediately after this method's caller returns does

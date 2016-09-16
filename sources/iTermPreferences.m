@@ -61,6 +61,7 @@ NSString *const kPreferenceKeyHideTabCloseButton = @"HideTabCloseButton";
 NSString *const kPreferenceKeyHideTabActivityIndicator = @"HideActivityIndicator";
 NSString *const kPreferenceKeyShowNewOutputIndicator = @"ShowNewOutputIndicator";
 NSString *const kPreferenceKeyShowPaneTitles = @"ShowPaneTitles";
+NSString *const kPreferenceKeyStretchTabsToFillBar = @"StretchTabsToFillBar";
 NSString *const kPreferenceKeyHideMenuBarInFullscreen = @"HideMenuBarInFullscreen";
 NSString *const kPreferenceKeyUIElement = @"HideFromDockAndAppSwitcher";
 NSString *const kPreferenceKeyFlashTabBarInFullscreen = @"FlashTabBarInFullscreen";
@@ -73,6 +74,7 @@ NSString *const kPreferenceKeyDimInactiveSplitPanes = @"DimInactiveSplitPanes";
 NSString *const kPreferenceKeyShowWindowBorder = @"UseBorder";
 NSString *const kPreferenceKeyHideScrollbar = @"HideScrollbar";
 NSString *const kPreferenceKeyDisableFullscreenTransparencyByDefault = @"DisableFullscreenTransparency";
+NSString *const kPreferenceKeyEnableDivisionView = @"EnableDivisionView";
 NSString *const kPreferenceKeyDimBackgroundWindows = @"DimBackgroundWindows";
 
 NSString *const kPreferenceKeyControlRemapping = @"Control";
@@ -218,6 +220,7 @@ static NSMutableDictionary *gObservers;
                   kPreferenceKeyHideTabCloseButton: @NO,
                   kPreferenceKeyHideTabActivityIndicator: @NO,
                   kPreferenceKeyShowNewOutputIndicator: @YES,
+                  kPreferenceKeyStretchTabsToFillBar: @NO,
 
                   kPreferenceKeyShowPaneTitles: @YES,
                   kPreferenceKeyHideMenuBarInFullscreen:@YES,
@@ -232,6 +235,7 @@ static NSMutableDictionary *gObservers;
                   kPreferenceKeyShowWindowBorder: @NO,
                   kPreferenceKeyHideScrollbar: @NO,
                   kPreferenceKeyDisableFullscreenTransparencyByDefault: @NO,
+                  kPreferenceKeyEnableDivisionView: @YES,
                   kPreferenceKeyDimBackgroundWindows: @NO,
 
                   kPreferenceKeyControlRemapping: @(kPreferencesModifierTagControl),

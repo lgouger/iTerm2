@@ -701,7 +701,6 @@
 		1D6ED89A19AEA20D005A7799 /* CGSNotifications.h in Headers */ = {isa = PBXBuildFile; fileRef = F6441F6C0E748404000EC682 /* CGSNotifications.h */; };
 		1D6ED89B19AEA20D005A7799 /* iTermColorMap.h in Headers */ = {isa = PBXBuildFile; fileRef = A6A13AA018C2D23300B241ED /* iTermColorMap.h */; };
 		1D6ED89C19AEA20D005A7799 /* CGSRegion.h in Headers */ = {isa = PBXBuildFile; fileRef = F6441F6D0E748404000EC682 /* CGSRegion.h */; };
-		1D6ED89D19AEA20D005A7799 /* iTermPreferences.h in Headers */ = {isa = PBXBuildFile; fileRef = A6E7137D18F1DB1E008D94DD /* iTermPreferences.h */; };
 		1D6ED89E19AEA20D005A7799 /* CGSSession.h in Headers */ = {isa = PBXBuildFile; fileRef = F6441F6E0E748404000EC682 /* CGSSession.h */; };
 		1D6ED89F19AEA20D005A7799 /* CGSTransitions.h in Headers */ = {isa = PBXBuildFile; fileRef = F6441F6F0E748404000EC682 /* CGSTransitions.h */; };
 		1D6ED8A019AEA20D005A7799 /* CGSWindow.h in Headers */ = {isa = PBXBuildFile; fileRef = F6441F700E748404000EC682 /* CGSWindow.h */; };
@@ -1567,6 +1566,8 @@
 		A697E27B1B42501000E175DA /* iTermMinimumSubsequenceMatcher.h in Headers */ = {isa = PBXBuildFile; fileRef = A697E2791B42501000E175DA /* iTermMinimumSubsequenceMatcher.h */; };
 		A697E27C1B42501000E175DA /* iTermMinimumSubsequenceMatcher.h in Headers */ = {isa = PBXBuildFile; fileRef = A697E2791B42501000E175DA /* iTermMinimumSubsequenceMatcher.h */; };
 		A699BAE618C8394700D425A7 /* CVector.h in Headers */ = {isa = PBXBuildFile; fileRef = A699BAE418C8394700D425A7 /* CVector.h */; };
+		A69A15731D7FD78200A9E7EF /* TipCalendar.png in Resources */ = {isa = PBXBuildFile; fileRef = A69A15711D7FD78200A9E7EF /* TipCalendar.png */; };
+		A69A15741D7FD78200A9E7EF /* TipCalendar@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = A69A15721D7FD78200A9E7EF /* TipCalendar@2x.png */; };
 		A69B4577195F668500F5444D /* NSScreen+iTerm.h in Headers */ = {isa = PBXBuildFile; fileRef = A69B4575195F668500F5444D /* NSScreen+iTerm.h */; };
 		A69B457B1967B03B00F5444D /* BrokenPipeDivider.png in Resources */ = {isa = PBXBuildFile; fileRef = A69B457A1967B03B00F5444D /* BrokenPipeDivider.png */; };
 		A69B457C1967B04300F5444D /* BrokenPipeDivider.png in Resources */ = {isa = PBXBuildFile; fileRef = A69B457A1967B03B00F5444D /* BrokenPipeDivider.png */; };
@@ -1595,6 +1596,7 @@
 		A6A2699C190319A000437DA9 /* ProfilesAdvancedPreferencesViewController.h in Headers */ = {isa = PBXBuildFile; fileRef = A6A2699A190319A000437DA9 /* ProfilesAdvancedPreferencesViewController.h */; };
 		A6A51A401B45CEA9007891F3 /* VT100DCSParserTest.m in Sources */ = {isa = PBXBuildFile; fileRef = A6A51A3F1B45CEA9007891F3 /* VT100DCSParserTest.m */; };
 		A6A5991D1887C63700CB4209 /* ToolCommandHistoryView.h in Headers */ = {isa = PBXBuildFile; fileRef = A6A5991B1887C63700CB4209 /* ToolCommandHistoryView.h */; };
+		A6AC81931D4923DC006F2ADC /* iTermPreferences.h in Headers */ = {isa = PBXBuildFile; fileRef = A6E7137D18F1DB1E008D94DD /* iTermPreferences.h */; };
 		A6ACD1F81B62F2210095CB57 /* iTermRuleTest.m in Sources */ = {isa = PBXBuildFile; fileRef = A6ACD1F71B62F2210095CB57 /* iTermRuleTest.m */; };
 		A6AE1ECF191FFA1C00780C19 /* iTermMouseCursor.h in Headers */ = {isa = PBXBuildFile; fileRef = A6AE1ECE191FFA1C00780C19 /* iTermMouseCursor.h */; };
 		A6AE1ED81926F89B00780C19 /* iTermAnnouncementViewController.h in Headers */ = {isa = PBXBuildFile; fileRef = A6AE1ED61926F89B00780C19 /* iTermAnnouncementViewController.h */; };
@@ -2086,7 +2088,6 @@
 		A6E525E11A9C5730007B898E /* VT100State.h in Headers */ = {isa = PBXBuildFile; fileRef = A6E525DC1A9C5730007B898E /* VT100State.h */; };
 		A6E525E21A9C5730007B898E /* VT100State.h in Headers */ = {isa = PBXBuildFile; fileRef = A6E525DC1A9C5730007B898E /* VT100State.h */; };
 		A6E7137A18F1D70E008D94DD /* GeneralPreferencesViewController.h in Headers */ = {isa = PBXBuildFile; fileRef = A6E7137818F1D70D008D94DD /* GeneralPreferencesViewController.h */; };
-		A6E7137F18F1DB1E008D94DD /* iTermPreferences.h in Headers */ = {isa = PBXBuildFile; fileRef = A6E7137D18F1DB1E008D94DD /* iTermPreferences.h */; };
 		A6E7138418F263BC008D94DD /* PreferenceInfo.h in Headers */ = {isa = PBXBuildFile; fileRef = A6E7138218F263BC008D94DD /* PreferenceInfo.h */; };
 		A6E7138918F26445008D94DD /* iTermPreferencesBaseViewController.h in Headers */ = {isa = PBXBuildFile; fileRef = A6E7138718F26445008D94DD /* iTermPreferencesBaseViewController.h */; };
 		A6E7138E18F26A91008D94DD /* AppearancePreferencesViewController.h in Headers */ = {isa = PBXBuildFile; fileRef = A6E7138C18F26A91008D94DD /* AppearancePreferencesViewController.h */; };
@@ -3293,6 +3294,8 @@
 		A697E2791B42501000E175DA /* iTermMinimumSubsequenceMatcher.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = iTermMinimumSubsequenceMatcher.h; sourceTree = "<group>"; };
 		A697E27A1B42501000E175DA /* iTermMinimumSubsequenceMatcher.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = iTermMinimumSubsequenceMatcher.m; sourceTree = "<group>"; };
 		A699BAE418C8394700D425A7 /* CVector.h */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.c.h; path = CVector.h; sourceTree = "<group>"; tabWidth = 4; };
+		A69A15711D7FD78200A9E7EF /* TipCalendar.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = TipCalendar.png; path = images/TipCalendar.png; sourceTree = "<group>"; };
+		A69A15721D7FD78200A9E7EF /* TipCalendar@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = "TipCalendar@2x.png"; path = "images/TipCalendar@2x.png"; sourceTree = "<group>"; };
 		A69B4575195F668500F5444D /* NSScreen+iTerm.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = "NSScreen+iTerm.h"; sourceTree = "<group>"; };
 		A69B4576195F668500F5444D /* NSScreen+iTerm.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = "NSScreen+iTerm.m"; sourceTree = "<group>"; };
 		A69B457A1967B03B00F5444D /* BrokenPipeDivider.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = BrokenPipeDivider.png; path = images/BrokenPipeDivider.png; sourceTree = "<group>"; };
@@ -4192,6 +4195,8 @@
 		1D093C131217412B0029F9AD /* Images */ = {
 			isa = PBXGroup;
 			children = (
+				A69A15711D7FD78200A9E7EF /* TipCalendar.png */,
+				A69A15721D7FD78200A9E7EF /* TipCalendar@2x.png */,
 				A6339DD91D232DF2000BAD78 /* StatusItemAlt.png */,
 				A6339DDA1D232DF2000BAD78 /* StatusItemAlt@2x.png */,
 				A6339DD51D232CEE000BAD78 /* StatusItem.png */,
@@ -5538,7 +5543,6 @@
 				1D6ED89A19AEA20D005A7799 /* CGSNotifications.h in Headers */,
 				1D6ED89B19AEA20D005A7799 /* iTermColorMap.h in Headers */,
 				1D6ED89C19AEA20D005A7799 /* CGSRegion.h in Headers */,
-				1D6ED89D19AEA20D005A7799 /* iTermPreferences.h in Headers */,
 				1D6ED89E19AEA20D005A7799 /* CGSSession.h in Headers */,
 				1D6ED89F19AEA20D005A7799 /* CGSTransitions.h in Headers */,
 				1D6ED8A019AEA20D005A7799 /* CGSWindow.h in Headers */,
@@ -5881,7 +5885,6 @@
 				1D5FDD721208E8F000C46BA3 /* CGSNotifications.h in Headers */,
 				A6A13AA218C2D23300B241ED /* iTermColorMap.h in Headers */,
 				1D5FDD731208E8F000C46BA3 /* CGSRegion.h in Headers */,
-				A6E7137F18F1DB1E008D94DD /* iTermPreferences.h in Headers */,
 				1D5FDD741208E8F000C46BA3 /* CGSSession.h in Headers */,
 				1D5FDD751208E8F000C46BA3 /* CGSTransitions.h in Headers */,
 				1D5FDD761208E8F000C46BA3 /* CGSWindow.h in Headers */,
@@ -6206,6 +6209,7 @@
 				A6F3E96E1D60E4F0000E97C4 /* iTermInitialDirectory.h in Headers */,
 				A686F3621D32CD8100F08ED7 /* NSWindow+iTerm.h in Headers */,
 				1D72A4D51BE9707A0042174A /* iTermWebViewWrapperViewController.h in Headers */,
+				A6AC81931D4923DC006F2ADC /* iTermPreferences.h in Headers */,
 				A62C3B2F1BCC24AB00B5629D /* iTermRecentDirectoryMO+CoreDataProperties.h in Headers */,
 				1DE0C8491BF17E34008ACBA9 /* SetDirectoryTrigger.h in Headers */,
 				A6EEA6681C83B95C00FA1594 /* iTermAutomaticProfileSwitcher.h in Headers */,
@@ -7007,6 +7011,7 @@
 				A67D0D651A2EE12A003A8B35 /* iTermPasswordManager.xib in Resources */,
 				A6EFF2381D20F6BE00806EEF /* EraseDarkBackground@2x.png in Resources */,
 				1DE922E61AC3709200965876 /* BackgroundStripes.png in Resources */,
+				A69A15731D7FD78200A9E7EF /* TipCalendar.png in Resources */,
 				1DA02CFB1327612600D7E7DB /* bell.png in Resources */,
 				A67D0D861A2EE12A003A8B35 /* PseudoTerminal.strings in Resources */,
 				A6FD85311B767D6300EB9DCE /* Hamburger@2x.png in Resources */,
@@ -7039,6 +7044,7 @@
 				1DC2A1CE1949165D005769D5 /* Maximized@2x.png in Resources */,
 				A6339DDB1D232DF2000BAD78 /* StatusItemAlt.png in Resources */,
 				1D8255F9146869D8007CAE78 /* DefaultPointerActions.plist in Resources */,
+				A69A15741D7FD78200A9E7EF /* TipCalendar@2x.png in Resources */,
 				1D8BBA6B1B30F5C30005A852 /* Navigate@2x.png in Resources */,
 				A67D0D801A2EE12A003A8B35 /* PreferencePanel.xib in Resources */,
 				A67D0D5F1A2EE12A003A8B35 /* iTermKeyMapping.xib in Resources */,

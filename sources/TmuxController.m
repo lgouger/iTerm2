@@ -546,12 +546,15 @@ static NSString *kListWindowsFormat = @"\"#{session_name}\t#{window_id}\t"
     NSSize minSize = NSMakeSize(INFINITY, INFINITY);
     for (id windowKey in windows_) {
         PTYTab *tab = [[windows_ objectForKey:windowKey] objectAtIndex:0];
-        NSSize size = [tab maxTmuxSize];
+        NSSize size = [tab tmuxSize];
         minSize.width = MIN(minSize.width, size.width);
         minSize.height = MIN(minSize.height, size.height);
     }
-    if (minSize.width == 0 || minSize.height == 0) {
-        // After the last session closes a size of 0 is reported.
+    if (minSize.width <= 0 || minSize.height <= 0) {
+        // After the last session closes a size of 0 is reported. Apparently unplugging a monitor
+        // leads to a negative value here. That's inferred from crash report 1468853197.309853926.txt
+        // (at the time of that crash, this tested only for zero values so it passed through and
+        // asserted anyway).
         return;
     }
     if (NSEqualSizes(minSize, lastSize_)) {
@@ -602,20 +605,70 @@ static NSString *kListWindowsFormat = @"\"#{session_name}\t#{window_id}\t"
 }
 
 - (void)guessVersion {
-    [gateway_ sendCommand:@"list-windows -F \"#{socket_path}\""
-           responseTarget:self
-         responseSelector:@selector(guessVersionResponse:)
-           responseObject:nil
-                    flags:kTmuxGatewayCommandShouldTolerateErrors];
+    // Run commands that will fail in successively older versions.
+    // show-window-options pane-border-format will succeed in 2.3 and later (presumably. 2.3 isn't out yet)
+    // the socket_path format was added in 2.2.
+    // the session_activity format was added in 2.1
+    NSArray *commands = @[ [gateway_ dictionaryForCommand:@"show-window-options pane-border-format"
+                                           responseTarget:self
+                                         responseSelector:@selector(guessVersion23Response:)
+                                           responseObject:nil
+                                                    flags:kTmuxGatewayCommandShouldTolerateErrors],
+                           [gateway_ dictionaryForCommand:@"list-windows -F \"#{socket_path}\""
+                                           responseTarget:self
+                                         responseSelector:@selector(guessVersion22Response:)
+                                           responseObject:nil
+                                                    flags:kTmuxGatewayCommandShouldTolerateErrors],
+                           [gateway_ dictionaryForCommand:@"list-windows -F \"#{session_activity}\""
+                                           responseTarget:self
+                                         responseSelector:@selector(guessVersion21Response:)
+                                           responseObject:nil
+                                                    flags:kTmuxGatewayCommandShouldTolerateErrors]
+                           ];
+    for (NSDictionary *command in commands) {
+        [gateway_ sendCommandList:@[ command ]];
+    }
 }
 
-- (void)guessVersionResponse:(NSString *)response {
-    if (response.length == 0) {
-        DLog(@"Looks like tmux 2.1 or earlier");
-        gateway_.maximumServerVersion = @2.1;
+- (void)decreaseMaximumServerVersionTo:(NSString *)string {
+    NSDecimalNumber *number = [NSDecimalNumber decimalNumberWithString:string];
+    if (!gateway_.maximumServerVersion ||
+        [gateway_.maximumServerVersion compare:number] == NSOrderedDescending) {
+        gateway_.maximumServerVersion = number;
+        DLog(@"Decreasing maximum server version to %@", number);
+    }
+}
+
+- (void)increaseMinimumServerVersionTo:(NSString *)string {
+    NSDecimalNumber *number = [NSDecimalNumber decimalNumberWithString:string];
+    if (!gateway_.minimumServerVersion ||
+        [gateway_.minimumServerVersion compare:number] == NSOrderedAscending) {
+        gateway_.minimumServerVersion = number;
+        DLog(@"Increasing minimum server version to %@", number);
+    }
+}
+
+- (void)guessVersion23Response:(NSString *)response {
+    if (response == nil) {
+        [self decreaseMaximumServerVersionTo:@"2.2"];
     } else {
-        DLog(@"Looks like tmux 2.2 or later");
-        gateway_.minimumServerVersion = @2.2;
+        [self increaseMinimumServerVersionTo:@"2.3"];
+    }
+}
+
+- (void)guessVersion22Response:(NSString *)response {
+    if (response.length == 0) {
+        [self decreaseMaximumServerVersionTo:@"2.1"];
+    } else {
+        [self increaseMinimumServerVersionTo:@"2.2"];
+    }
+}
+
+- (void)guessVersion21Response:(NSString *)response {
+    if (response.length == 0) {
+        [self decreaseMaximumServerVersionTo:@"2.0"];
+    } else {
+        [self increaseMinimumServerVersionTo:@"2.1"];
     }
 }
 

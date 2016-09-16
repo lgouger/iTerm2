@@ -138,6 +138,7 @@
 + (BOOL)jiggleTTYSizeOnClearBuffer;
 + (BOOL)cmdClickWhenInactiveInvokesSemanticHistory;
 + (BOOL)suppressRestartAnnouncement;
++ (BOOL)showSessionRestoredBanner;
 + (void)setSuppressRestartAnnouncement:(BOOL)value;
 + (BOOL)useAdaptiveFrameRate;
 + (int)adaptiveFrameRateThroughputThreshold;
@@ -151,5 +152,7 @@
 + (double)pointSizeOfTimeStamp;
 + (BOOL)showYellowMarkForJobStoppedBySignal;
 + (double)slowFrameRate;
++ (double)timeBetweenTips;
++ (void)setTimeBetweenTips:(double)time;
 
 @end

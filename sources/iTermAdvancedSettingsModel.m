@@ -48,6 +48,15 @@ DEFINE_BOOL(name, theDefault, theDescription) \
                                                            description:theDescription]; \
 }
 
+#define DEFINE_SETTABLE_FLOAT(name, capitalizedName, theDefault, theDescription) \
+DEFINE_FLOAT(name, theDefault, theDescription) \
++ (void)set##capitalizedName :(double)newValue { \
+    [[NSUserDefaults standardUserDefaults] setDouble:newValue forKey:@#capitalizedName]; \
+    [[NSNotificationCenter defaultCenter] postNotificationName:iTermAdvancedSettingsDidChange \
+                                                        object:nil]; \
+}
+
+
 #define DEFINE_STRING(name, theDefault, theDescription) \
 + (NSString *)name { \
     NSString *theIdentifier = [@#name stringByCapitalizingFirstLetter]; \
@@ -141,6 +150,7 @@ DEFINE_BOOL(logDrawingPerformance, NO, @"Debugging: Log stats about text drawing
 DEFINE_BOOL(runJobsInServers, YES, @"Session: Enable session restoration.\nSession restoration runs jobs in separate processes. They will survive crashes, force quits, and upgrades.\nYou must restart iTerm2 for this change to take effect.");
 DEFINE_BOOL(killJobsInServersOnQuit, YES, @"Session: User-initiated Quit (⌘Q) of iTerm2 will kill all running jobs.\nApplies only when session restoration is on.");
 DEFINE_SETTABLE_BOOL(suppressRestartAnnouncement, SuppressRestartAnnouncement, NO, @"Session: Suppress the Restart Session offer.\nWhen a sessions terminates, it will offer to restart itself. Turn this on to suppress the offer permanently.");
+DEFINE_BOOL(showSessionRestoredBanner, YES, @"Session: When restoring a session without restoring a running job, draw a banner saying “Session Restored” below the restored contents.");
 
 #pragma mark - Window
 DEFINE_BOOL(openFileInNewWindows, NO, @"Windows: Open files in new windows, not new tabs.\nThis affects shell scripts opened from Finder, for example.");
@@ -190,6 +200,7 @@ DEFINE_BOOL(typingClearsSelection, YES, @"Pasteboard: Pressing a key will remove
 #pragma mark - Tip of the day
 
 DEFINE_BOOL(noSyncTipsDisabled, NO, @"Tip of the Day: Disable the Tip of the Day?");
+DEFINE_SETTABLE_FLOAT(timeBetweenTips, TimeBetweenTips, 24 * 60 * 60, @"Tip of the Day: Time between tips (in seconds)");
 
 #pragma mark - Badge
 DEFINE_STRING(badgeFont, @"Helvetica", @"Badge: Font to use for the badge.");
