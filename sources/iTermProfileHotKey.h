@@ -27,7 +27,7 @@
 @property(nonatomic, readonly) BOOL rollingIn;
 @property(nonatomic, readonly) BOOL rollingOut;
 
-@property(nonatomic, readonly) BOOL autoHides;
+@property(nonatomic, assign) BOOL autoHides;
 
 // Is there a visible hotkey window right now?
 @property(nonatomic, readonly, getter=isHotKeyWindowOpen) BOOL hotKeyWindowOpen;
@@ -70,6 +70,7 @@
 
 - (void)createWindow;
 - (void)showHotKeyWindow;
+- (BOOL)showHotKeyWindowCreatingWithURLIfNeeded:(NSURL *)url;
 - (void)saveHotKeyWindowState;
 - (BOOL)loadRestorableStateFromArray:(NSArray *)states;
 - (void)setLegacyState:(NSDictionary *)state;
