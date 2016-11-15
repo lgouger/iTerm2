@@ -595,6 +595,7 @@ static BOOL hasBecomeActive = NO;
         } else {
             message = @"All sessions will be closed.";
         }
+        [NSApp activateIgnoringOtherApps:YES];
         BOOL stayput = NSRunAlertPanel(@"Quit iTerm2?",
                                        @"%@",
                                        @"OK",
@@ -694,7 +695,7 @@ static BOOL hasBecomeActive = NO;
             filename = [filename stringWithEscapedShellCharacters];
             if (filename) {
                 NSString *initialText = bookmark[KEY_INITIAL_TEXT];
-                if (initialText) {
+                if (initialText && ![iTermAdvancedSettingsModel openFileOverridesSendText]) {
                     initialText = [initialText stringByAppendingFormat:@"\n%@; exit\n", filename];
                 } else {
                     initialText = [NSString stringWithFormat:@"%@; exit\n", filename];

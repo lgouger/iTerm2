@@ -3128,6 +3128,7 @@ ITERM_WEAKLY_REFERENCEABLE
     iTermApplicationDelegate *itad = [iTermApplication.sharedApplication delegate];
     [itad updateUseTransparencyMenuItem];
     for (PTYSession* aSession in [self allSessions]) {
+        [aSession useTransparencyDidChange];
         [[aSession view] setNeedsDisplay:YES];
     }
     [[self currentTab] recheckBlur];
@@ -5525,6 +5526,38 @@ ITERM_WEAKLY_REFERENCEABLE
     int height = [[[self currentSession] textview] lineHeight];
     [[self currentTab] moveCurrentSessionDividerBy:-height
                                       horizontally:NO];
+}
+
+- (void)swapPaneLeft
+{
+    PTYSession* session = [[self currentTab] sessionLeftOf:[[self currentTab] activeSession]];
+    if (session) {
+        [[self currentTab] swapSession:[[self currentTab] activeSession] withSession:session];
+    }
+}
+
+- (void)swapPaneRight
+{
+    PTYSession* session = [[self currentTab] sessionRightOf:[[self currentTab] activeSession]];
+    if (session) {
+        [[self currentTab] swapSession:[[self currentTab] activeSession] withSession:session];
+    }
+}
+
+- (void)swapPaneUp
+{
+    PTYSession* session = [[self currentTab] sessionAbove:[[self currentTab] activeSession]];
+    if (session) {
+        [[self currentTab] swapSession:[[self currentTab] activeSession] withSession:session];
+    }
+}
+
+- (void)swapPaneDown
+{
+    PTYSession* session = [[self currentTab] sessionBelow:[[self currentTab] activeSession]];
+    if (session) {
+        [[self currentTab] swapSession:[[self currentTab] activeSession] withSession:session];
+    }
 }
 
 - (IBAction)addNoteAtCursor:(id)sender {

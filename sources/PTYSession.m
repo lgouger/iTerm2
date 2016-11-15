@@ -1118,7 +1118,7 @@ ITERM_WEAKLY_REFERENCEABLE
     _antiIdleTimer = nil;
     _newOutput = NO;
     [_view updateScrollViewFrame];
-
+    [self useTransparencyDidChange];
     return YES;
 }
 
@@ -1373,7 +1373,7 @@ ITERM_WEAKLY_REFERENCEABLE
     env[@"TERM_PROGRAM_VERSION"] = [[[NSBundle mainBundle] infoDictionary] objectForKey:@"CFBundleShortVersionString"];
     env[@"TERM_SESSION_ID"] = itermId;
     env[@"TERM_PROGRAM"] = @"iTerm.app";
-
+    env[@"COLORTERM"] = @"truecolor";
 
     if (_profile[KEY_NAME]) {
         env[@"ITERM_PROFILE"] = [_profile[KEY_NAME] stringByPerformingSubstitutions:substitutions];
@@ -2965,6 +2965,7 @@ ITERM_WEAKLY_REFERENCEABLE
     }
     DLog(@"Fit layout to window on session delegate change");
     [_tmuxController fitLayoutToWindows];
+    [self useTransparencyDidChange];
 }
 
 - (NSString*)name
@@ -3170,7 +3171,27 @@ ITERM_WEAKLY_REFERENCEABLE
     [[self textview] setMinimumContrast:value];
 }
 
-// Changes transparency
+- (BOOL)viewShouldWantLayer {
+    if (![iTermAdvancedSettingsModel useLayers]) {
+        return NO;
+    }
+    if (!_delegate.realParentWindow || !_textview) {
+        return YES;
+    }
+    BOOL isTransparent = ([[_delegate realParentWindow] useTransparency] && [_textview transparency] > 0);
+    return !isTransparent;
+}
+
+- (void)useTransparencyDidChange {
+    // The view does not like getting replaced during the spin of the runloop during which it is created.
+    if (_view.window && _delegate.realParentWindow && _textview && self.viewShouldWantLayer != _view.useSubviewWithLayer) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (_view.window && _delegate.realParentWindow && _textview && self.viewShouldWantLayer != _view.useSubviewWithLayer) {
+                _view.useSubviewWithLayer = self.viewShouldWantLayer;
+            }
+        });
+    }
+}
 
 - (float)transparency
 {
@@ -3184,6 +3205,7 @@ ITERM_WEAKLY_REFERENCEABLE
         transparency = 0.9;
     }
     [_textview setTransparency:transparency];
+    [self useTransparencyDidChange];
 }
 
 - (float)blend {
@@ -4992,7 +5014,6 @@ ITERM_WEAKLY_REFERENCEABLE
             case KEY_ACTION_DECREASE_HEIGHT:
                 [[[iTermController sharedInstance] currentTerminal] decreaseHeight:nil];
                 break;
-
             case KEY_ACTION_INCREASE_HEIGHT:
                 [[[iTermController sharedInstance] currentTerminal] increaseHeight:nil];
                 break;
@@ -5000,9 +5021,21 @@ ITERM_WEAKLY_REFERENCEABLE
             case KEY_ACTION_DECREASE_WIDTH:
                 [[[iTermController sharedInstance] currentTerminal] decreaseWidth:nil];
                 break;
-
             case KEY_ACTION_INCREASE_WIDTH:
                 [[[iTermController sharedInstance] currentTerminal] increaseWidth:nil];
+                break;
+
+            case KEY_ACTION_SWAP_PANE_LEFT:
+                [[[iTermController sharedInstance] currentTerminal] swapPaneLeft];
+                break;
+            case KEY_ACTION_SWAP_PANE_RIGHT:
+                [[[iTermController sharedInstance] currentTerminal] swapPaneRight];
+                break;
+            case KEY_ACTION_SWAP_PANE_ABOVE:
+                [[[iTermController sharedInstance] currentTerminal] swapPaneUp];
+                break;
+            case KEY_ACTION_SWAP_PANE_BELOW:
+                [[[iTermController sharedInstance] currentTerminal] swapPaneDown];
                 break;
 
             default:
