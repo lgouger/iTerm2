@@ -83,7 +83,8 @@
 #import "PTYTextView.h"   // For selection movement units
 #import <Carbon/Carbon.h>
 
-static NSDictionary* globalKeyMap;
+static NSDictionary *globalKeyMap;
+static NSDictionary *globalTouchBarMap;
 static NSString *const kFactoryDefaultsGlobalPreset = @"Factory Defaults";
 
 @implementation iTermKeyBindingMgr
@@ -344,6 +345,10 @@ exit:
     return [[[ProfileModel sharedInstance] bookmarkWithGuid:guid] objectForKey:KEY_NAME];
 }
 
++ (NSString *)touchBarLabelForBinding:(NSDictionary *)binding {
+    return binding[@"Label"] ?: @"?";
+}
+
 + (NSString *)formatAction:(NSDictionary *)keyInfo
 {
     NSString *actionString;
@@ -452,7 +457,7 @@ exit:
             actionString = @"Unsupported Command";
             break;
         case KEY_ACTION_IR_BACKWARD:
-            actionString = @"Backward in Time";
+            actionString = @"Start Instant Replay";
             break;
         case KEY_ACTION_SELECT_PANE_LEFT:
             actionString = @"Select Split Pane on Left";
@@ -483,6 +488,12 @@ exit:
             break;
         case KEY_ACTION_FIND_REGEX:
             actionString = [NSString stringWithFormat:@"Find Regex “%@”", auxText];
+            break;
+        case KEY_FIND_AGAIN_DOWN:
+            actionString = @"Find Again Down";
+            break;
+        case KEY_FIND_AGAIN_UP:
+            actionString = @"Find Again Up";
             break;
         case KEY_ACTION_PASTE_SPECIAL_FROM_SELECTION: {
             NSString *pasteDetails =
@@ -576,8 +587,7 @@ exit:
     return [[self globalKeyMap] objectForKey:keyString] != nil;
 }
 
-+ (BOOL)haveKeyMappingForKeyString:(NSString*)keyString inBookmark:(Profile*)bookmark
-{
++ (BOOL)haveKeyMappingForKeyString:(NSString*)keyString inBookmark:(Profile*)bookmark {
     NSDictionary *dict = [bookmark objectForKey:KEY_KEYBOARD_MAP];
     return [dict objectForKey:keyString] != nil;
 }
@@ -625,8 +635,7 @@ exit:
     return (retCode);
 }
 
-+ (void)_loadGlobalKeyMap
-{
++ (void)_loadGlobalKeyMap {
     globalKeyMap = [[NSUserDefaults standardUserDefaults] objectForKey:@"GlobalKeyMap"];
     if (!globalKeyMap) {
         NSString* plistFile = [[NSBundle bundleForClass: [self class]] pathForResource:@"DefaultGlobalKeyMap" ofType:@"plist"];
@@ -635,19 +644,39 @@ exit:
     [globalKeyMap retain];
 }
 
-+ (NSDictionary*)globalKeyMap
-{
++ (void)loadGlobalTouchBarMap {
+    globalTouchBarMap = [[NSUserDefaults standardUserDefaults] objectForKey:@"GlobalTouchBarMap"];
+    if (!globalTouchBarMap) {
+        NSString *plistFile = [[NSBundle bundleForClass: [self class]] pathForResource:@"DefaultGlobalTouchBarMap" ofType:@"plist"];
+        globalTouchBarMap = [NSDictionary dictionaryWithContentsOfFile:plistFile];
+    }
+    [globalTouchBarMap retain];
+}
+
++ (NSDictionary*)globalKeyMap {
     if (!globalKeyMap) {
         [iTermKeyBindingMgr _loadGlobalKeyMap];
     }
     return globalKeyMap;
 }
 
-+ (void)setGlobalKeyMap:(NSDictionary*)src
-{
-    [globalKeyMap release];
++ (NSDictionary *)globalTouchBarMap {
+    if (!globalTouchBarMap) {
+        [iTermKeyBindingMgr loadGlobalTouchBarMap];
+    }
+    return globalTouchBarMap;
+}
+
++ (void)setGlobalKeyMap:(NSDictionary *)src {
+    [globalKeyMap autorelease];
     globalKeyMap = [src copy];
     [[NSUserDefaults standardUserDefaults] setObject:globalKeyMap forKey:@"GlobalKeyMap"];
+}
+
++ (void)setGlobalTouchBarMap:(NSDictionary *)src {
+    [globalTouchBarMap autorelease];
+    globalTouchBarMap = [src copy];
+    [[NSUserDefaults standardUserDefaults] setObject:globalTouchBarMap forKey:@"GlobalTouchBarMap"];
 }
 
 + (int)actionForKeyCode:(unichar)keyCode
@@ -671,8 +700,15 @@ exit:
     return keyBindingAction;
 }
 
-+ (NSMutableDictionary*)removeMappingAtIndex:(int)rowIndex inDictionary:(NSDictionary*)dict
-{
++ (int)actionForTouchBarItemBinding:(NSDictionary *)binding {
+    return [binding[@"Action"] intValue];
+}
+
++ (NSString *)parameterForTouchBarItemBinding:(NSDictionary *)binding {
+    return binding[@"Text"];
+}
+
++ (NSMutableDictionary*)removeMappingAtIndex:(int)rowIndex inDictionary:(NSDictionary*)dict {
     NSMutableDictionary* km = [NSMutableDictionary dictionaryWithDictionary:dict];
     NSArray* allKeys = [[km allKeys] sortedArrayUsingSelector:@selector(caseInsensitiveCompare:)];
     if (rowIndex >= 0 && rowIndex < [allKeys count]) {
@@ -681,11 +717,29 @@ exit:
     return km;
 }
 
-+ (void)removeMappingAtIndex:(int)rowIndex inBookmark:(NSMutableDictionary*)bookmark
-{
++ (void)removeTouchBarItem:(NSString *)key {
+    NSDictionary *dict = [self globalTouchBarMap];
+    dict = [self dictionaryByRemovingTouchBarItem:key fromDictionary:dict];
+    [self setGlobalTouchBarMap:dict];
+}
+
++ (NSDictionary *)dictionaryByRemovingTouchBarItem:(NSString *)key fromDictionary:(NSDictionary *)dictionary {
+    NSMutableDictionary *temp = [[dictionary mutableCopy] autorelease];
+    [temp removeObjectForKey:key];
+    return temp;
+}
+
+
++ (void)removeMappingAtIndex:(int)rowIndex inBookmark:(NSMutableDictionary*)bookmark {
     [bookmark setObject:[iTermKeyBindingMgr removeMappingAtIndex:rowIndex
                                                     inDictionary:[bookmark objectForKey:KEY_KEYBOARD_MAP]]
                  forKey:KEY_KEYBOARD_MAP];
+}
+
++ (void)removeTouchBarItemWithKey:(NSString *)key inMutableProfile:(MutableProfile *)profile {
+    NSDictionary *map = profile[KEY_TOUCHBAR_MAP];
+    map = [self dictionaryByRemovingTouchBarItem:key fromDictionary:map];
+    profile[KEY_TOUCHBAR_MAP] = map;
 }
 
 + (NSArray *)globalPresetNames {
@@ -709,18 +763,18 @@ exit:
     return dict;
 }
 
-+ (void)setKeyMappingsToPreset:(NSString*)presetName inBookmark:(NSMutableDictionary*)bookmark
-{
++ (void)setKeyMappingsToPreset:(NSString*)presetName inBookmark:(NSMutableDictionary*)bookmark {
     NSMutableDictionary* km = [NSMutableDictionary dictionaryWithDictionary:[bookmark objectForKey:KEY_KEYBOARD_MAP]];
 
     [km removeAllObjects];
-    NSDictionary* presetsDict 
-        = [self readPresetKeyMappingsFromPlist:@"PresetKeyMappings"];
+    NSDictionary* presetsDict = [self readPresetKeyMappingsFromPlist:@"PresetKeyMappings"];
 
     NSDictionary* settings = [presetsDict objectForKey:presetName];
     [km setDictionary:settings];
 
     [bookmark setObject:km forKey:KEY_KEYBOARD_MAP];
+
+#warning Update touch bar
 }
 
 + (NSArray *)presetKeyMappingsNames {
@@ -769,13 +823,48 @@ exit:
                    action:(int)actionIndex
                     value:(NSString*)valueToSend
                 createNew:(BOOL)newMapping
-               inBookmark:(NSMutableDictionary*)bookmark
-{
-
+               inBookmark:(NSMutableDictionary*)bookmark {
     NSMutableDictionary* km =
         [NSMutableDictionary dictionaryWithDictionary:[bookmark objectForKey:KEY_KEYBOARD_MAP]];
     [iTermKeyBindingMgr setMappingAtIndex:rowIndex forKey:keyString action:actionIndex value:valueToSend createNew:newMapping inDictionary:km];
     [bookmark setObject:km forKey:KEY_KEYBOARD_MAP];
+}
+
++ (void)setTouchBarItemWithKey:(NSString *)key
+                      toAction:(int)action
+                         value:(NSString *)value
+                         label:(NSString *)label
+                     inProfile:(MutableProfile *)profile {
+    NSMutableDictionary *map = [[profile[KEY_TOUCHBAR_MAP] mutableCopy] autorelease];
+    if (!map) {
+        map = [NSMutableDictionary dictionary];
+    }
+    [self updateDictionary:map forTouchBarItem:key action:action value:value label:label];
+    profile[KEY_TOUCHBAR_MAP] = map;
+}
+
++ (NSArray<NSString *> *)sortedTouchBarKeysInDictionary:(NSDictionary<NSString *, NSDictionary *> *)dict {
+    NSArray<NSString *> *keys = dict.allKeys;
+    keys = [keys sortedArrayUsingComparator:^NSComparisonResult(NSString *_Nonnull key1, NSString *_Nonnull key2) {
+        NSString *desc1 = [self formatAction:dict[key1]];
+        NSString *desc2 = [self formatAction:dict[key2]];
+        return [desc1 compare:desc2];
+    }];
+    return keys;
+}
+
++ (void)updateDictionary:(NSMutableDictionary *)dict
+         forTouchBarItem:(NSString *)key
+                  action:(int)action
+                   value:(NSString *)parameter
+                   label:(NSString *)label {
+    NSMutableDictionary *binding = [NSMutableDictionary dictionary];
+    binding[@"Action"] = @(action);
+    if (parameter) {
+        binding[@"Text"] = parameter;
+    }
+    binding[@"Label"] = label ?: @"?";
+    dict[key] = binding;
 }
 
 + (NSArray *)sortedGlobalKeyCombinations {
@@ -788,8 +877,12 @@ exit:
     return [[km allKeys] sortedArrayUsingSelector:@selector(caseInsensitiveCompare:)];
 }
 
-+ (NSString*)shortcutAtIndex:(int)rowIndex forBookmark:(Profile*)bookmark
-{
++ (NSArray *)sortedTouchBarItemsForProfile:(Profile *)profile {
+    NSDictionary *map =profile[KEY_TOUCHBAR_MAP];
+    return [self sortedTouchBarKeysInDictionary:map];
+}
+
++ (NSString*)shortcutAtIndex:(int)rowIndex forBookmark:(Profile *)bookmark {
     NSDictionary* km = [bookmark objectForKey:KEY_KEYBOARD_MAP];
     NSArray* allKeys = [[km allKeys] sortedArrayUsingSelector:@selector(caseInsensitiveCompare:)];
     if (rowIndex >= 0 && rowIndex < [allKeys count]) {
@@ -812,6 +905,10 @@ exit:
 
 + (NSDictionary *)keyMappingsForProfile:(Profile *)profile {
     return profile[KEY_KEYBOARD_MAP];
+}
+
++ (NSDictionary *)touchBarItemsForProfile:(Profile *)profile {
+    return profile[KEY_TOUCHBAR_MAP];
 }
 
 + (NSDictionary*)mappingAtIndex:(int)rowIndex forBookmark:(Profile*)bookmark
@@ -844,8 +941,7 @@ exit:
 
 + (void)removeMappingWithCode:(unichar)keyCode
                     modifiers:(unsigned int)mods
-                   inBookmark:(NSMutableDictionary*)bookmark
-{
+                   inBookmark:(NSMutableDictionary*)bookmark {
     NSMutableDictionary* km = [NSMutableDictionary dictionaryWithDictionary:[bookmark objectForKey:KEY_KEYBOARD_MAP]];
     NSString* keyString = [NSString stringWithFormat:@"0x%x-0x%x", keyCode, mods];
     [km removeObjectForKey:keyString];
@@ -996,14 +1092,21 @@ exit:
     return [self _nxMaskForRightMod:[[iTermModifierRemapper sharedInstance] controlRemapping]];
 }
 
-+ (CGEventRef)remapModifiersInCGEvent:(CGEventRef)cgEvent
-{
++ (CGEventRef)remapModifiersInCGEvent:(CGEventRef)cgEvent {
     // This function copied from cmd-key happy. See copyright notice at top.
-    CGEventFlags flags = CGEventGetFlags(cgEvent);
-    const CGEventFlags origFlags = flags;
+    const CGEventFlags flags = CGEventGetFlags(cgEvent);
+    DLog(@"Performing remapping. On input CGEventFlags=%@", @(flags));
     CGEventFlags andMask = -1;
     CGEventFlags orMask = 0;
-    if (origFlags & kCGEventFlagMaskCommand) {
+
+    // flags contains both device-dependent flags and device-independent flags.
+    // The device-indepdendent flags are named kCGEventFlagMaskXXX or NX_xxxMASK
+    // The device-dependent flags are named NX_DEVICExxxKEYMASK
+    // Device-independent flags do not indicate leftness or rightness.
+    // Device-dependent flags do.
+    // Generally, you get both sets of flags. But this does not have to be the case if an event
+    // is synthesized, as seen in issue 5207 where Flycut does not set the device-dependent flags.
+    if ((flags & kCGEventFlagMaskCommand) && (flags & (NX_DEVICELCMDKEYMASK | NX_DEVICERCMDKEYMASK))) {
         andMask &= ~kCGEventFlagMaskCommand;
         if (flags & NX_DEVICELCMDKEYMASK) {
             andMask &= ~NX_DEVICELCMDKEYMASK;
@@ -1016,7 +1119,7 @@ exit:
             orMask |= [self _nxMaskForRightCommandKey];
         }
     }
-    if (origFlags & kCGEventFlagMaskAlternate) {
+    if ((flags & kCGEventFlagMaskAlternate) && (flags & (NX_DEVICELALTKEYMASK | NX_DEVICERALTKEYMASK))) {
         andMask &= ~kCGEventFlagMaskAlternate;
         if (flags & NX_DEVICELALTKEYMASK) {
             andMask &= ~NX_DEVICELALTKEYMASK;
@@ -1029,7 +1132,7 @@ exit:
             orMask |= [self _nxMaskForRightAlternateKey];
         }
     }
-    if (origFlags & kCGEventFlagMaskControl) {
+    if ((flags & kCGEventFlagMaskControl) && (flags & (NX_DEVICELCTLKEYMASK | NX_DEVICERCTLKEYMASK))) {
         andMask &= ~kCGEventFlagMaskControl;
         if (flags & NX_DEVICELCTLKEYMASK) {
             andMask &= ~NX_DEVICELCTLKEYMASK;
@@ -1042,6 +1145,7 @@ exit:
             orMask |= [self _nxMaskForRightControlKey];
         }
     }
+    DLog(@"On output CGEventFlags=%@", @((flags & andMask) | orMask));
 
     CGEventSetFlags(cgEvent, (flags & andMask) | orMask);
     return cgEvent;
