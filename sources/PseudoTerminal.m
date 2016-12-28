@@ -44,6 +44,7 @@
 #import "iTermWindowShortcutLabelTitlebarAccessoryViewController.h"
 #import "MovePaneController.h"
 #import "NSArray+iTerm.h"
+#import "NSColor+iTerm.h"
 #import "NSImage+iTerm.h"
 #import "NSScreen+iTerm.h"
 #import "NSStringITerm.h"
@@ -97,10 +98,12 @@ static NSString *const iTermTouchBarIdentifierNextMark = @"iTermTouchBarIdentifi
 static NSString *const iTermTouchBarIdentifierPreviousMark = @"iTermTouchBarIdentifierPreviousMark";
 static NSString *const iTermTouchBarIdentifierManPage = @"iTermTouchBarIdentifierManPage";
 static NSString *const iTermTouchBarIdentifierColorPreset = @"iTermTouchBarIdentifierColorPreset";
+static NSString *const iTermTouchBarIdentifierFunctionKeys = @"iTermTouchBarIdentifierFunctionKeys";
 static NSString *const iTermTouchBarIdentifierColorPresetScrollview = @"iTermTouchBarIdentifierColorPresetScrollview";
 static NSString *const iTermTouchBarIdentifierAutocomplete = @"iTermTouchBarIdentifierAutocomplete";
 static NSString *const iTermTabBarTouchBarIdentifier = @"tab bar";
 static NSString *const iTermTabBarItemTouchBarIdentifier = @"tab bar item";
+static NSString *const iTermTouchBarFunctionKeysScrollView  = @"iTermTouchBarFunctionKeysScrollView";
 
 #define PtyLog DLog
 
@@ -816,6 +819,7 @@ ITERM_WEAKLY_REFERENCEABLE
 #endif
     [_didEnterLionFullscreen release];
     [_desiredTitle release];
+    [_tabsTouchBarItem release];
     [super dealloc];
 }
 
@@ -2705,7 +2709,7 @@ ITERM_WEAKLY_REFERENCEABLE
                 // If the screen grew and the window was smaller than the desired number of rows, grow it.
                 if (desiredRows_ > 0) {
                     frame.size.height = MIN(screenVisibleFrame.size.height,
-                                            ceil([[session textview] lineHeight] * desiredRows_) + decorationSize.height + 2 * VMARGIN);
+                                            ceil([[session textview] lineHeight] * desiredRows_) + decorationSize.height + 2 * [iTermAdvancedSettingsModel terminalVMargin]);
                 } else {
                     frame.size.height = MIN(screenVisibleFrame.size.height, frame.size.height);
                 }
@@ -2731,7 +2735,7 @@ ITERM_WEAKLY_REFERENCEABLE
                 // If the screen grew and the window was smaller than the desired number of rows, grow it.
                 if (desiredRows_ > 0) {
                     frame.size.height = MIN(screenVisibleFrame.size.height,
-                                            ceil([[session textview] lineHeight] * desiredRows_) + decorationSize.height + 2 * VMARGIN);
+                                            ceil([[session textview] lineHeight] * desiredRows_) + decorationSize.height + 2 * [iTermAdvancedSettingsModel terminalVMargin]);
                 } else {
                     frame.size.height = MIN(screenVisibleFrame.size.height, frame.size.height);
                 }
@@ -2761,7 +2765,7 @@ ITERM_WEAKLY_REFERENCEABLE
                 // If the screen grew and the window was smaller than the desired number of columns, grow it.
                 if (desiredColumns_ > 0) {
                     frame.size.width = MIN(screenVisibleFrame.size.width,
-                                           [[session textview] charWidth] * desiredColumns_ + 2 * MARGIN);
+                                           [[session textview] charWidth] * desiredColumns_ + 2 * [iTermAdvancedSettingsModel terminalMargin]);
                 } else {
                     frame.size.width = MIN(screenVisibleFrame.size.width, frame.size.width);
                 }
@@ -2788,7 +2792,7 @@ ITERM_WEAKLY_REFERENCEABLE
                 // If the screen grew and the window was smaller than the desired number of columns, grow it.
                 if (desiredColumns_ > 0) {
                     frame.size.width = MIN(screenVisibleFrame.size.width,
-                                           [[session textview] charWidth] * desiredColumns_ + 2 * MARGIN);
+                                           [[session textview] charWidth] * desiredColumns_ + 2 * [iTermAdvancedSettingsModel terminalMargin]);
                 } else {
                     frame.size.width = MIN(screenVisibleFrame.size.width, frame.size.width);
                 }
@@ -2996,14 +3000,14 @@ ITERM_WEAKLY_REFERENCEABLE
                               controlSize:NSRegularControlSize
                             scrollerStyle:[self scrollerStyle]];
 
-    int screenWidth = (contentSize.width - MARGIN * 2) / charWidth;
-    int screenHeight = (contentSize.height - VMARGIN * 2) / charHeight;
+    int screenWidth = (contentSize.width - [iTermAdvancedSettingsModel terminalMargin] * 2) / charWidth;
+    int screenHeight = (contentSize.height - [iTermAdvancedSettingsModel terminalVMargin] * 2) / charHeight;
 
     if (snapWidth) {
-      contentSize.width = screenWidth * charWidth + MARGIN * 2;
+      contentSize.width = screenWidth * charWidth + [iTermAdvancedSettingsModel terminalMargin] * 2;
     }
     if (snapHeight) {
-      contentSize.height = screenHeight * charHeight + VMARGIN * 2;
+      contentSize.height = screenHeight * charHeight + [iTermAdvancedSettingsModel terminalVMargin] * 2;
     }
     tabSize =
         [PTYScrollView frameSizeForContentSize:contentSize
@@ -3346,8 +3350,8 @@ ITERM_WEAKLY_REFERENCEABLE
     NSSize decorationSize = [self windowDecorationSize];
     VT100GridSize sessionSize = VT100GridSizeMake([session.profile[KEY_COLUMNS] intValue],
                                                   [session.profile[KEY_ROWS] intValue]);
-    return NSMakeSize(MARGIN * 2 + sessionSize.width * cellSize.width + decorationSize.width,
-                      VMARGIN * 2 + sessionSize.height * cellSize.height + decorationSize.height);
+    return NSMakeSize([iTermAdvancedSettingsModel terminalMargin] * 2 + sessionSize.width * cellSize.width + decorationSize.width,
+                      [iTermAdvancedSettingsModel terminalVMargin] * 2 + sessionSize.height * cellSize.height + decorationSize.height);
 }
 
 - (void)toggleTraditionalFullScreenMode {
@@ -3687,9 +3691,9 @@ ITERM_WEAKLY_REFERENCEABLE
     // panes then the margins probably won't turn out perfect. If other tabs have
     // a different char size, they will also have imperfect margins.
     float decorationHeight = [sender frame].size.height -
-        [[[[self currentSession] view] scrollview] documentVisibleRect].size.height + VMARGIN * 2;
+        [[[[self currentSession] view] scrollview] documentVisibleRect].size.height + [iTermAdvancedSettingsModel terminalVMargin] * 2;
     float decorationWidth = [sender frame].size.width -
-        [[[[self currentSession] view] scrollview] documentVisibleRect].size.width + MARGIN * 2;
+        [[[[self currentSession] view] scrollview] documentVisibleRect].size.width + [iTermAdvancedSettingsModel terminalMargin] * 2;
 
     float charHeight = [self maxCharHeight:nil];
     float charWidth = [self maxCharWidth:nil];
@@ -3980,7 +3984,7 @@ ITERM_WEAKLY_REFERENCEABLE
 
     PTYSession *activeSession = [self currentSession];
     for (PTYSession *s in [self allSessions]) {
-      [aSession setFocused:(s == activeSession)];
+      [s setFocused:(s == activeSession)];
     }
     [self showOrHideInstantReplayBar];
     iTermApplicationDelegate *itad = [iTermApplication.sharedApplication delegate];
@@ -3993,6 +3997,22 @@ ITERM_WEAKLY_REFERENCEABLE
         [self editSession:self.currentSession makeKey:NO];
     }
     [self updateTouchBarIfNeeded];
+
+    NSInteger darkCount = 0;
+    NSInteger lightCount = 0;
+    for (PTYSession *session in tab.sessions) {
+        if ([[session.colorMap colorForKey:kColorMapBackground] perceivedBrightness] < 0.5) {
+            darkCount++;
+        } else {
+            lightCount++;
+        }
+    }
+    if (lightCount > darkCount) {
+        // Matches bottom line color for tab bar
+        _contentView.color = [NSColor colorWithSRGBRed:170/255.0 green:167/255.0 blue:170/255.0 alpha:1];
+    } else {
+        _contentView.color = [NSColor windowBackgroundColor];
+    }
 }
 
 - (void)notifyTmuxOfTabChange {
@@ -4518,6 +4538,7 @@ ITERM_WEAKLY_REFERENCEABLE
     [_contentView.tabBarControl setObjectCount:tab.objectCount forTabWithIdentifier:tab];
 }
 
+// This updates the window's background color and title text color as well as the tab bar's color.
 - (void)updateTabColors {
     for (PTYTab *aTab in [self tabs]) {
         NSTabViewItem *tabViewItem = [aTab tabViewItem];
@@ -4529,26 +4550,40 @@ ITERM_WEAKLY_REFERENCEABLE
             if ([_contentView.tabView numberOfTabViewItems] == 1 &&
                 [iTermPreferences boolForKey:kPreferenceKeyHideTabBar] &&
                 newTabColor) {
-                [[self window] setBackgroundColor:newTabColor];
+                [self setBackgroundColor:newTabColor];
 
-                if (IsYosemiteOrLater()) {
-                    if (newTabColor.brightnessComponent < 0.5) {
-                        self.window.appearance = [NSAppearance appearanceNamed:NSAppearanceNameVibrantDark];
-                    } else {
-                        self.window.appearance = nil;
-                    }
-                }
                 [_contentView setColor:newTabColor];
             } else {
-                [[self window] setBackgroundColor:nil];
-                if (IsYosemiteOrLater()) {
-                    self.window.appearance = nil;
-                }
+                [self setBackgroundColor:nil];
                 [_contentView setColor:normalBackgroundColor];
             }
         }
     }
 }
+
+- (void)setBackgroundColor:(nullable NSColor *)backgroundColor {
+    if (backgroundColor == nil && [iTermAdvancedSettingsModel darkThemeHasBlackTitlebar]) {
+        switch ([iTermPreferences intForKey:kPreferenceKeyTabStyle]) {
+            case TAB_STYLE_LIGHT:
+            case TAB_STYLE_LIGHT_HIGH_CONTRAST:
+                break;
+
+            case TAB_STYLE_DARK:
+            case TAB_STYLE_DARK_HIGH_CONTRAST:
+                backgroundColor = [PSMDarkTabStyle tabBarColor];
+                break;
+        }
+    }
+    [self.window setBackgroundColor:backgroundColor];
+    if (IsYosemiteOrLater()) {
+        if (backgroundColor != nil && backgroundColor.perceivedBrightness < 0.5) {
+            self.window.appearance = [NSAppearance appearanceNamed:NSAppearanceNameVibrantDark];
+        } else {
+            self.window.appearance = nil;
+        }
+    }
+}
+
 
 - (void)tabsDidReorder {
     TmuxController *controller = nil;
@@ -5072,8 +5107,8 @@ ITERM_WEAKLY_REFERENCEABLE
                                            verticalSpacing:[[theBookmark objectForKey:KEY_VERTICAL_SPACING] floatValue]];
     NSSize charSize = NSMakeSize(MAX(asciiCharSize.width, nonAsciiCharSize.width),
                                  MAX(asciiCharSize.height, nonAsciiCharSize.height));
-    NSSize newSessionSize = NSMakeSize(charSize.width * kVT100ScreenMinColumns + MARGIN * 2,
-                                       charSize.height * kVT100ScreenMinRows + VMARGIN * 2);
+    NSSize newSessionSize = NSMakeSize(charSize.width * kVT100ScreenMinColumns + [iTermAdvancedSettingsModel terminalMargin] * 2,
+                                       charSize.height * kVT100ScreenMinRows + [iTermAdvancedSettingsModel terminalVMargin] * 2);
 
     return [[self currentTab] canSplitVertically:isVertical withSize:newSessionSize];
 }
@@ -5691,6 +5726,17 @@ ITERM_WEAKLY_REFERENCEABLE
     [self insertTab:aTab atIndex:[_contentView.tabView numberOfTabViewItems]];
 }
 
+- (void)addTabAtAutomaticallyDeterminedLocation:(PTYTab *)tab {
+    if ([iTermAdvancedSettingsModel addNewTabAtEndOfTabs] || ![self currentTab]) {
+        [self insertTab:tab atIndex:self.numberOfTabs];
+    } else {
+        [self insertTab:tab atIndex:[self indexOfTab:self.currentTab] + 1];
+        if (tab.isTmuxTab) {
+            [self tabsDidReorder];
+        }
+    }
+}
+
 - (NSString *)promptForParameter:(NSString *)name {
     if (self.disablePromptForSubstitutions) {
         return @"";
@@ -6102,6 +6148,7 @@ ITERM_WEAKLY_REFERENCEABLE
             break;
     }
     [_contentView.tabBarControl setStyle:style];
+    [self updateTabColors];
 }
 
 - (void)hideMenuBar {
@@ -6455,8 +6502,8 @@ ITERM_WEAKLY_REFERENCEABLE
 
     if (size == nil && [_contentView.tabView numberOfTabViewItems] != 0) {
         NSSize contentSize = [[[[self currentSession] view] scrollview] documentVisibleRect].size;
-        rows = (contentSize.height - VMARGIN*2) / charSize.height;
-        columns = (contentSize.width - MARGIN*2) / charSize.width;
+        rows = (contentSize.height - [iTermAdvancedSettingsModel terminalVMargin]*2) / charSize.height;
+        columns = (contentSize.width - [iTermAdvancedSettingsModel terminalMargin]*2) / charSize.width;
     }
     NSRect sessionRect;
     if (size != nil) {
@@ -6468,12 +6515,12 @@ ITERM_WEAKLY_REFERENCEABLE
                                    borderType:NSNoBorder
                                   controlSize:NSRegularControlSize
                                 scrollerStyle:[self scrollerStyle]];
-        rows = (contentSize.height - VMARGIN*2) / charSize.height;
-        columns = (contentSize.width - MARGIN*2) / charSize.width;
+        rows = (contentSize.height - [iTermAdvancedSettingsModel terminalVMargin]*2) / charSize.height;
+        columns = (contentSize.width - [iTermAdvancedSettingsModel terminalMargin]*2) / charSize.width;
         sessionRect.origin = NSZeroPoint;
         sessionRect.size = *size;
     } else {
-        sessionRect = NSMakeRect(0, 0, columns * charSize.width + MARGIN * 2, rows * charSize.height + VMARGIN * 2);
+        sessionRect = NSMakeRect(0, 0, columns * charSize.width + [iTermAdvancedSettingsModel terminalMargin] * 2, rows * charSize.height + [iTermAdvancedSettingsModel terminalVMargin] * 2);
     }
 
     if ([aSession setScreenSize:sessionRect parent:self]) {
@@ -7087,6 +7134,7 @@ ITERM_WEAKLY_REFERENCEABLE
     touchBar.delegate = self;
     touchBar.defaultItemIdentifiers = @[ iTermTouchBarIdentifierManPage,
                                          iTermTouchBarIdentifierColorPreset,
+                                         iTermTouchBarIdentifierFunctionKeys,
                                          NSTouchBarItemIdentifierFlexibleSpace,
                                          NSTouchBarItemIdentifierOtherItemsProxy,
                                          iTermTouchBarIdentifierAddMark,
@@ -7109,6 +7157,8 @@ ITERM_WEAKLY_REFERENCEABLE
         }
         NSArray *ids = @[ iTermTouchBarIdentifierManPage,
                           iTermTouchBarIdentifierColorPreset,
+                          iTermTouchBarIdentifierFunctionKeys,
+                          iTermTouchBarFunctionKeysScrollView,
                           NSTouchBarItemIdentifierFlexibleSpace,
                           iTermTouchBarIdentifierAddMark,
                           iTermTouchBarIdentifierNextMark,
@@ -7116,6 +7166,7 @@ ITERM_WEAKLY_REFERENCEABLE
                           iTermTouchBarIdentifierAutocomplete ];
         ids = [ids arrayByAddingObjectsFromArray:[iTermKeyBindingMgr sortedTouchBarKeysInDictionary:[iTermKeyBindingMgr globalTouchBarMap]]];
         self.touchBar.customizationAllowedItemIdentifiers = ids;
+        [self updateTouchBarFunctionKeyLabels];
     }
 }
 
@@ -7161,6 +7212,74 @@ ITERM_WEAKLY_REFERENCEABLE
         button.enabled = NO;
         button.keyBindingAction = nil;
     }
+}
+
+- (NSTouchBarItem *)functionKeysTouchBarItem {
+    if (!IsTouchBarAvailable()) {
+        return nil;
+    }
+    NSScrollView *scrollView = [[[NSScrollView alloc] init] autorelease];
+    NSCustomTouchBarItem *item = [[[NSCustomTouchBarItem alloc] initWithIdentifier:iTermTouchBarFunctionKeysScrollView] autorelease];
+    item.view = scrollView;
+    NSView *documentView = [[NSView alloc] init];
+    documentView.translatesAutoresizingMaskIntoConstraints = NO;
+    scrollView.documentView = documentView;
+    NSButton *previous = nil;
+    for (NSInteger n = 1; n <= 20; n++) {
+        NSString *label = [NSString stringWithFormat:@"F%@", @(n)];
+        iTermTouchBarButton *button = [iTermTouchBarButton buttonWithTitle:label target:self action:@selector(functionKeyTouchBarItemSelected:)];
+        button.tag = n;
+        [button sizeToFit];
+        [documentView addSubview:button];
+        button.translatesAutoresizingMaskIntoConstraints = NO;
+        if (previous == nil) {
+            // Constrain the first item's left to the document view's left
+            [documentView addConstraint:[NSLayoutConstraint constraintWithItem:button
+                                                                     attribute:NSLayoutAttributeLeft
+                                                                     relatedBy:NSLayoutRelationEqual
+                                                                        toItem:documentView
+                                                                     attribute:NSLayoutAttributeLeft
+                                                                    multiplier:1
+                                                                      constant:0]];
+        } else {
+            // Constrain non-first button's left to predecessor's right + 8pt
+            [documentView addConstraint:[NSLayoutConstraint constraintWithItem:button
+                                                                     attribute:NSLayoutAttributeLeft
+                                                                     relatedBy:NSLayoutRelationEqual
+                                                                        toItem:previous
+                                                                     attribute:NSLayoutAttributeRight
+                                                                    multiplier:1
+                                                                      constant:8]];
+        }
+        // Constrain top and bottom to document view's top and bottom
+        [documentView addConstraint:[NSLayoutConstraint constraintWithItem:button
+                                                                 attribute:NSLayoutAttributeTop
+                                                                 relatedBy:NSLayoutRelationEqual
+                                                                    toItem:documentView
+                                                                 attribute:NSLayoutAttributeTop
+                                                                multiplier:1
+                                                                  constant:0]];
+        [documentView addConstraint:[NSLayoutConstraint constraintWithItem:button
+                                                                 attribute:NSLayoutAttributeBottom
+                                                                 relatedBy:NSLayoutRelationEqual
+                                                                    toItem:documentView
+                                                                 attribute:NSLayoutAttributeBottom
+                                                                multiplier:1
+                                                                  constant:0]];
+        previous = button;
+    }
+    if (previous) {
+        // Constrain last button's right to document view's right
+        [documentView addConstraint:[NSLayoutConstraint constraintWithItem:previous
+                                                                 attribute:NSLayoutAttributeRight
+                                                                 relatedBy:NSLayoutRelationEqual
+                                                                    toItem:documentView
+                                                                 attribute:NSLayoutAttributeRight
+                                                                multiplier:1
+                                                                  constant:0]];
+    }
+    item.customizationLabel = @"Function Keys";
+    return item;
 }
 
 - (NSTouchBarItem *)colorPresetsScrollViewTouchBarItem {
@@ -7720,6 +7839,43 @@ ITERM_WEAKLY_REFERENCEABLE
     [_contentView.tabBarControl setObjectCount:objectCount forTabWithIdentifier:tab];
 }
 
+- (void)tabKeyLabelsDidChangeForSession:(PTYSession *)session {
+    [self updateTouchBarFunctionKeyLabels];
+}
+
+- (void)updateTouchBarFunctionKeyLabels {
+    if (!IsTouchBarAvailable()) {
+        return;
+    }
+
+    NSTouchBarItem *item = [self.touchBar itemForIdentifier:iTermTouchBarFunctionKeysScrollView];
+    NSScrollView *scrollView = (NSScrollView *)item.view;
+    [self updateTouchBarFunctionKeyLabelsInScrollView:scrollView];
+
+    NSPopoverTouchBarItem *popoverItem = [self.touchBar itemForIdentifier:iTermTouchBarIdentifierFunctionKeys];
+    NSTouchBar *popoverTouchBar = popoverItem.popoverTouchBar;
+    item = [popoverTouchBar itemForIdentifier:iTermTouchBarFunctionKeysScrollView];
+    scrollView = (NSScrollView *)item.view;
+    [self updateTouchBarFunctionKeyLabelsInScrollView:scrollView];
+}
+
+- (void)updateTouchBarFunctionKeyLabelsInScrollView:(NSScrollView *)scrollView {
+    if (!scrollView) {
+        return;
+    }
+    NSView *documentView = scrollView.documentView;
+    NSInteger n = 1;
+    for (iTermTouchBarButton *button in [documentView subviews]) {
+        if (![button isKindOfClass:[iTermTouchBarButton class]]) {
+            continue;
+        }
+        NSString *label = [NSString stringWithFormat:@"F%@", @(n)];
+        NSString *customLabel = self.currentSession.keyLabels[label];
+        button.title = customLabel ?: label;
+        n++;
+    }
+}
+
 #pragma mark - Toolbelt
 
 - (void)toolbeltUpdateMouseCursor {
@@ -7789,21 +7945,21 @@ ITERM_WEAKLY_REFERENCEABLE
     return [_contentView.tabView numberOfTabViewItems];
 }
 
-- (NSString *)scrubberLabelAtIndex:(NSInteger)index {
+- (NSString *)scrubber:(NSScrubber *)scrubber labelAtIndex:(NSInteger)index {
     NSArray<PTYTab *> *tabs = self.tabs;
     return index < tabs.count ?  self.tabs[index].activeSession.name : @"";
 }
 
 - (__kindof NSScrubberItemView *)scrubber:(NSScrubber *)scrubber viewForItemAtIndex:(NSInteger)index {
     NSScrubberTextItemView *itemView = [scrubber makeItemWithIdentifier:iTermTabBarItemTouchBarIdentifier owner:nil];
-    itemView.textField.stringValue = [self scrubberLabelAtIndex:index];
+    itemView.textField.stringValue = [self scrubber:scrubber labelAtIndex:index];
     return itemView;
 }
 
 - (NSSize)scrubber:(NSScrubber *)scrubber layout:(NSScrubberFlowLayout *)layout sizeForItemAtIndex:(NSInteger)itemIndex {
     NSSize size = NSMakeSize(CGFLOAT_MAX, CGFLOAT_MAX);
 
-    NSString *title = [self scrubberLabelAtIndex:itemIndex];
+    NSString *title = [self scrubber:scrubber labelAtIndex:itemIndex];
     NSRect textRect = [title boundingRectWithSize:size
                                           options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingUsesFontLeading
                                        attributes:@{ NSFontAttributeName: [NSFont systemFontOfSize:0]}];
@@ -7893,11 +8049,25 @@ ITERM_WEAKLY_REFERENCEABLE
         item.showsCloseButton = YES;
         item.collapsedRepresentationImage = image;
 
-        NSTouchBar *secondaryTouchBar = [[NSTouchBar alloc] init];
+        NSTouchBar *secondaryTouchBar = [[[NSTouchBar alloc] init] autorelease];
         secondaryTouchBar.delegate = self;
         secondaryTouchBar.defaultItemIdentifiers = @[ iTermTouchBarIdentifierColorPresetScrollview ];
         item.popoverTouchBar = secondaryTouchBar;
         return item;
+    } else if ([identifier isEqualToString:iTermTouchBarIdentifierFunctionKeys]) {
+        image = [NSImage imageNamed:@"Touch Bar Function Keys"];
+        NSPopoverTouchBarItem *item = [[[NSPopoverTouchBarItem alloc] initWithIdentifier:identifier] autorelease];
+        item.customizationLabel = @"Function Keys Popover";
+        item.showsCloseButton = YES;
+        item.collapsedRepresentationImage = image;
+
+        NSTouchBar *functionKeys = [[[NSTouchBar alloc] init] autorelease];
+        functionKeys.delegate = self;
+        functionKeys.defaultItemIdentifiers = @[ iTermTouchBarFunctionKeysScrollView ];
+        item.popoverTouchBar = functionKeys;
+        return item;
+    } else if ([identifier isEqualToString:iTermTouchBarFunctionKeysScrollView]) {
+        return [self functionKeysTouchBarItem];
     } else if ([identifier isEqualToString:iTermTouchBarIdentifierColorPresetScrollview]) {
         return [self colorPresetsScrollViewTouchBarItem];
     }
@@ -7976,6 +8146,53 @@ ITERM_WEAKLY_REFERENCEABLE
 
 - (void)colorPresetTouchBarItemSelected:(iTermTouchBarButton *)sender {
     [self.currentSession setColorsFromPresetNamed:sender.keyBindingAction[@"presetName"]];
+}
+
+- (void)functionKeyTouchBarItemSelected:(iTermTouchBarButton *)sender {
+    [self sendFunctionKeyToCurrentSession:sender.tag];
+}
+
+- (void)sendFunctionKeyToCurrentSession:(NSInteger)number {
+    if (number < 1 || number > 20) {
+        return;
+    }
+
+    NSEvent *currentEvent = [NSApp currentEvent];
+    unsigned short keyCodes[] = {
+        kVK_F1,
+        kVK_F2,
+        kVK_F3,
+        kVK_F4,
+        kVK_F5,
+        kVK_F6,
+        kVK_F7,
+        kVK_F8,
+        kVK_F9,
+        kVK_F10,
+        kVK_F11,
+        kVK_F12,
+        kVK_F13,
+        kVK_F14,
+        kVK_F15,
+        kVK_F16,
+        kVK_F17,
+        kVK_F18,
+        kVK_F19,
+        kVK_F20,
+    };
+    NSString *chars = [NSString stringWithFormat:@"%C", (unichar)(NSF1FunctionKey + number - 1)];
+    NSPoint screenPoint = [NSEvent mouseLocation];
+    NSEvent *event = [NSEvent keyEventWithType:NSKeyDown
+                                      location:[self.window convertRectFromScreen:NSMakeRect(screenPoint.x, screenPoint.y, 0, 0)].origin
+                                 modifierFlags:([NSEvent modifierFlags] | NSFunctionKeyMask)
+                                     timestamp:[currentEvent timestamp]
+                                  windowNumber:self.window.windowNumber
+                                       context:nil
+                                    characters:chars
+                   charactersIgnoringModifiers:chars
+                                     isARepeat:NO
+                                       keyCode:keyCodes[number - 1]];
+    [self.currentSession.textview keyDown:event];
 }
 
 - (void)candidateListTouchBarItem:(NSCandidateListTouchBarItem *)anItem endSelectingCandidateAtIndex:(NSInteger)index {

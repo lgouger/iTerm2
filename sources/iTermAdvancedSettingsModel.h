@@ -156,8 +156,14 @@
 + (void)setTimeBetweenTips:(double)time;
 + (BOOL)openFileOverridesSendText;
 + (BOOL)useLayers;
++ (int)terminalMargin;
++ (int)terminalVMargin;
 + (BOOL)useColorfgbgFallback;
 + (BOOL)promptForPasteWhenNotAtPrompt;
 + (BOOL)performDNSLookups;
++ (BOOL)zeroWidthSpaceAdvancesCursor;
++ (BOOL)darkThemeHasBlackTitlebar;
++ (BOOL)fontChangeAffectsBroadcastingSessions;
++ (BOOL)zippyTextDrawing;
 
 @end

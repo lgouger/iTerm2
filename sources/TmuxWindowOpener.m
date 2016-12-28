@@ -397,7 +397,6 @@ static int OctalValue(const char *bytes) {
                               withObject:[NSNumber numberWithInt:windowIndex_]];
         }
         if (isNewWindow) {
-#warning TODO Make iTermController not know about PseudoTerminal so I don't have to do this cast.
             [[iTermController sharedInstance] didFinishCreatingTmuxWindow:(PseudoTerminal *)term];
         }
     }
@@ -409,6 +408,9 @@ static int OctalValue(const char *bytes) {
                                                  callingSelector:@selector(decorateWindowPane:)
                                                         onTarget:self
                                                       withObject:nil];
+    if (self.manuallyOpened) {
+        parseTree[kLayoutDictTabOpenedManually] = @YES;
+    }
 }
 
 // Callback for DFS of parse tree from decorateParseTree:

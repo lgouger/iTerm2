@@ -44,6 +44,7 @@
 #import "NSColor+iTerm.h"
 #import "NSData+iTerm.h"
 #import "NSDictionary+iTerm.h"
+#import "NSFont+iTerm.h"
 #import "NSImage+iTerm.h"
 #import "NSPasteboard+iTerm.h"
 #import "NSStringITerm.h"
@@ -404,6 +405,10 @@ static const NSUInteger kMaxHosts = 100;
     
     // Current unicode version.
     NSInteger _unicodeVersion;
+
+    // Touch bar labels for function keys.
+    NSMutableDictionary<NSString *, NSString *> *_keyLabels;
+    NSMutableArray<NSMutableDictionary<NSString *, NSString *> *> *_keyLabelsStack;
 }
 
 + (void)registerSessionInArrangement:(NSDictionary *)arrangement {
@@ -564,7 +569,8 @@ ITERM_WEAKLY_REFERENCEABLE
     [_jobName release];
     [_automaticProfileSwitcher release];
     [_throughputEstimator release];
-
+    [_keyLabels release];
+    [_keyLabelsStack release];
     [[NSNotificationCenter defaultCenter] removeObserver:self];
 
     if (_dvrDecoder) {
@@ -1093,7 +1099,7 @@ ITERM_WEAKLY_REFERENCEABLE
     NSSize aSize = [_view.scrollview contentSize];
     _wrapper = [[TextViewWrapper alloc] initWithFrame:NSMakeRect(0, 0, aSize.width, aSize.height)];
 
-    _textview = [[PTYTextView alloc] initWithFrame: NSMakeRect(0, VMARGIN, aSize.width, aSize.height)
+    _textview = [[PTYTextView alloc] initWithFrame: NSMakeRect(0, [iTermAdvancedSettingsModel terminalVMargin], aSize.width, aSize.height)
                                           colorMap:_colorMap];
     _colorMap.dimOnlyText = [iTermPreferences boolForKey:kPreferenceKeyDimOnlyText];
     [_textview setAutoresizingMask: NSViewWidthSizable | NSViewHeightSizable];
@@ -1108,7 +1114,7 @@ ITERM_WEAKLY_REFERENCEABLE
     [self setTransparencyAffectsOnlyDefaultBackgroundColor:[[_profile objectForKey:KEY_TRANSPARENCY_AFFECTS_ONLY_DEFAULT_BACKGROUND_COLOR] boolValue]];
 
     [_wrapper addSubview:_textview];
-    [_textview setFrame:NSMakeRect(0, VMARGIN, aSize.width, aSize.height - VMARGIN)];
+    [_textview setFrame:NSMakeRect(0, [iTermAdvancedSettingsModel terminalVMargin], aSize.width, aSize.height - [iTermAdvancedSettingsModel terminalVMargin])];
     [_textview release];
 
     // assign terminal and task objects
@@ -1117,8 +1123,8 @@ ITERM_WEAKLY_REFERENCEABLE
 
     // initialize the screen
     // TODO: Shouldn't this take the scrollbar into account?
-    int width = (aSize.width - MARGIN*2) / [_textview charWidth];
-    int height = (aSize.height - VMARGIN*2) / [_textview lineHeight];
+    int width = (aSize.width - [iTermAdvancedSettingsModel terminalMargin]*2) / [_textview charWidth];
+    int height = (aSize.height - [iTermAdvancedSettingsModel terminalVMargin]*2) / [_textview lineHeight];
     // NB: In the bad old days, this returned whether setup succeeded because it would allocate an
     // enormous amount of memory. That's no longer an issue.
     [_screen destructivelySetScreenWidth:width height:height];
@@ -1240,7 +1246,7 @@ ITERM_WEAKLY_REFERENCEABLE
         if ([_view showTitle]) {
             x -= [SessionView titleHeight];
         }
-        x -= VMARGIN * 2;
+        x -= [iTermAdvancedSettingsModel terminalVMargin] * 2;
         int iLineHeight = [_textview lineHeight];
         if (iLineHeight == 0) {
             return 0;
@@ -1251,7 +1257,7 @@ ITERM_WEAKLY_REFERENCEABLE
         }
         return x;
     } else {
-        x -= MARGIN * 2;
+        x -= [iTermAdvancedSettingsModel terminalMargin] * 2;
         int iCharWidth = [_textview charWidth];
         if (iCharWidth == 0) {
             return 0;
@@ -2205,8 +2211,8 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (NSSize)idealScrollViewSizeWithStyle:(NSScrollerStyle)scrollerStyle {
-    NSSize innerSize = NSMakeSize([_screen width] * [_textview charWidth] + MARGIN * 2,
-                                  [_screen height] * [_textview lineHeight] + VMARGIN * 2);
+    NSSize innerSize = NSMakeSize([_screen width] * [_textview charWidth] + [iTermAdvancedSettingsModel terminalMargin] * 2,
+                                  [_screen height] * [_textview lineHeight] + [iTermAdvancedSettingsModel terminalVMargin] * 2);
     BOOL hasScrollbar = [[_delegate realParentWindow] scrollbarShouldBeVisible];
     NSSize outerSize =
         [PTYScrollView frameSizeForContentSize:innerSize
@@ -2881,6 +2887,9 @@ ITERM_WEAKLY_REFERENCEABLE
                                                    inProfile:aDict]];
     self.thinStrokes = [iTermProfilePreferences intForKey:KEY_THIN_STROKES inProfile:aDict];
 
+    self.asciiLigatures = [iTermProfilePreferences boolForKey:KEY_ASCII_LIGATURES inProfile:aDict];
+    self.nonAsciiLigatures = [iTermProfilePreferences boolForKey:KEY_NON_ASCII_LIGATURES inProfile:aDict];
+
     [_textview setUseBrightBold:[iTermProfilePreferences boolForKey:KEY_USE_BRIGHT_BOLD
                                                           inProfile:aDict]];
 
@@ -3354,6 +3363,22 @@ ITERM_WEAKLY_REFERENCEABLE
 
 - (void)setThinStrokes:(iTermThinStrokesSetting)thinStrokes {
     _textview.thinStrokes = thinStrokes;
+}
+
+- (void)setAsciiLigatures:(BOOL)asciiLigatures {
+    _textview.asciiLigatures = asciiLigatures;
+}
+
+- (BOOL)asciiLigatures {
+    return _textview.asciiLigatures;
+}
+
+- (void)setNonAsciiLigatures:(BOOL)nonAsciiLigatures {
+    _textview.nonAsciiLigatures = nonAsciiLigatures;
+}
+
+- (BOOL)nonAsciiLigatures {
+    return _textview.nonAsciiLigatures;
 }
 
 - (BOOL)useItalicFont
@@ -3893,8 +3918,7 @@ ITERM_WEAKLY_REFERENCEABLE
     }
 }
 
-- (void)changeFontSizeDirection:(int)dir
-{
+- (void)changeFontSizeDirection:(int)dir {
     DLog(@"changeFontSizeDirection:%d", dir);
     NSFont* font;
     NSFont* nonAsciiFont;
@@ -3921,8 +3945,8 @@ ITERM_WEAKLY_REFERENCEABLE
         // Move this bookmark into the sessions model.
         NSString* guid = [self divorceAddressBookEntryFromPreferences];
 
-        [self setSessionSpecificProfileValues:@{ KEY_NORMAL_FONT: [ITAddressBookMgr descFromFont:font],
-                                                 KEY_NON_ASCII_FONT: [ITAddressBookMgr descFromFont:nonAsciiFont] }];
+        [self setSessionSpecificProfileValues:@{ KEY_NORMAL_FONT: [font stringValue],
+                                                 KEY_NON_ASCII_FONT: [nonAsciiFont stringValue] }];
         // Set the font in the bookmark dictionary
 
         // Update the model's copy of the bookmark.
@@ -4591,6 +4615,7 @@ ITERM_WEAKLY_REFERENCEABLE
 - (void)tmuxInitialCommandDidCompleteSuccessfully {
     // This kicks off a chain reaction that leads to windows being opened.
     [_tmuxController validateOptions];
+    [_tmuxController checkForUTF8];
     [_tmuxController guessVersion];
 }
 
@@ -6056,7 +6081,7 @@ ITERM_WEAKLY_REFERENCEABLE
     const CGFloat desiredHeight = _textview.desiredHeight;
     if (fabs(desiredHeight - NSHeight(frame)) >= 0.5) {
         // Update the wrapper's size, which in turn updates textview's size.
-        frame.size.height = desiredHeight + VMARGIN;  // The wrapper is always larger by VMARGIN.
+        frame.size.height = desiredHeight + [iTermAdvancedSettingsModel terminalVMargin];  // The wrapper is always larger by VMARGIN.
         _wrapper.frame = frame;
 
         NSAccessibilityPostNotification(_textview,
@@ -6956,6 +6981,10 @@ ITERM_WEAKLY_REFERENCEABLE
     }
 }
 
+- (void)screenSelectColorPresetNamed:(NSString *)name {
+    [self setColorsFromPresetNamed:name];
+}
+
 - (void)screenSetCurrentTabColor:(NSColor *)color {
     [self setTabColor:color];
     id<WindowControllerInterface> term = [_delegate parentWindow];
@@ -7537,6 +7566,31 @@ ITERM_WEAKLY_REFERENCEABLE
     }
 }
 
+- (void)screenSetLabel:(NSString *)label forKey:(NSString *)keyName {
+    if (!_keyLabels) {
+        _keyLabels = [[NSMutableDictionary alloc] init];
+    }
+    _keyLabels[keyName] = [[label copy] autorelease];
+    [_delegate sessionKeyLabelsDidChange:self];
+}
+
+- (void)screenPushKeyLabels {
+    if (!_keyLabels) {
+        return;
+    }
+    if (!_keyLabelsStack) {
+        _keyLabelsStack = [[NSMutableArray alloc] init];
+    }
+    [_keyLabelsStack addObject:[_keyLabels copy]];
+}
+
+- (void)screenPopKeyLabels {
+    [_keyLabels release];
+    _keyLabels = _keyLabelsStack.lastObject;
+    [_keyLabelsStack removeLastObject];
+    [_delegate sessionKeyLabelsDidChange:self];
+}
+
 #pragma mark - Announcements
 
 - (BOOL)hasAnnouncementWithIdentifier:(NSString *)identifier {
@@ -7815,7 +7869,7 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (CGFloat)sessionViewDesiredHeightOfDocumentView {
-    return _textview.desiredHeight + VMARGIN;
+    return _textview.desiredHeight + [iTermAdvancedSettingsModel terminalVMargin];
 }
 
 - (BOOL)sessionViewShouldUpdateSubviewsFramesAutomatically {

@@ -417,7 +417,7 @@ typedef struct iTermTextColorContext {
 
 //        NSLog(@"Paint background row %d range %@", line, NSStringFromRange(run->range));
         
-        NSRect rect = NSMakeRect(floor(MARGIN + run->range.location * _cellSize.width),
+        NSRect rect = NSMakeRect(floor([iTermAdvancedSettingsModel terminalMargin] + run->range.location * _cellSize.width),
                                  yOrigin,
                                  ceil(run->range.length * _cellSize.width),
                                  _cellSize.height * rows);
@@ -532,9 +532,9 @@ typedef struct iTermTextColorContext {
     // Draw a margin at the top of the visible area.
     NSRect topMarginRect = _visibleRect;
     topMarginRect.origin.y -=
-        MAX(0, VMARGIN - NSMinY(_delegate.enclosingScrollView.documentVisibleRect));
+        MAX(0, [iTermAdvancedSettingsModel terminalVMargin] - NSMinY(_delegate.enclosingScrollView.documentVisibleRect));
 
-    topMarginRect.size.height = VMARGIN;
+    topMarginRect.size.height = [iTermAdvancedSettingsModel terminalVMargin];
     [self.delegate drawingHelperDrawBackgroundImageInRect:topMarginRect
                                    blendDefaultBackground:YES];
 
@@ -544,10 +544,10 @@ typedef struct iTermTextColorContext {
 }
 
 - (void)drawMarginsAndMarkForLine:(int)line y:(CGFloat)y {
-    NSRect leftMargin = NSMakeRect(0, y, MARGIN, _cellSize.height);
+    NSRect leftMargin = NSMakeRect(0, y, [iTermAdvancedSettingsModel terminalMargin], _cellSize.height);
     NSRect rightMargin;
     NSRect visibleRect = _visibleRect;
-    rightMargin.origin.x = _cellSize.width * _gridSize.width + MARGIN;
+    rightMargin.origin.x = _cellSize.width * _gridSize.width + [iTermAdvancedSettingsModel terminalMargin];
     rightMargin.origin.y = y;
     rightMargin.size.width = visibleRect.size.width - rightMargin.origin.x;
     rightMargin.size.height = _cellSize.height;
@@ -603,7 +603,7 @@ typedef struct iTermTextColorContext {
         return;
     }
     [_cursorGuideColor set];
-    NSPoint textOrigin = NSMakePoint(MARGIN + range.location * _cellSize.width, yOrigin);
+    NSPoint textOrigin = NSMakePoint([iTermAdvancedSettingsModel terminalMargin] + range.location * _cellSize.width, yOrigin);
     NSRect rect = NSMakeRect(textOrigin.x,
                              textOrigin.y,
                              range.length * _cellSize.width,
@@ -623,7 +623,7 @@ typedef struct iTermTextColorContext {
         const CGFloat verticalSpacing = MAX(0, round((_cellSize.height - _cellSizeWithoutSpacing.height) / 2.0));
         CGRect rect = NSMakeRect(leftMargin.origin.x,
                                  leftMargin.origin.y + verticalSpacing,
-                                 MARGIN,
+                                 [iTermAdvancedSettingsModel terminalMargin],
                                  _cellSizeWithoutSpacing.height);
         const CGFloat kMaxHeight = 15;
         const CGFloat kMinMargin = 3;
@@ -664,11 +664,11 @@ typedef struct iTermTextColorContext {
     if (noteRanges.count) {
         for (NSValue *value in noteRanges) {
             VT100GridRange range = [value gridRangeValue];
-            CGFloat x = range.location * _cellSize.width + MARGIN;
+            CGFloat x = range.location * _cellSize.width + [iTermAdvancedSettingsModel terminalMargin];
             CGFloat y = line * _cellSize.height;
             [[NSColor yellowColor] set];
 
-            CGFloat maxX = MIN(_frame.size.width - MARGIN, range.length * _cellSize.width + x);
+            CGFloat maxX = MIN(_frame.size.width - [iTermAdvancedSettingsModel terminalMargin], range.length * _cellSize.width + x);
             CGFloat w = maxX - x;
             NSRectFill(NSMakeRect(x, y + _cellSize.height - 1.5, w, 1));
             [[NSColor orangeColor] set];
@@ -743,7 +743,7 @@ typedef struct iTermTextColorContext {
 
     NSString *widest = [s stringByReplacingOccurrencesOfRegex:@"[\\d\\p{Alphabetic}]" withString:@"M"];
     NSSize size = [widest sizeWithAttributes:@{ NSFontAttributeName: [NSFont systemFontOfSize:[iTermAdvancedSettingsModel pointSizeOfTimeStamp]] }];
-    int w = size.width + MARGIN;
+    int w = size.width + [iTermAdvancedSettingsModel terminalMargin];
     int x = MAX(0, _frame.size.width - w);
     CGFloat y = line * _cellSize.height;
     NSColor *bgColor = [self defaultBackgroundColor];
@@ -915,7 +915,7 @@ typedef struct iTermTextColorContext {
     NSData *matches = [_delegate drawingHelperMatchesOnLine:line];
     for (iTermBoxedBackgroundColorRun *box in backgroundRuns) {
         iTermBackgroundColorRun *run = box.valuePointer;
-        NSPoint textOrigin = NSMakePoint(MARGIN + run->range.location * _cellSize.width,
+        NSPoint textOrigin = NSMakePoint([iTermAdvancedSettingsModel terminalMargin] + run->range.location * _cellSize.width,
                                          y);
         [self constructAndDrawRunsForLine:theLine
                                       row:line
@@ -994,11 +994,11 @@ typedef struct iTermTextColorContext {
         int numCellsDrawn;
         if ([singlePartAttributedString isKindOfClass:[NSAttributedString class]]) {
             numCellsDrawn = [self drawSinglePartAttributedString:(NSAttributedString *)singlePartAttributedString
-                                                 atPoint:point
-                                                  origin:origin
-                                               positions:subpositions
-                                               inContext:ctx
-                                         backgroundColor:backgroundColor];
+                                                         atPoint:point
+                                                          origin:origin
+                                                       positions:subpositions
+                                                       inContext:ctx
+                                                 backgroundColor:backgroundColor];
         } else {
             NSPoint offsetPoint = point;
             offsetPoint.y -= round((_cellSize.height - _cellSizeWithoutSpacing.height) / 2.0);
@@ -1041,10 +1041,13 @@ typedef struct iTermTextColorContext {
         // This method is really slow so avoid doing it when it's not
         // necessary. It is also deprecated but CoreText is extremely slow so
         // we'll keep using until Apple fixes that.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
         CGContextSelectFont(ctx,
                             [[font fontName] UTF8String],
                             [font pointSize],
                             kCGEncodingMacRoman);
+#pragma clang diagnostic pop
         [_selectedFont release];
         _selectedFont = [font retain];
     }
@@ -1633,6 +1636,11 @@ static BOOL iTermTextDrawingHelperIsCharacterDrawable(screen_char_t *c,
     if (!c->complexChar && iTermCharacterSupportsFastPath(c->code, _asciiLigaturesAvailable)) {
         attributes->ligatureLevel = 0;
     }
+    if (c->complexChar || c->code > 128) {
+        if (!_nonAsciiLigatures) {
+            attributes->ligatureLevel = 0;
+        }
+    }
     attributes->underline = (c->underline || inUnderlinedRange);
     attributes->drawable = drawable;
 }
@@ -1693,6 +1701,12 @@ static BOOL iTermTextDrawingHelperIsCharacterDrawable(screen_char_t *c,
     return YES;
 }
 
+- (BOOL)zippy {
+    return (!(_asciiLigaturesAvailable && _asciiLigatures) &&
+            !(_nonAsciiLigatures) &&
+            [iTermAdvancedSettingsModel zippyTextDrawing]);
+}
+
 - (NSArray<id<iTermAttributedString>> *)attributedStringsForLine:(screen_char_t *)line
                                                            range:(NSRange)indexRange
                                                  hasSelectedText:(BOOL)hasSelectedText
@@ -1720,7 +1734,8 @@ static BOOL iTermTextDrawingHelperIsCharacterDrawable(screen_char_t *c,
     };
     NSDictionary *previousImageAttributes = nil;
     iTermMutableAttributedStringBuilder *builder = [[[iTermMutableAttributedStringBuilder alloc] init] autorelease];
-    builder.asciiLigaturesAvailable = _asciiLigaturesAvailable;
+    builder.zippy = self.zippy;
+    builder.asciiLigaturesAvailable = _asciiLigaturesAvailable && _asciiLigatures;
     iTermCharacterAttributes characterAttributes = { 0 };
     iTermCharacterAttributes previousCharacterAttributes = { 0 };
     int segmentLength = 0;
@@ -1813,7 +1828,8 @@ static BOOL iTermTextDrawingHelperIsCharacterDrawable(screen_char_t *c,
                 [attributedStrings addObject:builtString];
             }
             builder = [[[iTermMutableAttributedStringBuilder alloc] init] autorelease];
-            builder.asciiLigaturesAvailable = _asciiLigaturesAvailable;
+            builder.zippy = self.zippy;
+            builder.asciiLigaturesAvailable = _asciiLigaturesAvailable && _asciiLigatures;
         }
         ++segmentLength;
         memcpy(&previousCharacterAttributes, &characterAttributes, sizeof(previousCharacterAttributes));
@@ -2003,7 +2019,7 @@ static BOOL iTermTextDrawingHelperIsCharacterDrawable(screen_char_t *c,
                             _useHFSPlusMapping,
                             self.unicodeVersion);
         int cursorX = 0;
-        int baseX = floor(xStart * _cellSize.width + MARGIN);
+        int baseX = floor(xStart * _cellSize.width + [iTermAdvancedSettingsModel terminalMargin]);
         int i;
         int y = (yStart + _numberOfLines - height) * _cellSize.height;
         int cursorY = y;
@@ -2075,14 +2091,14 @@ static BOOL iTermTextDrawingHelperIsCharacterDrawable(screen_char_t *c,
             } else {
                 justWrapped = NO;
             }
-            x = floor(xStart * _cellSize.width + MARGIN);
+            x = floor(xStart * _cellSize.width + [iTermAdvancedSettingsModel terminalMargin]);
             y = (yStart + _numberOfLines - height) * _cellSize.height;
             i += charsInLine;
         }
 
         if (!foundCursor && i == cursorIndex) {
             if (justWrapped) {
-                cursorX = MARGIN + width * _cellSize.width;
+                cursorX = [iTermAdvancedSettingsModel terminalMargin] + width * _cellSize.width;
                 cursorY = preWrapY;
             } else {
                 cursorX = x;
@@ -2090,7 +2106,7 @@ static BOOL iTermTextDrawingHelperIsCharacterDrawable(screen_char_t *c,
             }
         }
         const double kCursorWidth = 2.0;
-        double rightMargin = MARGIN + _gridSize.width * _cellSize.width;
+        double rightMargin = [iTermAdvancedSettingsModel terminalMargin] + _gridSize.width * _cellSize.width;
         if (cursorX + kCursorWidth >= rightMargin) {
             // Make sure the cursor doesn't draw in the margin. Shove it left
             // a little bit so it fits.
@@ -2118,7 +2134,7 @@ static BOOL iTermTextDrawingHelperIsCharacterDrawable(screen_char_t *c,
 - (NSRect)cursorFrame {
     const int rowNumber = _cursorCoord.y + _numberOfLines - _gridSize.height;
     const CGFloat height = MIN(_cellSize.height, _cellSizeWithoutSpacing.height);
-    return NSMakeRect(floor(_cursorCoord.x * _cellSize.width + MARGIN),
+    return NSMakeRect(floor(_cursorCoord.x * _cellSize.width + [iTermAdvancedSettingsModel terminalMargin]),
                       rowNumber * _cellSize.height + MAX(0, round((_cellSize.height - _cellSizeWithoutSpacing.height) / 2.0)),
                       MIN(_cellSize.width, _cellSizeWithoutSpacing.width),
                       height);
@@ -2322,7 +2338,7 @@ static BOOL iTermTextDrawingHelperIsCharacterDrawable(screen_char_t *c,
 #pragma mark - Coord/Rect Utilities
 
 - (NSRange)rangeOfVisibleRows {
-    int visibleRows = floor((_scrollViewContentSize.height - VMARGIN * 2) / _cellSize.height);
+    int visibleRows = floor((_scrollViewContentSize.height - [iTermAdvancedSettingsModel terminalVMargin] * 2) / _cellSize.height);
     CGFloat top = _scrollViewDocumentVisibleRect.origin.y;
     int firstVisibleRow = floor(top / _cellSize.height);
     if (firstVisibleRow < 0) {
@@ -2339,14 +2355,14 @@ static BOOL iTermTextDrawingHelperIsCharacterDrawable(screen_char_t *c,
 }
 
 - (VT100GridCoordRange)coordRangeForRect:(NSRect)rect {
-    return VT100GridCoordRangeMake(floor((rect.origin.x - MARGIN) / _cellSize.width),
+    return VT100GridCoordRangeMake(floor((rect.origin.x - [iTermAdvancedSettingsModel terminalMargin]) / _cellSize.width),
                                    floor(rect.origin.y / _cellSize.height),
-                                   ceil((NSMaxX(rect) - MARGIN) / _cellSize.width),
+                                   ceil((NSMaxX(rect) - [iTermAdvancedSettingsModel terminalMargin]) / _cellSize.width),
                                    ceil(NSMaxY(rect) / _cellSize.height));
 }
 
 - (NSRect)rectForCoordRange:(VT100GridCoordRange)coordRange {
-    return NSMakeRect(coordRange.start.x * _cellSize.width + MARGIN,
+    return NSMakeRect(coordRange.start.x * _cellSize.width + [iTermAdvancedSettingsModel terminalMargin],
                       coordRange.start.y * _cellSize.height,
                       (coordRange.end.x - coordRange.start.x) * _cellSize.width,
                       (coordRange.end.y - coordRange.start.y) * _cellSize.height);
@@ -2369,8 +2385,8 @@ static BOOL iTermTextDrawingHelperIsCharacterDrawable(screen_char_t *c,
 
 - (NSRange)rangeOfColumnsFrom:(CGFloat)x ofWidth:(CGFloat)width {
     NSRange charRange;
-    charRange.location = MAX(0, (x - MARGIN) / _cellSize.width);
-    charRange.length = ceil((x + width - MARGIN) / _cellSize.width) - charRange.location;
+    charRange.location = MAX(0, (x - [iTermAdvancedSettingsModel terminalMargin]) / _cellSize.width);
+    charRange.length = ceil((x + width - [iTermAdvancedSettingsModel terminalMargin]) / _cellSize.width) - charRange.location;
     if (charRange.location + charRange.length > _gridSize.width) {
         charRange.length = _gridSize.width - charRange.location;
     }
@@ -2452,7 +2468,7 @@ static BOOL iTermTextDrawingHelperIsCharacterDrawable(screen_char_t *c,
                                                       isComplex:NO
                                                      renderBold:&ignore1
                                                    renderItalic:&ignore2];
-    _asciiLigaturesAvailable = fontInfo.ligatureLevel > 0 || fontInfo.hasDefaultLigatures;
+    _asciiLigaturesAvailable = (fontInfo.ligatureLevel > 0 || fontInfo.hasDefaultLigatures) && _asciiLigatures;
 }
 
 - (void)startTiming {
@@ -2531,7 +2547,7 @@ static BOOL iTermTextDrawingHelperIsCharacterDrawable(screen_char_t *c,
     [self constructAndDrawRunsForLine:line
                                   row:row
                               inRange:NSMakeRange(0, _gridSize.width)
-                      startingAtPoint:NSMakePoint(MARGIN, row * _cellSize.height)
+                      startingAtPoint:NSMakePoint([iTermAdvancedSettingsModel terminalMargin], row * _cellSize.height)
                            bgselected:NO
                               bgColor:backgroundColor
              processedBackgroundColor:backgroundColor

@@ -213,6 +213,7 @@
 - (void)screenSetTabColorGreenComponentTo:(CGFloat)color;
 - (void)screenSetTabColorBlueComponentTo:(CGFloat)color;
 - (void)screenSetColor:(NSColor *)color forKey:(int)key;
+- (void)screenSelectColorPresetNamed:(NSString *)name;
 
 - (void)screenCurrentHostDidChange:(VT100RemoteHost *)host;
 - (void)screenCurrentDirectoryDidChangeTo:(NSString *)newPath;
@@ -238,5 +239,8 @@
 - (BOOL)screenShouldReduceFlicker;
 - (NSInteger)screenUnicodeVersion;
 - (void)screenSetUnicodeVersion:(NSInteger)unicodeVersion;
+- (void)screenSetLabel:(NSString *)label forKey:(NSString *)keyName;
+- (void)screenPushKeyLabels;
+- (void)screenPopKeyLabels;
 
 @end

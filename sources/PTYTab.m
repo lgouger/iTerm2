@@ -11,6 +11,7 @@
 #import "iTermProfilePreferences.h"
 #import "MovePaneController.h"
 #import "NSColor+iTerm.h"
+#import "NSFont+iTerm.h"
 #import "NSView+iTerm.h"
 #import "NSView+RecursiveDescription.h"
 #import "NSWindow+PSM.h"
@@ -150,6 +151,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 
     // If there is a flexible root view, this is set and is the tabview's view.
     // Otherwise it is nil.
+#warning TODO: I believe this prevents tmux windows from being transparent.
     SolidColorView *flexibleView_;
 
     // The root of a tree of split views whose leaves are SessionViews. The root is the view of the
@@ -1580,8 +1582,8 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     NSSize size;
     DLog(@"    calculating session size based on %dx%d cells", columns, rows);
     DLog(@"    cell size is %@", NSStringFromSize(NSMakeSize(charWidth, lineHeight)));
-    size.width = columns * charWidth + MARGIN * 2;
-    size.height = rows * lineHeight + VMARGIN * 2;
+    size.width = columns * charWidth + [iTermAdvancedSettingsModel terminalMargin] * 2;
+    size.height = rows * lineHeight + [iTermAdvancedSettingsModel terminalVMargin] * 2;
     DLog(@"    size for content is %@", NSStringFromSize(size));
     BOOL hasScrollbar = [term scrollbarShouldBeVisible];
     NSSize outerSize =
@@ -1610,8 +1612,8 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 - (NSSize)_minSessionSize:(SessionView*)sessionView {
     NSSize size;
     PTYSession *session = [self sessionForSessionView:sessionView];
-    size.width = kVT100ScreenMinColumns * [[session textview] charWidth] + MARGIN * 2;
-    size.height = kVT100ScreenMinRows * [[session textview] lineHeight] + VMARGIN * 2;
+    size.width = kVT100ScreenMinColumns * [[session textview] charWidth] + [iTermAdvancedSettingsModel terminalMargin] * 2;
+    size.height = kVT100ScreenMinRows * [[session textview] lineHeight] + [iTermAdvancedSettingsModel terminalVMargin] * 2;
 
     BOOL hasScrollbar = [parentWindow_ scrollbarShouldBeVisible];
     NSSize scrollViewSize =
@@ -2005,8 +2007,8 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
                             style:[parentWindow_ scrollerStyle]];
     NSSize size = [[aSession view] maximumPossibleScrollViewContentSize];
     DLog(@"Max size is %@", [NSValue valueWithSize:size]);
-    int width = (size.width - MARGIN * 2) / [[aSession textview] charWidth];
-    int height = (size.height - VMARGIN * 2) / [[aSession textview] lineHeight];
+    int width = (size.width - [iTermAdvancedSettingsModel terminalMargin] * 2) / [[aSession textview] charWidth];
+    int height = (size.height - [iTermAdvancedSettingsModel terminalVMargin] * 2) / [[aSession textview] lineHeight];
     PtyLog(@"fitSessionToCurrentViewSize %@ gives %d rows", [NSValue valueWithSize:size], height);
     if (width <= 0) {
         ELog(@"WARNING: Session has %d width", width);
@@ -2797,10 +2799,10 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
        nonAsciiFont:(NSFont *)nonAsciiFont
            hSpacing:(double)hs
            vSpacing:(double)vs {
-    [[ProfileModel sharedInstance] setObject:[ITAddressBookMgr descFromFont:font]
+    [[ProfileModel sharedInstance] setObject:[font stringValue]
                                        forKey:KEY_NORMAL_FONT
                                    inBookmark:[PTYTab tmuxBookmark]];
-    [[ProfileModel sharedInstance] setObject:[ITAddressBookMgr descFromFont:nonAsciiFont]
+    [[ProfileModel sharedInstance] setObject:[nonAsciiFont stringValue]
                                        forKey:KEY_NON_ASCII_FONT
                                    inBookmark:[PTYTab tmuxBookmark]];
     [[ProfileModel sharedInstance] setObject:[NSNumber numberWithDouble:hs]
@@ -2896,7 +2898,11 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     theTab->tmuxController_ = [tmuxController retain];
     theTab->parseTree_ = [parseTree retain];
 
-    [term appendTab:theTab];
+    if ([parseTree[kLayoutDictTabOpenedManually] boolValue]) {
+        [term addTabAtAutomaticallyDeterminedLocation:theTab];
+    } else {
+        [term appendTab:theTab];
+    }
     [theTab didAddToTerminal:term withArrangement:arrangement];
 
     return theTab;
@@ -2987,8 +2993,8 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
                                                            controlSize:NSRegularControlSize
                                                          scrollerStyle:session.view.scrollview.scrollerStyle];
             
-            int chars = forHeight ? (contentSize.height - VMARGIN * 2) / cellSize.height :
-                                    (contentSize.width - MARGIN * 2) / cellSize.width;
+            int chars = forHeight ? (contentSize.height - [iTermAdvancedSettingsModel terminalVMargin] * 2) / cellSize.height :
+                                    (contentSize.width - [iTermAdvancedSettingsModel terminalMargin] * 2) / cellSize.width;
             [intervalMap incrementNumbersBy:chars
                                     inRange:[IntRange rangeWithMin:minPos size:size]];
         }
@@ -4658,6 +4664,10 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     if (session.isTmuxClient) {
         [self updateFlexibleViewColors];
     }
+}
+
+- (void)sessionKeyLabelsDidChange:(PTYSession *)session {
+    [_delegate tabKeyLabelsDidChangeForSession:session];
 }
 
 @end

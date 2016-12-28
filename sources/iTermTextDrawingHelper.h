@@ -12,12 +12,6 @@
 #import "ScreenChar.h"
 #import "VT100GridTypes.h"
 
-// Number of pixels margin on left and right edge.
-#define MARGIN 5
-
-// Number of pixels margin on the top.
-#define VMARGIN 2
-
 @class iTermColorMap;
 @class iTermFindOnPageHelper;
 @class iTermSelection;
@@ -264,6 +258,10 @@
 
 // Version of unicode. Determines character widths.
 @property(nonatomic, assign) NSInteger unicodeVersion;
+
+// Are ligatures allowed?
+@property(nonatomic, assign) BOOL asciiLigatures;
+@property(nonatomic, assign) BOOL nonAsciiLigatures;
 
 // Updates self.blinkingFound.
 - (void)drawTextViewContentInRect:(NSRect)rect

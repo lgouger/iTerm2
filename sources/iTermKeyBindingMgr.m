@@ -79,6 +79,7 @@
 #import "iTermModifierRemapper.h"
 #import "iTermPasteSpecialViewController.h"
 #import "iTermPreferences.h"
+#import "NSArray+iTerm.h"
 #import "NSStringITerm.h"
 #import "PTYTextView.h"   // For selection movement units
 #import <Carbon/Carbon.h>
@@ -773,8 +774,6 @@ exit:
     [km setDictionary:settings];
 
     [bookmark setObject:km forKey:KEY_KEYBOARD_MAP];
-
-#warning Update touch bar
 }
 
 + (NSArray *)presetKeyMappingsNames {
@@ -909,6 +908,11 @@ exit:
 
 + (NSDictionary *)touchBarItemsForProfile:(Profile *)profile {
     return profile[KEY_TOUCHBAR_MAP];
+}
+
++ (NSArray<NSString *> *)sortedKeysForKeyMappingsInProfile:(Profile *)profile {
+    NSDictionary *km = [profile objectForKey:KEY_KEYBOARD_MAP];
+    return [[km allKeys] sortedArrayUsingSelector:@selector(caseInsensitiveCompare:)];
 }
 
 + (NSDictionary*)mappingAtIndex:(int)rowIndex forBookmark:(Profile*)bookmark
@@ -1156,37 +1160,49 @@ exit:
     return [NSEvent eventWithCGEvent:[iTermKeyBindingMgr remapModifiersInCGEvent:[event CGEvent]]];
 }
 
-+ (Profile*)removeMappingsReferencingGuid:(NSString*)guid fromBookmark:(Profile*)bookmark
-{
-    if (bookmark) {
-        NSMutableDictionary* mutableBookmark = [NSMutableDictionary dictionaryWithDictionary:bookmark];
-        BOOL anyChange = NO;
-        BOOL change;
-        do {
-            change = NO;
-            for (int i = 0; i < [iTermKeyBindingMgr numberOfMappingsForBookmark:mutableBookmark]; i++) {
-                NSDictionary* keyMap = [iTermKeyBindingMgr mappingAtIndex:i forBookmark:mutableBookmark];
-                int action = [[keyMap objectForKey:@"Action"] intValue];
-                if (action == KEY_ACTION_NEW_TAB_WITH_PROFILE ||
-                    action == KEY_ACTION_NEW_WINDOW_WITH_PROFILE ||
-                    action == KEY_ACTION_SPLIT_HORIZONTALLY_WITH_PROFILE ||
-                    action == KEY_ACTION_SPLIT_VERTICALLY_WITH_PROFILE ||
-                    action == KEY_ACTION_SET_PROFILE) {
-                    NSString* referencedGuid = [keyMap objectForKey:@"Text"];
-                    if ([referencedGuid isEqualToString:guid]) {
-                        [iTermKeyBindingMgr removeMappingAtIndex:i inBookmark:mutableBookmark];
-                        change = YES;
-                        anyChange = YES;
-                        break;
-                    }
-                }
++ (NSString *)keyForMappingReferencingProfileWithGuid:(NSString *)guid inProfile:(Profile *)profile {
+    __block NSString *theKey = nil;
+    NSDictionary *keyboardMap = profile[KEY_KEYBOARD_MAP];
+
+    // Search for a keymapping with an action that references a profile.
+    [keyboardMap enumerateKeysAndObjectsUsingBlock:^(id  _Nonnull key, id  _Nonnull keyMap, BOOL * _Nonnull stop) {
+        int action = [[keyMap objectForKey:@"Action"] intValue];
+        if (action == KEY_ACTION_NEW_TAB_WITH_PROFILE ||
+            action == KEY_ACTION_NEW_WINDOW_WITH_PROFILE ||
+            action == KEY_ACTION_SPLIT_HORIZONTALLY_WITH_PROFILE ||
+            action == KEY_ACTION_SPLIT_VERTICALLY_WITH_PROFILE ||
+            action == KEY_ACTION_SET_PROFILE) {
+            NSString *referencedGuid = [keyMap objectForKey:@"Text"];
+            if ([referencedGuid isEqualToString:guid]) {
+                theKey = [[key copy] autorelease];
+                *stop = YES;
             }
-        } while (change);
-        if (!anyChange) {
-            return nil;
-        } else {
-            return mutableBookmark;
         }
+    }];
+    return theKey;
+}
+
++ (Profile *)removeMappingsReferencingGuid:(NSString*)guid fromBookmark:(Profile *)bookmark {
+    if (bookmark) {
+        NSMutableDictionary *mutableBookmark = nil;
+        NSString *keyToRemove = [self keyForMappingReferencingProfileWithGuid:guid inProfile:bookmark];
+        while (keyToRemove) {
+            NSInteger i = [[self sortedKeysForKeyMappingsInProfile:mutableBookmark ?: bookmark] indexOfObject:keyToRemove];
+            if (i != NSNotFound) {
+                if (!mutableBookmark) {
+                    mutableBookmark = [[bookmark mutableCopy] autorelease];
+                }
+                [iTermKeyBindingMgr removeMappingAtIndex:i inBookmark:mutableBookmark];
+            } else {
+                ELog(@"Profile with guid %@ has key mapping referencing guid %@ with key %@ but I can't find it in sorted keys",
+                     bookmark[KEY_GUID],
+                     guid,
+                     keyToRemove);
+                break;
+            }
+            keyToRemove = [self keyForMappingReferencingProfileWithGuid:guid inProfile:mutableBookmark ?: bookmark];
+        };
+        return mutableBookmark;
     } else {
         BOOL change;
         do {
