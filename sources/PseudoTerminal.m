@@ -1958,7 +1958,9 @@ ITERM_WEAKLY_REFERENCEABLE
     iTermProfileHotKey *profileHotKey = [[iTermHotKeyController sharedInstance] profileHotKeyForGUID:guid];
     iTermHotkeyWindowType hotkeyWindowType = iTermHotkeyWindowTypeNone;
     if (isHotkeyWindow) {
-        assert(profileHotKey);
+        if (!profileHotKey) {
+            return nil;
+        }
         hotkeyWindowType = profileHotKey.hotkeyWindowType;
     }
     if (windowType == WINDOW_TYPE_TRADITIONAL_FULL_SCREEN) {
@@ -2027,11 +2029,8 @@ ITERM_WEAKLY_REFERENCEABLE
         [term hideAfterOpening];
     }
     if (isHotkeyWindow) {
-        BOOL ok = YES;
-        if (force) {
-            ok = [[iTermHotKeyController sharedInstance] addRevivedHotkeyWindowController:term
-                                                                       forProfileWithGUID:guid];
-        }
+        BOOL ok = [[iTermHotKeyController sharedInstance] addRevivedHotkeyWindowController:term
+                                                                        forProfileWithGUID:guid];
         if (ok) {
             term.window.alphaValue = 0;
             [[term window] orderOut:nil];
@@ -2064,8 +2063,7 @@ ITERM_WEAKLY_REFERENCEABLE
     FindViewController *findViewController = [[[self currentSession] view] findViewController];
     NSString *regex = [iTermAdvancedSettingsModel findUrlsRegex];
     [findViewController closeViewAndDoTemporarySearchForString:regex
-                                                  ignoringCase:NO
-                                                         regex:YES];
+                                                          mode:iTermFindModeCaseSensitiveRegex];
 }
 
 - (IBAction)detachTmux:(id)sender
@@ -2161,6 +2159,17 @@ ITERM_WEAKLY_REFERENCEABLE
     [[self window] performSelector:@selector(miniaturize:)
                                             withObject:nil
                                             afterDelay:0];
+}
+
++ (NSDictionary *)repairedArrangement:(NSDictionary *)arrangement replacingProfileWithGUID:(NSString *)badGuid withProfile:(Profile *)goodProfile {
+    NSMutableDictionary *mutableArrangement = [[arrangement mutableCopy] autorelease];
+    NSMutableArray *mutableTabs = [NSMutableArray array];
+
+    for (NSDictionary* tabArrangement in [arrangement objectForKey:TERMINAL_ARRANGEMENT_TABS]) {
+        [mutableTabs addObject:[PTYTab repairedArrangement:tabArrangement replacingProfileWithGUID:badGuid withProfile:(Profile *)goodProfile]];
+    }
+    mutableArrangement[TERMINAL_ARRANGEMENT_TABS] = mutableTabs;
+    return mutableArrangement;
 }
 
 - (BOOL)loadArrangement:(NSDictionary *)arrangement {
@@ -3528,8 +3537,7 @@ ITERM_WEAKLY_REFERENCEABLE
     return _contentView.scrollbarShouldBeVisible;
 }
 
-- (void)windowWillStartLiveResize:(NSNotification *)notification
-{
+- (void)windowWillStartLiveResize:(NSNotification *)notification {
     liveResize_ = YES;
 }
 
@@ -3620,7 +3628,7 @@ ITERM_WEAKLY_REFERENCEABLE
     zooming_ = NO;
     togglingLionFullScreen_ = NO;
     lionFullScreen_ = YES;
-    [_contentView.tabBarControl updateFlashing];
+    [_contentView.tabBarControl setFlashing:YES];
     [_contentView updateToolbelt];
     // Set scrollbars appropriately
     [self updateSessionScrollbars];

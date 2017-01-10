@@ -151,7 +151,6 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 
     // If there is a flexible root view, this is set and is the tabview's view.
     // Otherwise it is nil.
-#warning TODO: I believe this prevents tmux windows from being transparent.
     SolidColorView *flexibleView_;
 
     // The root of a tree of split views whose leaves are SessionViews. The root is the view of the
@@ -2288,6 +2287,27 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     }
 }
 
++ (NSDictionary *)recursiveRepairedArrangementNode:(NSDictionary *)arrangement
+                          replacingProfileWithGUID:(NSString *)badGuid
+                                       withProfile:(Profile *)goodProfile {
+    if ([[arrangement objectForKey:TAB_ARRANGEMENT_VIEW_TYPE] isEqualToString:VIEW_TYPE_SPLITTER]) {
+        NSMutableArray *repairedSubviews = [NSMutableArray array];
+        for (NSDictionary<NSString *, id> *subArrangement in arrangement[SUBVIEWS]) {
+            [repairedSubviews addObject:[PTYTab recursiveRepairedArrangementNode:subArrangement
+                                                        replacingProfileWithGUID:badGuid
+                                                                     withProfile:goodProfile]];
+        }
+        NSMutableDictionary *result = [[arrangement mutableCopy] autorelease];
+        result[SUBVIEWS] = repairedSubviews;
+        return result;
+    } else {
+        NSDictionary *repairedSession = [PTYSession repairedArrangement:arrangement[TAB_ARRANGEMENT_SESSION] replacingProfileWithGUID:badGuid withProfile:goodProfile];
+        NSMutableDictionary *result = [[arrangement mutableCopy] autorelease];
+        result[TAB_ARRANGEMENT_SESSION] = repairedSession;
+        return result;
+    }
+}
+
 - (PTYSession *)_recursiveRestoreSessions:(NSDictionary<NSString *, id> *)arrangement
                                    atNode:(__kindof NSView *)view
                                     inTab:(PTYTab *)theTab
@@ -2461,6 +2481,17 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
                                                          inTab:theTab
                                                  forObjectType:objectType]];
     return theTab;
+}
+
++ (NSDictionary *)repairedArrangement:(NSDictionary *)arrangement
+             replacingProfileWithGUID:(NSString *)badGuid
+                          withProfile:(Profile *)goodProfile {
+    NSDictionary *newRoot = [PTYTab recursiveRepairedArrangementNode:arrangement[TAB_ARRANGEMENT_ROOT]
+                                            replacingProfileWithGUID:badGuid
+                                                         withProfile:goodProfile];
+    NSMutableDictionary *result = [[arrangement mutableCopy] autorelease];
+    result[TAB_ARRANGEMENT_ROOT] = newRoot;
+    return result;
 }
 
 // This can only be used in conjunction with

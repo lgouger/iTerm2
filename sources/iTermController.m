@@ -366,6 +366,22 @@ static iTermController *gSharedInstance;
     }
 }
 
+- (void)repairSavedArrangementNamed:(NSString *)savedArrangementName
+               replacingMissingGUID:(NSString *)guidToReplace
+                           withGUID:(NSString *)replacementGuid {
+    NSArray *terminalArrangements = [WindowArrangements arrangementWithName:savedArrangementName];
+    Profile *goodProfile = [[ProfileModel sharedInstance] bookmarkWithGuid:replacementGuid];
+    if (goodProfile) {
+        NSMutableArray *repairedArrangements = [NSMutableArray array];
+        for (NSDictionary *terminalArrangement in terminalArrangements) {
+            [repairedArrangements addObject:[PseudoTerminal repairedArrangement:terminalArrangement
+                                                       replacingProfileWithGUID:guidToReplace
+                                                                    withProfile:goodProfile]];
+        }
+        [WindowArrangements setArrangement:repairedArrangements withName:savedArrangementName];
+    }
+}
+
 - (void)saveWindowArrangement:(BOOL)allWindows {
     NSString *name = [self showAlertWithText:@"Name for saved window arrangement:"
                                 defaultInput:[NSString stringWithFormat:@"Arrangement %d", 1 + [WindowArrangements count]]];
@@ -384,9 +400,7 @@ static iTermController *gSharedInstance;
     NSMutableArray *terminalArrangements = [NSMutableArray arrayWithCapacity:[_terminalWindows count]];
     if (allWindows) {
         for (PseudoTerminal *terminal in _terminalWindows) {
-            if (![terminal isHotKeyWindow]) {
-                [terminalArrangements addObject:[terminal arrangement]];
-            }
+            [terminalArrangements addObject:[terminal arrangement]];
         }
     } else {
         PseudoTerminal *currentTerminal = [self currentTerminal];
@@ -425,12 +439,14 @@ static iTermController *gSharedInstance;
 }
 
 - (void)loadWindowArrangementWithName:(NSString *)theName {
+    _savedArrangementNameBeingRestored = [[theName retain] autorelease];
     NSArray *terminalArrangements = [WindowArrangements arrangementWithName:theName];
     if (terminalArrangements) {
         for (NSDictionary *terminalArrangement in terminalArrangements) {
             [self tryOpenArrangement:terminalArrangement];
         }
     }
+    _savedArrangementNameBeingRestored = nil;
 }
 
 // Return all the terminals in the given screen.

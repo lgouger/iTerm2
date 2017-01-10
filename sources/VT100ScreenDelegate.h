@@ -204,6 +204,7 @@
 
 - (void)screenWillReceiveFileNamed:(NSString *)name ofSize:(int)size;
 - (void)screenDidFinishReceivingFile;
+- (void)screenDidFinishReceivingInlineFile;
 - (void)screenDidReceiveBase64FileData:(NSString *)data;
 - (void)screenFileReceiptEndedUnexpectedly;
 
@@ -240,7 +241,9 @@
 - (NSInteger)screenUnicodeVersion;
 - (void)screenSetUnicodeVersion:(NSInteger)unicodeVersion;
 - (void)screenSetLabel:(NSString *)label forKey:(NSString *)keyName;
-- (void)screenPushKeyLabels;
-- (void)screenPopKeyLabels;
+- (void)screenPushKeyLabels:(NSString *)value;
+- (void)screenPopKeyLabels:(NSString *)value;
+
+- (void)screenTerminalAttemptedPasteboardAccess;
 
 @end

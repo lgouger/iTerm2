@@ -151,6 +151,9 @@ static const double kInterBellQuietPeriod = 0.1;
     BOOL _cursorVisible;
     // Line numbers containing animated GIFs that need to be redrawn for the next frame.
     NSMutableIndexSet *_animatedLines;
+
+    // base64 value to copy to pasteboard, being built up bit by bit.
+    NSMutableString *_copyString;
 }
 
 static NSString *const kInlineFileName = @"name";  // NSString
@@ -232,6 +235,7 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
     [_temporaryDoubleBuffer reset];
     [_temporaryDoubleBuffer release];
     [_animatedLines release];
+    [_copyString release];
     [super dealloc];
 }
 
@@ -891,7 +895,7 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
     if (newCommandStart.x >= 0) {
         // Create a new mark and inform the delegate that there's new command start coord.
         [delegate_ screenPromptDidStartAtLine:[self numberOfScrollbackLines] + self.cursorY - 1];
-        [self commandDidStartAtCoord:newCommandStart];
+        [self commandDidStartAtScreenCoord:newCommandStart];
     }
 }
 
@@ -1544,8 +1548,7 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
 
 - (void)setFindString:(NSString*)aString
      forwardDirection:(BOOL)direction
-         ignoringCase:(BOOL)ignoreCase
-                regex:(BOOL)regex
+                 mode:(iTermFindMode)mode
           startingAtX:(int)x
           startingAtY:(int)y
            withOffset:(int)offset
@@ -1601,16 +1604,10 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
     if (!direction) {
         opts |= FindOptBackwards;
     }
-    if (ignoreCase) {
-        opts |= FindOptCaseInsensitive;
-    }
-    if (regex) {
-        opts |= FindOptRegex;
-    }
     if (multipleResults) {
         opts |= FindMultipleResults;
     }
-    [linebuffer_ prepareToSearchFor:aString startingAt:startPos options:opts withContext:context];
+    [linebuffer_ prepareToSearchFor:aString startingAt:startPos options:opts mode:mode withContext:context];
     context.hasWrapped = NO;
     [self popScrollbackLines:linesPushed];
 }
@@ -3199,7 +3196,6 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
 
 - (void)terminalSetRemoteHost:(NSString *)remoteHost {
     NSRange atRange = [remoteHost rangeOfString:@"@"];
-    VT100RemoteHost *currentHost = [self remoteHostOnLine:[self numberOfLines]];
     NSString *user = nil;
     NSString *host = nil;
     if (atRange.length == 1) {
@@ -3212,6 +3208,11 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
         host = remoteHost;
     }
 
+    [self setHost:host user:user];
+}
+
+- (void)setHost:(NSString *)host user:(NSString *)user {
+    VT100RemoteHost *currentHost = [self remoteHostOnLine:[self numberOfLines]];
     if (!host || !user) {
         // A trigger can set the host and user alone. If remoteHost looks like example.com or
         // user@, then preserve the previous host/user. Also ensure neither value is nil; the
@@ -3231,6 +3232,23 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
     if (![remoteHostObj isEqualToRemoteHost:currentHost]) {
         [delegate_ screenCurrentHostDidChange:remoteHostObj];
     }
+}
+
+- (void)terminalSetWorkingDirectoryURL:(NSString *)URLString {
+    if (![iTermAdvancedSettingsModel acceptOSC7]) {
+        return;
+    }
+    NSURL *URL = [NSURL URLWithString:URLString];
+    NSURLComponents *components = [[[NSURLComponents alloc] initWithURL:URL resolvingAgainstBaseURL:NO] autorelease];
+    NSString *host = components.host;
+    NSString *user = components.user;
+    NSString *path = components.path;
+
+    if (host || user) {
+        [self setHost:host user:user];
+    }
+    [self terminalCurrentDirectoryDidChangeTo:path];
+    [delegate_ screenPromptDidStartAtLine:[self numberOfScrollbackLines] + self.cursorY - 1];
 }
 
 - (void)terminalClearScreen {
@@ -3504,6 +3522,7 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
                                      data:data];
         [inlineFileInfo_ release];
         inlineFileInfo_ = nil;
+        [delegate_ screenDidFinishReceivingInlineFile];
     } else {
         [delegate_ screenDidFinishReceivingFile];
     }
@@ -3519,6 +3538,51 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
 
 - (void)terminalFileReceiptEndedUnexpectedly {
     [delegate_ screenFileReceiptEndedUnexpectedly];
+}
+
+- (void)terminalRequestUpload:(NSString *)args {
+    [delegate_ screenRequestUpload:args];
+}
+
+- (void)terminalBeginCopyToPasteboard {
+    if ([iTermPreferences boolForKey:kPreferenceKeyAllowClipboardAccessFromTerminal]) {
+        [_copyString release];
+        _copyString = [[NSMutableString alloc] init];
+    } else {
+        [delegate_ screenTerminalAttemptedPasteboardAccess];
+    }
+}
+
+- (void)terminalDidReceiveBase64PasteboardString:(NSString *)string {
+    if ([iTermPreferences boolForKey:kPreferenceKeyAllowClipboardAccessFromTerminal]) {
+        [_copyString appendString:string];
+    }
+}
+
+- (void)terminalDidFinishReceivingPasteboard {
+    if (_copyString && [iTermPreferences boolForKey:kPreferenceKeyAllowClipboardAccessFromTerminal]) {
+        NSData *data = [NSData dataWithBase64EncodedString:_copyString];
+        if (data) {
+            NSString *string = [[[NSString alloc] initWithData:data encoding:terminal_.encoding] autorelease];
+            if (!string) {
+                string = [[[NSString alloc] initWithData:data encoding:[NSString defaultCStringEncoding]] autorelease];
+            }
+
+            if (string) {
+                NSPasteboard *pboard = [NSPasteboard generalPasteboard];
+                [pboard clearContents];
+                [pboard declareTypes:@[ NSStringPboardType ] owner:self];
+                [pboard setString:string forType:NSStringPboardType];
+            }
+        }
+    }
+    [_copyString release];
+    _copyString = nil;
+}
+
+- (void)terminalPasteboardReceiptEndedUnexpectedly {
+    [_copyString release];
+    _copyString = nil;
 }
 
 - (void)terminalCopyBufferToPasteboard {
@@ -3637,15 +3701,18 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
 }
 
 - (void)terminalPromptDidStart {
+    [self promptDidStartAt:VT100GridAbsCoordMake(currentGrid_.cursor.x,
+                                                 currentGrid_.cursor.y + self.numberOfScrollbackLines + self.totalScrollbackOverflow)];
+}
+
+- (void)promptDidStartAt:(VT100GridAbsCoord)coord {
     DLog(@"FinalTerm: terminalPromptDidStart");
-    if (self.cursorX > 1 && [delegate_ screenShouldPlacePromptAtFirstColumn]) {
+    if (coord.x > 0 && [delegate_ screenShouldPlacePromptAtFirstColumn]) {
         [self crlf];
     }
     _shellIntegrationInstalled = YES;
 
-    _lastCommandOutputRange.end.x = currentGrid_.cursor.x;
-    _lastCommandOutputRange.end.y =
-        currentGrid_.cursor.y + [self numberOfScrollbackLines] + [self totalScrollbackOverflow];
+    _lastCommandOutputRange.end = coord;
     _lastCommandOutputRange.start = nextCommandOutputStart_;
 
     // FinalTerm uses this to define the start of a collapsable region. That would be a nightmare
@@ -3655,25 +3722,33 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
 
 - (void)terminalCommandDidStart {
     DLog(@"FinalTerm: terminalCommandDidStart");
-    [self commandDidStartAtCoord:currentGrid_.cursor];
+    [self commandDidStartAtScreenCoord:currentGrid_.cursor];
 }
 
-- (void)commandDidStartAtCoord:(VT100GridCoord)coord {
+- (void)commandDidStartAtScreenCoord:(VT100GridCoord)coord {
+    [self commandDidStartAt:VT100GridAbsCoordMake(coord.x, coord.y + [self numberOfScrollbackLines] + [self totalScrollbackOverflow])];
+}
+
+- (void)commandDidStartAt:(VT100GridAbsCoord)coord {
     commandStartX_ = coord.x;
-    commandStartY_ = coord.y + [self numberOfScrollbackLines] + [self totalScrollbackOverflow];
+    commandStartY_ = coord.y;
     [delegate_ screenCommandDidChangeWithRange:[self commandRange]];
 }
 
 - (void)terminalCommandDidEnd {
     DLog(@"FinalTerm: terminalCommandDidEnd");
+    [self commandDidEndAtAbsCoord:VT100GridAbsCoordMake(currentGrid_.cursor.x, currentGrid_.cursor.y + [self numberOfScrollbackLines] + [self totalScrollbackOverflow])];
+}
+
+- (BOOL)commandDidEndAtAbsCoord:(VT100GridAbsCoord)coord {
     if (commandStartX_ != -1) {
         [delegate_ screenCommandDidEndWithRange:[self commandRange]];
         commandStartX_ = commandStartY_ = -1;
         [delegate_ screenCommandDidChangeWithRange:[self commandRange]];
-        nextCommandOutputStart_.x = currentGrid_.cursor.x;
-        nextCommandOutputStart_.y =
-            currentGrid_.cursor.y + [self numberOfScrollbackLines] + [self totalScrollbackOverflow];
+        nextCommandOutputStart_ = coord;
+        return YES;
     }
+    return NO;
 }
 
 - (void)terminalAbortCommand {
@@ -3863,12 +3938,12 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
     [delegate_ screenSetLabel:label forKey:keyName];
 }
 
-- (void)terminalPushKeyLabels {
-    [delegate_ screenPushKeyLabels];
+- (void)terminalPushKeyLabels:(NSString *)value {
+    [delegate_ screenPushKeyLabels:value];
 }
 
-- (void)terminalPopKeyLabels {
-    [delegate_ screenPopKeyLabels];
+- (void)terminalPopKeyLabels:(NSString *)value {
+    [delegate_ screenPopKeyLabels:value];
 }
 
 // fg=ff0080,bg=srgb:808080
@@ -4236,8 +4311,11 @@ static void SwapInt(int *a, int *b) {
                                        end:VT100GridCoordMake(range.end.x, range.end.y)
                                   toStartX:&trimmedStart
                                     toEndX:&trimmedEnd];
-    if (!ok) {
+    if (!ok && !tolerateEmpty) {
         return nil;
+    } else if (!ok && tolerateEmpty) {
+        trimmedStart = range.start;
+        trimmedEnd = range.start;
     }
     if (VT100GridCoordOrder(trimmedStart, trimmedEnd) == NSOrderedDescending) {
         if (tolerateEmpty) {
@@ -4520,6 +4598,7 @@ static void SwapInt(int *a, int *b) {
                     [linebuffer_ prepareToSearchFor:findContext_.substring
                                          startingAt:(findContext_.dir > 0 ? [linebuffer_ firstPosition] : [[linebuffer_ lastPosition] predecessor])
                                             options:findContext_.options
+                                               mode:findContext_.mode
                                         withContext:tempFindContext];
                     [findContext_ reset];
                     // TODO test this!

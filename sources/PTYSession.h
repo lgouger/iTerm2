@@ -433,6 +433,10 @@ typedef enum {
 
 #pragma mark - methods
 
++ (NSDictionary *)repairedArrangement:(NSDictionary *)arrangement
+             replacingProfileWithGUID:(NSString *)badGuid
+                          withProfile:(Profile *)goodProfile;
+
 + (BOOL)handleShortcutWithoutTerminal:(NSEvent*)event;
 + (void)selectMenuItem:(NSString*)theName;
 
@@ -681,6 +685,9 @@ typedef enum {
 - (void)performKeyBindingAction:(int)keyBindingAction parameter:(NSString *)keyBindingText event:(NSEvent *)event;
 
 - (void)setColorsFromPresetNamed:(NSString *)presetName;
+
+- (void)triggerDidDetectStartOfPromptAt:(VT100GridAbsCoord)coord;
+- (void)triggerDidDetectEndOfPromptAt:(VT100GridAbsCoord)coord;
 
 #pragma mark - Testing utilities
 
