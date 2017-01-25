@@ -91,6 +91,7 @@
 
 NSString *const kCurrentSessionDidChange = @"kCurrentSessionDidChange";
 NSString *const kTerminalWindowControllerWasCreatedNotification = @"kTerminalWindowControllerWasCreatedNotification";
+NSString *const iTermDidDecodeWindowRestorableStateNotification = @"iTermDidDecodeWindowRestorableStateNotification";
 
 static NSString *const kWindowNameFormat = @"iTerm Window %d";
 static NSString *const iTermTouchBarIdentifierAddMark = @"iTermTouchBarIdentifierAddMark";
@@ -148,7 +149,6 @@ static NSRect iTermRectCenteredVerticallyWithinRect(NSRect frameToCenter, NSRect
     frameToCenter.origin.y += diff;
     return frameToCenter;
 }
-
 
 @interface NSWindow (private)
 - (void)setBottomCornerRounded:(BOOL)rounded;
@@ -372,6 +372,13 @@ static NSRect iTermRectCenteredVerticallyWithinRect(NSRect frameToCenter, NSRect
 
     NSCustomTouchBarItem *_tabsTouchBarItem;
     NSCandidateListTouchBarItem<NSString *> *_autocompleteCandidateListItem;
+
+    // The window restoration completion block was called but windowDidDecodeRestorableState:
+    // has not yet been called.
+    BOOL _expectingDecodeOfRestorableState;
+
+    // Used to prevent infinite re-entrancy in windowDidChangeScreen:.
+    BOOL _inWindowDidChangeScreen;
 }
 
 + (void)registerSessionsInArrangement:(NSDictionary *)arrangement {
@@ -3144,7 +3151,18 @@ ITERM_WEAKLY_REFERENCEABLE
     // appears to be spuriously called for nonnative fullscreen windows.
     DLog(@"windowDidChangeScreen called. This is known to happen when the screen didn't really change! screen=%@",
          self.window.screen);
-    [self canonicalizeWindowFrame];
+    if (!_inWindowDidChangeScreen) {
+        // Nicolas reported a bug where canonicalizeWindowFrame moved the window causing this to
+        // be called re-entrantly, and eventually the stack overflowed. If we insist the window should
+        // be on screen A and the OS insists it should be on screen B, we'll never agree, so just
+        // try once.
+        _inWindowDidChangeScreen = YES;
+        [self canonicalizeWindowFrame];
+        _inWindowDidChangeScreen = NO;
+    } else {
+        DLog(@"** Re-entrant call to windowDidChangeScreen:! Not canonicalizing. **");
+    }
+    DLog(@"Returning from windowDidChangeScreen:.");
 }
 
 - (void)windowDidMove:(NSNotification *)notification
@@ -6665,6 +6683,14 @@ ITERM_WEAKLY_REFERENCEABLE
     }
 }
 
+- (void)setRestoringWindow:(BOOL)restoringWindow {
+    if (_restoringWindow != restoringWindow) {
+        _restoringWindow = restoringWindow;
+        if (restoringWindow) {
+            self.restorableStateDecodePending = YES;
+        }
+    }
+}
 // Add a session to the tab view.
 - (void)insertSession:(PTYSession *)aSession atIndex:(int)anIndex
 {
@@ -7614,10 +7640,19 @@ ITERM_WEAKLY_REFERENCEABLE
     return aSession;
 }
 
-- (void)window:(NSWindow *)window didDecodeRestorableState:(NSCoder *)state
-{
+- (void)window:(NSWindow *)window didDecodeRestorableState:(NSCoder *)state {
     [self loadArrangement:[state decodeObjectForKey:kTerminalWindowStateRestorationWindowArrangementKey]
                  sessions:nil];
+    self.restorableStateDecodePending = NO;
+}
+
+- (void)setRestorableStateDecodePending:(BOOL)restorableStateDecodePending {
+    if (_restorableStateDecodePending != restorableStateDecodePending) {
+        _restorableStateDecodePending = restorableStateDecodePending;
+        if (!restorableStateDecodePending) {
+            [[NSNotificationCenter defaultCenter] postNotificationName:iTermDidDecodeWindowRestorableStateNotification object:self];
+        }
+    }
 }
 
 - (BOOL)allTabsAreTmuxTabs
