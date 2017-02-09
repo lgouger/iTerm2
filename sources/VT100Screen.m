@@ -3721,6 +3721,7 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
 - (void)terminalCommandDidStart {
     DLog(@"FinalTerm: terminalCommandDidStart");
     [self commandDidStartAtScreenCoord:currentGrid_.cursor];
+    [delegate_ screenPromptDidEndAtLine:[self numberOfScrollbackLines] + self.cursorY - 1];
 }
 
 - (void)commandDidStartAtScreenCoord:(VT100GridCoord)coord {
@@ -3874,7 +3875,7 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
         @{ @"tcsh": @2,
            @"bash": @2,
            @"zsh": @2,
-           @"fish": @2 };
+           @"fish": @5 };
     NSInteger latestKnownVersion = [lastVersionByShell[shell ?: @""] integerValue];
     if (!shell || versionNumber < latestKnownVersion) {
         [delegate_ screenSuggestShellIntegrationUpgrade];
@@ -4309,11 +4310,12 @@ static void SwapInt(int *a, int *b) {
                                        end:VT100GridCoordMake(range.end.x, range.end.y)
                                   toStartX:&trimmedStart
                                     toEndX:&trimmedEnd];
-    if (!ok && !tolerateEmpty) {
-        return nil;
-    } else if (!ok && tolerateEmpty) {
-        trimmedStart = range.start;
-        trimmedEnd = range.start;
+    if (!ok) {
+        if (tolerateEmpty) {
+            trimmedStart = trimmedEnd = range.start;
+        } else {
+            return nil;
+        }
     }
     if (VT100GridCoordOrder(trimmedStart, trimmedEnd) == NSOrderedDescending) {
         if (tolerateEmpty) {

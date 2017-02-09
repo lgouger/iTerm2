@@ -126,6 +126,7 @@ typedef NS_ENUM(NSInteger, PTYTextViewSelectionExtensionUnit) {
 - (BOOL)textViewHasCoprocess;
 - (void)textViewPostTabContentsChangedNotification;
 - (void)textViewInvalidateRestorableState;
+- (void)textViewDidFindDirtyRects;
 - (void)textViewBeginDrag;
 - (void)textViewMovePane;
 - (void)textViewSwapPane;
@@ -174,6 +175,7 @@ typedef NS_ENUM(NSInteger, PTYTextViewSelectionExtensionUnit) {
 
 // Describes the current user, host, and path.
 - (NSURL *)textViewCurrentLocation;
+- (void)textViewBurySession;
 
 @end
 

@@ -160,6 +160,7 @@
 + (int)terminalVMargin;
 + (BOOL)useColorfgbgFallback;
 + (BOOL)promptForPasteWhenNotAtPrompt;
++ (void)setPromptForPasteWhenNotAtPrompt:(BOOL)value;
 + (BOOL)performDNSLookups;
 + (BOOL)zeroWidthSpaceAdvancesCursor;
 + (BOOL)darkThemeHasBlackTitlebar;
@@ -171,6 +172,7 @@
 + (void)setNoSyncSuppressMissingProfileInArrangementWarning:(BOOL)value;
 + (BOOL)acceptOSC7;
 + (BOOL)trackingRunloopForLiveResize;
++ (BOOL)enableAPIServer;
 + (double)shortLivedSessionDuration;
 
 @end

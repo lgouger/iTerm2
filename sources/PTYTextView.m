@@ -359,6 +359,7 @@ static const int kDragThreshold = 3;
         
         _altScreenMouseScrollInferer = [[iTermAltScreenMouseScrollInferer alloc] init];
         _altScreenMouseScrollInferer.delegate = self;
+        [self refuseFirstResponderAtCurrentMouseLocation];
     }
     return self;
 }
@@ -1398,11 +1399,24 @@ static const int kDragThreshold = 3;
     // Hide the cursor
     [NSCursor setHiddenUntilMouseMoves:YES];
 
-    if ([_keyBindingEmulator handlesEvent:event]) {
+    NSMutableArray *eventsToHandle = [NSMutableArray array];
+    if ([_keyBindingEmulator handlesEvent:event extraEvents:eventsToHandle]) {
         DLog(@"iTermNSKeyBindingEmulator reports that event is handled, sending to interpretKeyEvents.");
         [self interpretKeyEvents:@[ event ]];
         return;
     }
+    [eventsToHandle addObject:event];
+    for (NSEvent *event in eventsToHandle) {
+        [self handleKeyDownEvent:event];
+    }
+}
+
+- (void)handleKeyDownEvent:(NSEvent *)event {
+    id delegate = [self delegate];
+    unsigned int modflag = [event modifierFlags];
+    unsigned short keyCode = [event keyCode];
+    BOOL rightAltPressed = (modflag & NSRightAlternateKeyMask) == NSRightAlternateKeyMask;
+    BOOL leftAltPressed = (modflag & NSAlternateKeyMask) == NSAlternateKeyMask && !rightAltPressed;
 
     // Should we process the event immediately in the delegate?
     if (!_hadMarkedTextBeforeHandlingKeypressEvent &&
@@ -1880,6 +1894,7 @@ static const int kDragThreshold = 3;
             obj = [[NSApp keyWindow] windowController];
         }
         if (!NSEqualPoints(_mouseLocationToRefuseFirstResponderAt, [NSEvent mouseLocation])) {
+            DLog(@"%p Mouse location is %@, refusal point is %@", self, NSStringFromPoint([NSEvent mouseLocation]), NSStringFromPoint(_mouseLocationToRefuseFirstResponderAt));
             if ([iTermAdvancedSettingsModel stealKeyFocus]) {
                 if (![obj disableFocusFollowsMouse]) {
                     [[self window] makeKeyWindow];
@@ -1892,6 +1907,8 @@ static const int kDragThreshold = 3;
             if ([self isInKeyWindow]) {
                 [_delegate textViewDidBecomeFirstResponder];
             }
+        } else {
+            DLog(@"%p Refusing first responder on enter", self);
         }
     }
 }
@@ -2733,14 +2750,18 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
 }
 
 - (BOOL)showWebkitPopoverAtPoint:(NSPoint)pointInWindow url:(NSURL *)url {
-    WKWebView *webView = [[iTermWebViewPool sharedInstance] webView];
+    WKWebView *webView = [[iTermWebViewFactory sharedInstance] webView];
     if (webView) {
-        NSURLRequest *request =
-            [[[NSURLRequest alloc] initWithURL:url] autorelease];
-        [webView loadRequest:request];
-
+        if ([[url.scheme lowercaseString] isEqualToString:@"http"]) {
+            [webView loadHTMLString:@"This site cannot be displayed in QuickLook because of Application Transport Security. Only HTTPS URLs can be previewed." baseURL:nil];
+        } else {
+            NSURLRequest *request =
+                [[[NSURLRequest alloc] initWithURL:url] autorelease];
+            [webView loadRequest:request];
+        }
         NSPopover *popover = [[[NSPopover alloc] init] autorelease];
-        NSViewController *viewController = [[[iTermWebViewWrapperViewController alloc] initWithWebView:webView] autorelease];
+        NSViewController *viewController = [[[iTermWebViewWrapperViewController alloc] initWithWebView:webView
+                                                                                             backupURL:url] autorelease];
         popover.contentViewController = viewController;
         popover.contentSize = viewController.view.frame.size;
         NSRect rect = NSMakeRect(pointInWindow.x - _charWidth / 2,
@@ -3595,6 +3616,8 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
     }
     if ([item action]==@selector(restartTextViewSession:)) {
         return [_delegate isRestartable];
+    } else if ([item action]==@selector(bury:)) {
+        return YES;
     }
 
     if ([item action]==@selector(mail:) ||
@@ -4565,7 +4588,17 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
         [[self delegate] menuForEvent:nil menu:theMenu];
     }
 
+    // Separator
+    [theMenu addItem:[NSMenuItem separatorItem]];
+    [theMenu addItemWithTitle:@"Bury"
+                       action:@selector(bury:)
+                keyEquivalent:@""];
+
     return theMenu;
+}
+
+- (IBAction)bury:(id)sender {
+    [_delegate textViewBurySession];
 }
 
 - (void)mail:(id)sender
@@ -6657,6 +6690,7 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
     if (foundDirty) {
         [_dataSource saveToDvr];
         [_delegate textViewInvalidateRestorableState];
+        [_delegate textViewDidFindDirtyRects];
     }
 
     if (foundDirty && [_dataSource shouldSendContentsChangedNotification]) {

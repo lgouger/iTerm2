@@ -707,6 +707,10 @@ static NSRect iTermRectCenteredVerticallyWithinRect(NSRect frameToCenter, NSRect
                                              selector:@selector(keyBindingsDidChange:)
                                                  name:kKeyBindingsChangedNotification
                                                object:nil];
+    [[[NSWorkspace sharedWorkspace] notificationCenter] addObserver:self
+                                                           selector:@selector(activeSpaceDidChange:)
+                                                               name:NSWorkspaceActiveSpaceDidChangeNotification
+                                                             object:nil];
     PtyLog(@"set window inited");
     self.windowInitialized = YES;
     useTransparency_ = YES;
@@ -793,6 +797,7 @@ ITERM_WEAKLY_REFERENCEABLE
 
     // Do not assume that [self window] is valid here. It may have been freed.
     [[NSNotificationCenter defaultCenter] removeObserver:self];
+    [[[NSWorkspace sharedWorkspace] notificationCenter] removeObserver:self];
 
     // Release all our sessions
     NSTabViewItem *aTabViewItem;
@@ -1324,6 +1329,45 @@ ITERM_WEAKLY_REFERENCEABLE
     [self closeTab:aTab soft:NO];
 }
 
+- (iTermRestorableSession *)restorableSessionForSession:(PTYSession *)session {
+    if (session.isTmuxClient) {
+        return nil;
+    }
+    if ([[[self tabForSession:session] sessions] count] > 1) {
+        return [session restorableSession];
+    }
+    if (self.numberOfTabs > 1) {
+        return [self restorableSessionForTab:[self tabForSession:session]];
+    }
+    iTermRestorableSession *restorableSession = [[[iTermRestorableSession alloc] init] autorelease];
+    restorableSession.sessions = [self allSessions];
+    restorableSession.terminalGuid = self.terminalGuid;
+    restorableSession.arrangement = [self arrangement];
+    restorableSession.group = kiTermRestorableSessionGroupWindow;
+    return restorableSession;
+}
+
+- (iTermRestorableSession *)restorableSessionForTab:(PTYTab *)aTab {
+    if (!aTab) {
+        return nil;
+    }
+
+    iTermRestorableSession *restorableSession = [[[iTermRestorableSession alloc] init] autorelease];
+    restorableSession.sessions = [aTab sessions];
+    restorableSession.terminalGuid = self.terminalGuid;
+    restorableSession.tabUniqueId = aTab.uniqueId;
+    NSArray *tabs = [self tabs];
+    NSUInteger index = [tabs indexOfObject:aTab];
+    NSMutableArray *predecessors = [NSMutableArray array];
+    for (NSUInteger i = 0; i < index; i++) {
+        [predecessors addObject:@([tabs[i] uniqueId])];
+    }
+    restorableSession.predecessors = predecessors;
+    restorableSession.arrangement = [aTab arrangement];
+    restorableSession.group = kiTermRestorableSessionGroupTab;
+    return restorableSession;
+}
+
 // Just like closeTab but skips the tmux code. Terminates sessions, removes the
 // tab, and closes the window if there are no tabs left.
 - (void)removeTab:(PTYTab *)aTab {
@@ -1424,6 +1468,14 @@ ITERM_WEAKLY_REFERENCEABLE
         [_contentView.tabBarControl updateFlashing];
         [self repositionWidgets];
         [self fitTabsToWindow];
+    }
+}
+
+- (void)activeSpaceDidChange:(NSNotification *)notification {
+    DLog(@"Active space did change. active=%@ self.window.isOnActiveSpace=%@", @(NSApp.isActive), @(self.window.isOnActiveSpace));
+    if (!NSApp.isActive && self.lionFullScreen && self.window.isOnActiveSpace) {
+        DLog(@"Activating app because lion full screen window is on active space. %@", self);
+        [NSApp activateIgnoringOtherApps:YES];
     }
 }
 
@@ -1582,7 +1634,9 @@ ITERM_WEAKLY_REFERENCEABLE
 #endif
         title = [NSString stringWithFormat:@"%@%@%@", windowNumber, title, tmuxId];
     }
-
+    if ((self.numberOfTabs == 1) && (self.tabs.firstObject.state & kPTYTabBellState) && !self.tabBarShouldBeVisible) {
+        title = [title stringByAppendingString:@" 🔔"];
+    }
     if (liveResize_) {
         // During a live resize this has to be done immediately because the runloop doesn't get
         // around to delayed performs until the live resize is done (bug 2812).
@@ -2205,18 +2259,8 @@ ITERM_WEAKLY_REFERENCEABLE
         [[self window] setFrame:rect display:YES];
     }
 
-    for (NSDictionary* tabArrangement in [arrangement objectForKey:TERMINAL_ARRANGEMENT_TABS]) {
-        NSDictionary<NSString *, PTYSession *> *sessionMap = nil;
-        if (sessions) {
-            sessionMap = [PTYTab sessionMapWithArrangement:tabArrangement sessions:sessions];
-        }
-        if (![PTYTab openTabWithArrangement:tabArrangement
-                                 inTerminal:self
-                            hasFlexibleView:NO
-                                    viewMap:nil
-                                 sessionMap:sessionMap]) {
-            return NO;
-        }
+    if (![self restoreTabsFromArrangement:arrangement sessions:sessions]) {
+        return NO;
     }
     _contentView.shouldShowToolbelt = [arrangement[TERMINAL_ARRANGEMENT_HAS_TOOLBELT] boolValue];
     hidingToolbeltShouldResizeWindow_ = [arrangement[TERMINAL_ARRANGEMENT_HIDING_TOOLBELT_SHOULD_RESIZE_WINDOW] boolValue];
@@ -2249,7 +2293,39 @@ ITERM_WEAKLY_REFERENCEABLE
     return YES;
 }
 
+- (BOOL)restoreTabsFromArrangement:(NSDictionary *)arrangement sessions:(NSArray<PTYSession *> *)sessions {
+    for (NSDictionary *tabArrangement in arrangement[TERMINAL_ARRANGEMENT_TABS]) {
+        NSDictionary<NSString *, PTYSession *> *sessionMap = nil;
+        if (sessions) {
+            sessionMap = [PTYTab sessionMapWithArrangement:tabArrangement sessions:sessions];
+        }
+        if (![PTYTab openTabWithArrangement:tabArrangement
+                                 inTerminal:self
+                            hasFlexibleView:NO
+                                    viewMap:nil
+                                 sessionMap:sessionMap]) {
+            return NO;
+        }
+    }
+    return YES;
+}
+
 - (NSDictionary *)arrangementExcludingTmuxTabs:(BOOL)excludeTmux
+                             includingContents:(BOOL)includeContents {
+    NSArray<PTYTab *> *tabs = [self.tabs filteredArrayUsingBlock:^BOOL(PTYTab *theTab) {
+        if (theTab.sessions.count == 0) {
+            return NO;
+        }
+        if (excludeTmux && theTab.isTmuxTab) {
+            return NO;
+        }
+        return YES;
+    }];
+
+    return [self arrangementWithTabs:tabs includingContents:includeContents];
+}
+
+- (NSDictionary *)arrangementWithTabs:(NSArray<PTYTab *> *)tabs
                              includingContents:(BOOL)includeContents {
     NSMutableDictionary* result = [NSMutableDictionary dictionaryWithCapacity:7];
     NSRect rect = [[self window] frame];
@@ -2287,19 +2363,12 @@ ITERM_WEAKLY_REFERENCEABLE
     result[TERMINAL_ARRANGEMENT_DESIRED_COLUMNS] = @(desiredColumns_);
 
     // Save tabs.
-    NSMutableArray* tabs = [NSMutableArray arrayWithCapacity:[self numberOfTabs]];
-    for (NSTabViewItem* tabViewItem in [_contentView.tabView tabViewItems]) {
-        PTYTab *theTab = [tabViewItem identifier];
-        if ([[theTab sessions] count]) {
-            if (!excludeTmux || ![theTab isTmuxTab]) {
-                [tabs addObject:[theTab arrangementWithContents:includeContents]];
-            }
-        }
-    }
     if ([tabs count] == 0) {
         return nil;
     }
-    result[TERMINAL_ARRANGEMENT_TABS] = tabs;
+    result[TERMINAL_ARRANGEMENT_TABS] = [tabs mapWithBlock:^id(PTYTab *theTab) {
+        return [theTab arrangementWithContents:includeContents];
+    }];
 
     // Save index of selected tab.
     result[TERMINAL_ARRANGEMENT_SELECTED_TAB_INDEX] = @([_contentView.tabView indexOfTabViewItem:[_contentView.tabView selectedTabViewItem]]);
@@ -2630,9 +2699,10 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (void)canonicalizeWindowFrame {
-    PtyLog(@"canonicalizeWindowFrame");
+    PtyLog(@"canonicalizeWindowFrame %@\n%@", self, [NSThread callStackSymbols]);
     // It's important that this method respect the current screen if possible because
     // -windowDidChangeScreen calls it.
+
     NSScreen* screen = [[self window] screen];
     if (!screen) {
         screen = self.screen;
@@ -2712,8 +2782,19 @@ ITERM_WEAKLY_REFERENCEABLE
     // during sleep/wake from sleep. That is why we check that width is positive before setting the
     // window's frame.
     NSSize decorationSize = [self windowDecorationSize];
+
+    // Note: During window state restoration, this may be called before the tabs are created from
+    // the arrangement, in which case the line height and char width will be 0.
+    if (self.tabs.count == 0) {
+        DLog(@"Window has no tabs. Returning early.");
+        return self.window.frame;
+    }
     PtyLog(@"Decoration size is %@", [NSValue valueWithSize:decorationSize]);
     PtyLog(@"Line height is %f, char width is %f", (float) [[session textview] lineHeight], [[session textview] charWidth]);
+    if (session.textview.lineHeight == 0 || session.textview.charWidth == 0) {
+        DLog(@"Line height or char width is 0. Returning existing frame. session=%@", session);
+        return self.window.frame;
+    }
     BOOL edgeSpanning = YES;
     switch (windowType_) {
         case WINDOW_TYPE_TOP_PARTIAL:
@@ -3615,7 +3696,7 @@ ITERM_WEAKLY_REFERENCEABLE
         default:
             break;
     }
-    if (!NSEqualRects(frame, self.window.frame)) {
+    if (!NSEqualRects(frame, self.window.frame) && frame.size.width > 0 && frame.size.height > 0) {
         [[self window] setFrame:frame display:NO];
     }
 
@@ -4417,6 +4498,12 @@ ITERM_WEAKLY_REFERENCEABLE
         [rootMenu addItem:item];
     }
 
+    item = [[[NSMenuItem alloc] initWithTitle:@"Save Tab as Window Arrangement"
+                                       action:@selector(saveTabAsWindowArrangement:)
+                                keyEquivalent:@""] autorelease];
+    [item setRepresentedObject:tabViewItem];
+    [rootMenu addItem:item];
+
     if ([_contentView.tabView numberOfTabViewItems] > 1) {
         item = [[[NSMenuItem alloc] initWithTitle:@"Move to New Window"
                                            action:@selector(moveTabToNewWindowContextualMenuAction:)
@@ -5178,7 +5265,8 @@ ITERM_WEAKLY_REFERENCEABLE
 
 - (void)recreateTab:(PTYTab *)tab
     withArrangement:(NSDictionary *)arrangement
-           sessions:(NSArray *)sessions {
+           sessions:(NSArray *)sessions
+             revive:(BOOL)revive {
     NSInteger tabIndex = [_contentView.tabView indexOfTabViewItemWithIdentifier:tab];
     if (tabIndex == NSNotFound) {
         return;
@@ -5209,13 +5297,17 @@ ITERM_WEAKLY_REFERENCEABLE
     if (!ok) {
         // Can't do it. Just add each session as its own tab.
         for (PTYSession *session in sessions) {
-            [session revive];
+            if (revive) {
+                [session revive];
+            }
             [self addRevivedSession:session];
         }
         return;
     }
-    for (PTYSession *session in sessions) {
-        assert([session revive]);
+    if (revive) {
+        for (PTYSession *session in sessions) {
+            assert([session revive]);
+        }
     }
 
     PTYSession *originalActiveSession = [tab activeSession];
@@ -5337,12 +5429,12 @@ ITERM_WEAKLY_REFERENCEABLE
     }
     [self fitTabsToWindow];
 
-    if (targetSession == [[self currentTab] activeSession]) {
+    if (targetSession == [[self currentTab] activeSession] && ![iTermPreferences boolForKey:kPreferenceKeyFocusFollowsMouse]) {
         [[self currentTab] setActiveSession:newSession];
     }
     [[self currentTab] recheckBlur];
     [[self currentTab] numberOfSessionsDidChange];
-    [self setDimmingForSession:targetSession];
+    [self setDimmingForSessions];
     for (PTYSession *session in self.currentTab.sessions) {
         [session.view updateDim];
     }
@@ -5827,7 +5919,7 @@ ITERM_WEAKLY_REFERENCEABLE
     return allSubstitutions;
 }
 
-- (NSArray<PTYTab *>*)tabs {
+- (NSArray<PTYTab *> *)tabs {
     int n = [_contentView.tabView numberOfTabViewItems];
     NSMutableArray<PTYTab *> *tabs = [NSMutableArray arrayWithCapacity:n];
     for (int i = 0; i < n; ++i) {
@@ -5871,7 +5963,7 @@ ITERM_WEAKLY_REFERENCEABLE
             [[self currentTab] setBroadcasting:NO];
     }
     broadcastMode_ = mode;
-        [self setDimmingForSessions];
+    [self setDimmingForSessions];
     iTermApplicationDelegate *itad = [iTermApplication.sharedApplication delegate];
     [itad updateBroadcastMenuState];
 }
@@ -6923,6 +7015,8 @@ ITERM_WEAKLY_REFERENCEABLE
                                                     horizontally:YES];
     } else if ([item action] == @selector(duplicateTab:)) {
         return ![[self currentTab] isTmuxTab];
+    } else if ([item action] == @selector(saveTabAsWindowArrangement:)) {
+        return YES;
     } else if ([item action] == @selector(zoomOnSelection:)) {
         return ![self inInstantReplay] && [[self currentSession] hasSelection];
     } else if ([item action] == @selector(showFindPanel:) ||
@@ -7053,6 +7147,18 @@ ITERM_WEAKLY_REFERENCEABLE
                                                    }];
     } else {
         [self appendTab:copyOfTab];
+    }
+}
+
+- (void)saveTabAsWindowArrangement:(id)sender {
+    PTYTab *theTab = (PTYTab *)[[sender representedObject] identifier];
+    if (!theTab) {
+        theTab = [self currentTab];
+    }
+    NSDictionary *arrangement = [self arrangementWithTabs:@[ theTab ] includingContents:NO];
+    NSString *name = [WindowArrangements nameForNewArrangement];
+    if (name) {
+        [WindowArrangements setArrangement:@[ arrangement ] withName:name];
     }
 }
 
@@ -7898,8 +8004,29 @@ ITERM_WEAKLY_REFERENCEABLE
     }
 }
 
+- (void)tabDidChangeTmuxLayout:(PTYTab *)tab {
+    [self setWindowTitle];
+}
+
+- (void)tabRemoveTab:(PTYTab *)tab {
+    if ([_contentView.tabView numberOfTabViewItems] <= 1 && self.windowInitialized) {
+        [[self window] close];
+    } else {
+        NSTabViewItem *tabViewItem = [tab tabViewItem];
+        [_contentView.tabView removeTabViewItem:tabViewItem];
+        PtyLog(@"tabRemoveTab - calling fitWindowToTabs");
+        [self fitWindowToTabs];
+    }
+}
+
 - (void)tabKeyLabelsDidChangeForSession:(PTYSession *)session {
     [self updateTouchBarFunctionKeyLabels];
+}
+
+- (void)tab:(PTYTab *)tab didChangeToState:(PTYTabState)newState {
+    if (self.numberOfTabs == 1) {
+        [self setWindowTitle];
+    }
 }
 
 - (void)updateTouchBarFunctionKeyLabels {
