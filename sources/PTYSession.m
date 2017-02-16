@@ -54,6 +54,7 @@
 #import "NSView+iTerm.h"
 #import "NSView+RecursiveDescription.h"
 #import "NSWindow+PSM.h"
+#import "NSWorkspace+iTerm.h"
 #import "PasteContext.h"
 #import "PasteEvent.h"
 #import "PreferencePanel.h"
@@ -213,11 +214,13 @@ static const NSUInteger kMaxHosts = 100;
 
 @interface PTYSession () <
     iTermAutomaticProfileSwitcherDelegate,
+    iTermCoprocessDelegate,
     iTermHotKeyNavigableSession,
     iTermPasteHelperDelegate,
     iTermSessionViewDelegate>
 @property(nonatomic, retain) Interval *currentMarkOrNotePosition;
 @property(nonatomic, retain) TerminalFile *download;
+@property(nonatomic, retain) TerminalFileUpload *upload;
 
 // Time since reference date when last output was received. New output in a brief period after the
 // session is resized is ignored to avoid making the spinner spin due to resizing.
@@ -603,6 +606,9 @@ ITERM_WEAKLY_REFERENCEABLE
     [_download stop];
     [_download endOfData];
     [_download release];
+    [_upload stop];
+    [_upload endOfData];
+    [_upload release];
     [_shell release];
     [_screen release];
     [_terminal release];
@@ -4024,12 +4030,18 @@ ITERM_WEAKLY_REFERENCEABLE
     DLog(@"Window frame: %@", window);
 }
 
-- (void)terminalFileShouldStop:(NSNotification *)notification
-{
-  if ([notification object] == _download) {
+- (void)terminalFileShouldStop:(NSNotification *)notification {
+    if ([notification object] == _download) {
         [_screen.terminal stopReceivingFile];
         [_download endOfData];
         self.download = nil;
+    } else if ([notification object] == _upload) {
+        [_pasteHelper abort];
+        [_upload endOfData];
+        self.upload = nil;
+        char controlC[1] = { VT100CC_ETX };
+        NSData *data = [NSData dataWithBytes:controlC length:sizeof(controlC)];
+        [self writeLatin1EncodedData:data broadcastAllowed:NO];
     }
 }
 
@@ -4395,6 +4407,23 @@ ITERM_WEAKLY_REFERENCEABLE
     [self queueAnnouncement:announcement identifier:@"AbortDownloadOnKeyPressAnnouncement"];
 }
 
+- (void)askAboutAbortingUpload {
+    iTermAnnouncementViewController *announcement =
+    [iTermAnnouncementViewController announcementWithTitle:@"A file is being uploaded. Abort the uploaded?"
+                                                     style:kiTermAnnouncementViewStyleQuestion
+                                               withActions:@[ @"OK", @"Cancel" ]
+                                                completion:^(int selection) {
+                                                    if (selection == 0) {
+                                                        if (self.upload) {
+                                                            [_pasteHelper abort];
+                                                            [self.upload endOfData];
+                                                            self.upload = nil;
+                                                        }
+                                                    }
+                                                }];
+    [self queueAnnouncement:announcement identifier:@"AbortUploadOnKeyPressAnnouncement"];
+}
+
 #pragma mark - Captured Output
 
 - (void)addCapturedOutput:(CapturedOutput *)capturedOutput {
@@ -4520,6 +4549,7 @@ ITERM_WEAKLY_REFERENCEABLE
 - (void)launchCoprocessWithCommand:(NSString *)command mute:(BOOL)mute
 {
     Coprocess *coprocess = [Coprocess launchedCoprocessWithCommand:command];
+    coprocess.delegate = self.weakSelf;
     coprocess.mute = mute;
     [_shell setCoprocess:coprocess];
     [_textview setNeedsDisplay:YES];
@@ -5067,9 +5097,13 @@ ITERM_WEAKLY_REFERENCEABLE
         [self didInferEndOfCommand];
     }
 
-    if ((event.modifierFlags & NSControlKeyMask) && [event.charactersIgnoringModifiers isEqualToString:@"c"] && self.terminal.receivingFile) {
-        // Offer to abort download if you press ^c while downloading an inline file
-        [self askAboutAbortingDownload];
+    if ((event.modifierFlags & NSControlKeyMask) && [event.charactersIgnoringModifiers isEqualToString:@"c"]) {
+        if (self.terminal.receivingFile) {
+            // Offer to abort download if you press ^c while downloading an inline file
+            [self askAboutAbortingDownload];
+        } else if (self.upload) {
+            [self askAboutAbortingUpload];
+        }
     }
     _lastInput = [NSDate timeIntervalSinceReferenceDate];
     if (_view.currentAnnouncement.dismissOnKeyDown) {
@@ -5099,6 +5133,7 @@ ITERM_WEAKLY_REFERENCEABLE
                 [keystrokeNotification.modifiersArray addValue:ITMKeystrokeNotification_Modifiers_Function];
             }
             keystrokeNotification.keyCode = event.keyCode;
+            keystrokeNotification.session = self.guid;
             ITMNotification *notification = [[[ITMNotification alloc] init] autorelease];
             notification.keystrokeNotification = keystrokeNotification;
 
@@ -5946,7 +5981,7 @@ ITERM_WEAKLY_REFERENCEABLE
     if (_updateSubscriptions.count) {
         ITMNotification *notification = [[[ITMNotification alloc] init] autorelease];
         notification.screenUpdateNotification = [[[ITMScreenUpdateNotification alloc] init] autorelease];
-
+        notification.screenUpdateNotification.session = self.guid;
         [_updateSubscriptions enumerateKeysAndObjectsUsingBlock:^(id  _Nonnull key, ITMNotificationRequest * _Nonnull obj, BOOL * _Nonnull stop) {
             [[[iTermApplication sharedApplication] delegate] postAPINotification:notification toConnection:key];
         }];
@@ -7094,6 +7129,7 @@ ITERM_WEAKLY_REFERENCEABLE
     [_promptSubscriptions enumerateKeysAndObjectsUsingBlock:^(id  _Nonnull key, ITMNotificationRequest * _Nonnull obj, BOOL * _Nonnull stop) {
         ITMNotification *notification = [[[ITMNotification alloc] init] autorelease];
         notification.promptNotification = [[[ITMPromptNotification alloc] init] autorelease];
+        notification.promptNotification.session = self.guid;
         [[[iTermApplication sharedApplication] delegate] postAPINotification:notification toConnection:key];
     }];
 }
@@ -7291,9 +7327,20 @@ ITERM_WEAKLY_REFERENCEABLE
             [_pasteHelper pasteString:base64String
                                slowly:NO
                      escapeShellChars:NO
-                             isUpload:NO
+                             isUpload:YES
                          tabTransform:kTabTransformNone
-                         spacesPerTab:0];          
+                         spacesPerTab:0
+                             progress:^(NSInteger progress) {
+                                 [self.upload didUploadBytes:progress];
+                             }];
+            NSString *label;
+            if (relativePaths.count == 1) {
+                label = relativePaths.firstObject.lastPathComponent;
+            } else {
+                label = [NSString stringWithFormat:@"%@ plus %ld more", relativePaths.firstObject.lastPathComponent, relativePaths.count - 1];
+            }
+            self.upload = [[[TerminalFileUpload alloc] initWithName:label size:base64String.length] autorelease];
+            [self.upload upload];
         } else {
             [self writeTaskNoBroadcast:@"abort\n" encoding:NSISOLatin1StringEncoding forceEncoding:YES];
         }
@@ -7539,6 +7586,7 @@ ITERM_WEAKLY_REFERENCEABLE
     notification.locationChangeNotification = [[[ITMLocationChangeNotification alloc] init] autorelease];
     notification.locationChangeNotification.hostName = host.hostname;
     notification.locationChangeNotification.userName = host.username;
+    notification.locationChangeNotification.session = self.guid;
     [_locationChangeSubscriptions enumerateKeysAndObjectsUsingBlock:^(id  _Nonnull key, ITMNotificationRequest * _Nonnull obj, BOOL * _Nonnull stop) {
         [[[iTermApplication sharedApplication] delegate] postAPINotification:notification toConnection:key];
     }];
@@ -7673,6 +7721,7 @@ ITERM_WEAKLY_REFERENCEABLE
 
     ITMNotification *notification = [[[ITMNotification alloc] init] autorelease];
     notification.locationChangeNotification = [[[ITMLocationChangeNotification alloc] init] autorelease];
+    notification.locationChangeNotification.session = self.guid;
     notification.locationChangeNotification.directory = newPath;
     [_locationChangeSubscriptions enumerateKeysAndObjectsUsingBlock:^(id  _Nonnull key, ITMNotificationRequest * _Nonnull obj, BOOL * _Nonnull stop) {
         [[[iTermApplication sharedApplication] delegate] postAPINotification:notification toConnection:key];
@@ -8188,6 +8237,13 @@ ITERM_WEAKLY_REFERENCEABLE
     [self queueAnnouncement:announcement identifier:identifier];
 }
 
+- (NSString *)screenValueOfVariableNamed:(NSString *)name {
+    if (!name) {
+        return nil;
+    }
+    return self.variables[name];
+}
+
 #pragma mark - Announcements
 
 - (BOOL)hasAnnouncementWithIdentifier:(NSString *)identifier {
@@ -8519,6 +8575,28 @@ ITERM_WEAKLY_REFERENCEABLE
 
 - (void)sessionViewBecomeFirstResponder {
     [self.textview.window makeFirstResponder:self.textview];
+}
+
+#pragma mark - iTermCoprocessDelegate
+
+- (void)coprocess:(Coprocess *)coprocess didTerminateWithErrorOutput:(NSString *)errors {
+    if ([Coprocess shouldIgnoreErrorsFromCommand:coprocess.command]) {
+        return;
+    }
+    iTermAnnouncementViewController *announcement =
+    [iTermAnnouncementViewController announcementWithTitle:[NSString stringWithFormat:@"Coprocess “%@” terminated with output on stderr.", coprocess.command]
+                                                     style:kiTermAnnouncementViewStyleWarning
+                                               withActions:@[ @"View Errors", @"Ignore Errors from This Command" ]
+                                                completion:^(int selection) {
+                                                    if (selection == 0) {
+                                                        NSString *filename = [[NSWorkspace sharedWorkspace] temporaryFileNameWithPrefix:@"coprocess-stderr." suffix:@".txt"];
+                                                        [errors writeToFile:filename atomically:NO encoding:NSUTF8StringEncoding error:nil];
+                                                        [[NSWorkspace sharedWorkspace] openFile:filename];
+                                                    } else if (selection == 1) {
+                                                        [Coprocess setSilentlyIgnoreErrors:YES fromCommand:coprocess.command];
+                                                    }
+                                                }];
+    [self queueAnnouncement:announcement identifier:[[NSUUID UUID] UUIDString]];
 }
 
 #pragma mark - API

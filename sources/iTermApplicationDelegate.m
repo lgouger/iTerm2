@@ -29,6 +29,7 @@
 
 #import "AppearancePreferencesViewController.h"
 #import "ColorsMenuItemView.h"
+#import "FileTransferManager.h"
 #import "ITAddressBookMgr.h"
 #import "iTermAPIServer.h"
 #import "iTermAboutWindowController.h"
@@ -46,6 +47,7 @@
 #import "iTermHotKeyProfileBindingController.h"
 #import "iTermIntegerNumberFormatter.h"
 #import "iTermLaunchServices.h"
+#import "iTermLSOF.h"
 #import "iTermModifierRemapper.h"
 #import "iTermPreferences.h"
 #import "iTermRemotePreferences.h"
@@ -90,6 +92,7 @@
 #import <objc/runtime.h>
 
 #include "iTermFileDescriptorClient.h"
+#include <libproc.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -186,6 +189,8 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
     BOOL _orphansAdopted;  // Have orphan servers been adopted?
 
     iTermAPIServer *_apiServer;
+
+    NSArray<NSDictionary *> *_buriedSessionsState;
 }
 
 - (void)updateProcessType {
@@ -606,6 +611,7 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
     if ([iTermAdvancedSettingsModel runJobsInServers] &&
         !self.isApplescriptTestApp) {
         [PseudoTerminalRestorer setRestorationCompletionBlock:^{
+            [self restoreBuriedSessionsState];
             if ([[iTermController sharedInstance] numberOfDecodesPending] == 0) {
                 _orphansAdopted = YES;
                 [[iTermOrphanServerAdopter sharedInstance] openWindowWithOrphans];
@@ -616,6 +622,8 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
                                                            object:nil];
             }
         }];
+    } else {
+        [self restoreBuriedSessionsState];
     }
 }
 
@@ -1679,9 +1687,17 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
             }
         }
     }
-    NSArray<NSDictionary *> *buried = [coder decodeObjectForKey:iTermBuriedSessionState];
-    if (buried) {
-        [[iTermBuriedSessions sharedInstance] restoreFromState:buried];
+    _buriedSessionsState = [[coder decodeObjectForKey:iTermBuriedSessionState] retain];
+    if (finishedLaunching_) {
+        [self restoreBuriedSessionsState];
+    }
+}
+
+- (void)restoreBuriedSessionsState {
+    if (_buriedSessionsState) {
+        [[iTermBuriedSessions sharedInstance] restoreFromState:_buriedSessionsState];
+        [_buriedSessionsState release];
+        _buriedSessionsState = nil;
     }
 }
 
@@ -1834,6 +1850,10 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
         [mainMenu insertItem:downloadsMenu_
                      atIndex:mainMenu.itemArray.count - 1];
         [downloadsMenu_ setSubmenu:[[[NSMenu alloc] initWithTitle:@"Downloads"] autorelease]];
+
+        NSMenuItem *clearAll = [[[NSMenuItem alloc] initWithTitle:@"Clear All" action:@selector(clearAllDownloads:) keyEquivalent:@""] autorelease];
+        [downloadsMenu_.submenu addItem:clearAll];
+        [downloadsMenu_.submenu addItem:[NSMenuItem separatorItem]];
     }
     return [downloadsMenu_ submenu];
 }
@@ -1847,8 +1867,20 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
         [mainMenu insertItem:uploadsMenu_
                      atIndex:mainMenu.itemArray.count - 1];
         [uploadsMenu_ setSubmenu:[[[NSMenu alloc] initWithTitle:@"Uploads"] autorelease]];
+
+        NSMenuItem *clearAll = [[[NSMenuItem alloc] initWithTitle:@"Clear All" action:@selector(clearAllUploads:) keyEquivalent:@""] autorelease];
+        [uploadsMenu_.submenu addItem:clearAll];
+        [uploadsMenu_.submenu addItem:[NSMenuItem separatorItem]];
     }
     return [uploadsMenu_ submenu];
+}
+
+- (void)clearAllDownloads:(id)sender {
+    [[FileTransferManager sharedInstance] removeAllDownloads];
+}
+
+- (void)clearAllUploads:(id)sender{
+    [[FileTransferManager sharedInstance] removeAllUploads];
 }
 
 // This is called whenever a tab becomes key or logging starts/stops.
@@ -1975,6 +2007,10 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
         iTermProfileHotKey *profileHotkey = self.currentProfileHotkey;
         menuItem.state = profileHotkey.autoHides ? NSOffState : NSOnState;
         return profileHotkey != nil;
+    } else if ([menuItem action] == @selector(clearAllDownloads:)) {
+        return downloadsMenu_.submenu.itemArray.count > 2;
+    } else if ([menuItem action] == @selector(clearAllUploads:)) {
+        return uploadsMenu_.submenu.itemArray.count > 2;
     } else {
         return YES;
     }
@@ -2165,17 +2201,24 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
     if (!bundles) {
         bundles = [NSMutableDictionary dictionary];
     }
+
+    NSString *processName = nil;
+    NSString *processIdentifier = nil;
+
     NSRunningApplication *app = [NSRunningApplication runningApplicationWithProcessIdentifier:pid];
-    if (!app) {
-        ELog(@"No running app with pid %d", (int)pid);
-        return nil;
+    if (app.localizedName && app.bundleIdentifier) {
+        processName = app.localizedName;
+        processIdentifier = app.bundleIdentifier;
+    } else {
+        processIdentifier = [iTermLSOF commandForProcess:pid execName:&processName];
+        if (!processName || !processIdentifier) {
+            ELog(@"Could not identify name for process with pid %d", (int)pid);
+            return nil;
+        }
+        processName = [processName lastPathComponent];
     }
-    if (!app.localizedName || !app.bundleIdentifier) {
-        ELog(@"App is missing name or bundle ID");
-        return nil;
-    }
-    NSDictionary *authorizedIdentity = @{ iTermWebSocketConnectionPeerIdentityBundleIdentifier: app.bundleIdentifier };
-    NSString *key = [NSString stringWithFormat:@"bundle=%@", app.bundleIdentifier];
+    NSDictionary *authorizedIdentity = @{ iTermWebSocketConnectionPeerIdentityBundleIdentifier: processIdentifier };
+    NSString *key = [NSString stringWithFormat:@"bundle=%@", processIdentifier];
     NSDictionary *setting = bundles[key];
     BOOL reauth = NO;
     if (setting) {
@@ -2185,13 +2228,13 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
         }
 
         NSString *name = setting[kAPIAccessLocalizedName];
-        if ([app.localizedName isEqualToString:name]) {
+        if ([processName isEqualToString:name]) {
             // Access is permanently allowed and the display name is unchanged. Do we need to reauth?
 
             NSDate *confirm = setting[kAPINextConfirmationDate];
             if ([[NSDate date] compare:confirm] == NSOrderedAscending) {
                 // No need to reauth, allow it.
-                ELog(@"Allowing API access to process id %d, name %@, bundle ID %@", pid, app.localizedName, app.bundleIdentifier);
+                ELog(@"Allowing API access to process id %d, name %@, bundle ID %@", pid, processName, processIdentifier);
                 return authorizedIdentity;
             }
 
@@ -2202,10 +2245,10 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
     NSAlert *alert = [[[NSAlert alloc] init] autorelease];
     if (reauth) {
         alert.messageText = @"Reauthorize API Access";
-        alert.informativeText = [NSString stringWithFormat:@"The application “%@” (%@) has API access, which grants it permission to see and control your activity. Would you like it to continue?", app.localizedName, app.bundleIdentifier];
+        alert.informativeText = [NSString stringWithFormat:@"The application “%@” (%@) has API access, which grants it permission to see and control your activity. Would you like it to continue?", processName, processIdentifier];
     } else {
         alert.messageText = @"API Access Request";
-        alert.informativeText = [NSString stringWithFormat:@"The application “%@” (%@) would like to control iTerm2. This exposes a significant amount of data in iTerm2 to %@. Allow this request?", app.localizedName, app.bundleIdentifier, app.localizedName];
+        alert.informativeText = [NSString stringWithFormat:@"The application “%@” (%@) would like to control iTerm2. This exposes a significant amount of data in iTerm2 to %@. Allow this request?", processName, processIdentifier, processName];
     }
     [alert addButtonWithTitle:@"Deny"];
     [alert addButtonWithTitle:@"Allow"];
@@ -2221,7 +2264,7 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
         bundles[key] = @{ kAPIAccessAllowed: @(allow),
                           kAPIAccessDate: [NSDate date],
                           kAPINextConfirmationDate: [[NSDate date] dateByAddingTimeInterval:kOneMonth],
-                          kAPIAccessLocalizedName: app.localizedName };
+                          kAPIAccessLocalizedName: processName };
     } else {
         [bundles removeObjectForKey:key];
     }
@@ -2351,6 +2394,29 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
     }
 
     handler([session handleSetProfilePropertyForKey:request.key value:value]);
+}
+
+- (void)apiServerListSessions:(ITMListSessionsRequest *)request
+                      handler:(void (^)(ITMListSessionsResponse *))handler {
+    ITMListSessionsResponse *response = [[[ITMListSessionsResponse alloc] init] autorelease];
+    for (PseudoTerminal *window in [[iTermController sharedInstance] terminals]) {
+        ITMListSessionsResponse_Window *windowMessage = [[[ITMListSessionsResponse_Window alloc] init] autorelease];
+
+        for (PTYTab *tab in window.tabs) {
+            ITMListSessionsResponse_Tab *tabMessage = [[[ITMListSessionsResponse_Tab alloc] init] autorelease];
+
+            for (PTYSession *session in tab.sessions) {
+                ITMListSessionsResponse_Session *sessionMessage = [[[ITMListSessionsResponse_Session alloc] init] autorelease];
+                sessionMessage.uniqueIdentifier = session.guid;
+                [tabMessage.sessionsArray addObject:sessionMessage];
+            }
+
+            [windowMessage.tabsArray addObject:tabMessage];
+        }
+
+        [response.windowsArray addObject:windowMessage];
+    }
+    handler(response);
 }
 
 @end
