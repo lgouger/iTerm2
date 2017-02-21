@@ -67,6 +67,7 @@
 #import "iTermTipController.h"
 #import "iTermTipWindowController.h"
 #import "iTermToolbeltView.h"
+#import "iTermVersionComparator.h"
 #import "iTermWarning.h"
 #import "NSApplication+iTerm.h"
 #import "NSArray+iTerm.h"
@@ -129,8 +130,7 @@ static NSString *const kAPINextConfirmationDate = @"next confirmation";
 static NSString *const kAPIAccessLocalizedName = @"app name";
 static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
 
-
-@interface iTermApplicationDelegate () <iTermAPIServerDelegate, iTermPasswordManagerDelegate>
+@interface iTermApplicationDelegate () <iTermAPIServerDelegate, iTermPasswordManagerDelegate, SUUpdaterDelegate>
 
 @property(nonatomic, readwrite) BOOL workspaceSessionActive;
 
@@ -517,7 +517,9 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
 - (void)applicationDidFinishLaunching:(NSNotification *)aNotification {
     [self warnAboutChangeToDefaultPasteBehavior];
     if (IsTouchBarAvailable()) {
+        ITERM_IGNORE_PARTIAL_BEGIN
         NSApp.automaticCustomizeTouchBarMenuItemEnabled = YES;
+        ITERM_IGNORE_PARTIAL_END
     }
 
     if ([iTermAdvancedSettingsModel enableAPIServer]) {
@@ -528,7 +530,7 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
     if ([self shouldNotifyAboutIncompatibleSoftware]) {
         [self notifyAboutIncompatibleSoftware];
     }
-    if (IsMavericksOrLater() && [iTermAdvancedSettingsModel disableAppNap]) {
+    if ([iTermAdvancedSettingsModel disableAppNap]) {
         [[NSProcessInfo processInfo] setAutomaticTerminationSupportEnabled:YES];
         [[NSProcessInfo processInfo] disableAutomaticTermination:@"User Preference"];
         _appNapStoppingActivity =
@@ -698,12 +700,11 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
             message = @"All sessions will be closed.";
         }
         [NSApp activateIgnoringOtherApps:YES];
-
-        NSAlert *alert = [NSAlert alertWithMessageText:@"Quit iTerm2?"
-                                         defaultButton:@"OK"
-                                       alternateButton:@"Cancel"
-                                           otherButton:nil
-                             informativeTextWithFormat:@"%@", message];
+        NSAlert *alert = [[[NSAlert alloc] init] autorelease];
+        alert.messageText = @"Quit iTerm2?";
+        alert.informativeText = message;
+        [alert addButtonWithTitle:@"OK"];
+        [alert addButtonWithTitle:@"Cancel"];
         iTermDisclosableView *accessory = [[iTermDisclosableView alloc] initWithFrame:NSZeroRect
                                                                                prompt:@"Details"
                                                                               message:[NSString stringWithFormat:@"You are being prompted because:\n\n%@",
@@ -714,7 +715,7 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
         };
         alert.accessoryView = accessory;
 
-        if ([alert runModal] != NSAlertDefaultReturn) {
+        if ([alert runModal] != NSAlertFirstButtonReturn) {
             DLog(@"User declined to quit");
             return NSTerminateCancel;
         }
@@ -778,12 +779,10 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
     if ([filename hasSuffix:@".itermcolors"]) {
         DLog(@"Importing color presets from %@", filename);
         if ([iTermColorPresets importColorPresetFromFile:filename]) {
-            NSRunAlertPanel(@"Colors Scheme Imported",
-                            @"The color scheme was imported and added to presets. You can find it "
-                             "under Preferences>Profiles>Colors>Load Presets….",
-                            @"OK",
-                            nil,
-                            nil);
+            NSAlert *alert = [[[NSAlert alloc] init] autorelease];
+            alert.messageText = @"Colors Scheme Imported";
+            alert.informativeText = @"The color scheme was imported and added to presets. You can find it under Preferences>Profiles>Colors>Load Presets….";
+            [alert runModal];
         }
         return YES;
     }
@@ -961,6 +960,7 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
 
         launchTime_ = [[NSDate date] retain];
         _workspaceSessionActive = YES;
+        [[SUUpdater sharedUpdater] setDelegate:self];
     }
 
     return self;
@@ -1504,18 +1504,18 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
 }
 
 - (int)promptForNumberOfSpacesToConverTabsToWithDefault:(int)defaultValue {
-    NSAlert *alert = [NSAlert alertWithMessageText:@"Converting tabs to spaces."
-                                     defaultButton:@"Ok"
-                                   alternateButton:@"Cancel"
-                                       otherButton:nil
-                         informativeTextWithFormat:@"How many spaces for each tab?"];
+    NSAlert *alert = [[[NSAlert alloc] init] autorelease];
+    alert.messageText = @"Converting tabs to spaces.";
+    alert.informativeText = @"How many spaces for each tab?";
+    [alert addButtonWithTitle:@"OK"];
+    [alert addButtonWithTitle:@"Cancel"];
     NSTextField *input = [[[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 50, 24)] autorelease];
     input.formatter = [[[iTermIntegerNumberFormatter alloc] init] autorelease];
     input.stringValue = [NSString stringWithFormat:@"%d", defaultValue];
     alert.accessoryView = input;
     [alert layout];
     [[alert window] makeFirstResponder:input];
-    if ([alert runModal] == NSAlertDefaultReturn) {
+    if ([alert runModal] == NSAlertFirstButtonReturn) {
         NSInteger n = [input integerValue];
         if (n > 0) {
             return n;
@@ -2337,11 +2337,6 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
                  peerIdentity:(NSDictionary *)peerIdentity
                       handler:(void (^)(ITMRegisterToolResponse *))handler {
     ITMRegisterToolResponse *response = [[[ITMRegisterToolResponse alloc] init] autorelease];
-    if (!IsYosemiteOrLater()) {
-        response.status = ITMRegisterToolResponse_Status_PermissionDenied;
-        handler(response);
-        return;
-    }
     if (!request.hasName || !request.hasIdentifier || !request.hasURL) {
         response.status = ITMRegisterToolResponse_Status_RequestMalformed;
         handler(response);
@@ -2417,6 +2412,12 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
         [response.windowsArray addObject:windowMessage];
     }
     handler(response);
+}
+
+#pragma mark - SUUpdaterDelegate
+
+- (id<SUVersionComparison>)versionComparatorForUpdater:(SUUpdater *)updater {
+    return [[[iTermVersionComparator alloc] init] autorelease];
 }
 
 @end
