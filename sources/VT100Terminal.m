@@ -1195,7 +1195,7 @@ static const int kMaxScreenRows = 4096;
     // Handle file downloads, which come as a series of MULTITOKEN_BODY tokens.
     if (receivingFile_) {
         if (token->type == XTERMCC_MULTITOKEN_BODY) {
-            [delegate_ terminalDidReceiveBase64FileData:token.string];
+            [delegate_ terminalDidReceiveBase64FileData:token.string ?: @""];
             return;
         } else if (token->type == VT100_ASCIISTRING) {
             [delegate_ terminalDidReceiveBase64FileData:[token stringForAsciiData]];
@@ -1210,7 +1210,7 @@ static const int kMaxScreenRows = 4096;
         }
     } else if (_copyingToPasteboard) {
         if (token->type == XTERMCC_MULTITOKEN_BODY) {
-            [delegate_ terminalDidReceiveBase64PasteboardString:token.string];
+            [delegate_ terminalDidReceiveBase64PasteboardString:token.string ?: @""];
             return;
         } else if (token->type == VT100_ASCIISTRING) {
             [delegate_ terminalDidReceiveBase64PasteboardString:[token stringForAsciiData]];
@@ -1660,9 +1660,11 @@ static const int kMaxScreenRows = 4096;
             [delegate_ terminalSetIconTitle:[token.string stringByReplacingControlCharsWithQuestionMark]];
             break;
         case XTERMCC_PASTE64: {
-            NSString *decoded = [self decodedBase64PasteCommand:token.string];
-            if (decoded) {
-                [delegate_ terminalPasteString:decoded];
+            if (token.string) {
+                NSString *decoded = [self decodedBase64PasteCommand:token.string];
+                if (decoded) {
+                    [delegate_ terminalPasteString:decoded];
+                }
             }
             break;
         }
@@ -2217,6 +2219,9 @@ static const int kMaxScreenRows = 4096;
     } else if ([key isEqualToString:@"ReportVariable"]) {
         if ([delegate_ terminalShouldSendReport] && [delegate_ terminalIsTrusted]) {
             NSData *valueAsData = [value dataUsingEncoding:NSISOLatin1StringEncoding];
+            if (!valueAsData) {
+                return;
+            }
             NSData *decodedData = [[[NSData alloc] initWithBase64EncodedData:valueAsData options:0] autorelease];
             NSString *name = [decodedData stringWithEncoding:self.encoding];
             NSString *encodedValue = @"";
@@ -2224,7 +2229,7 @@ static const int kMaxScreenRows = 4096;
                 NSString *variableValue = [delegate_ terminalValueOfVariableNamed:name];
                 encodedValue = [[variableValue dataUsingEncoding:self.encoding] base64EncodedStringWithOptions:0];
             }
-            NSString *report = [NSString stringWithFormat:@"%c]1337;ReportVariable=%@%c", VT100CC_ESC, encodedValue, VT100CC_BEL];
+            NSString *report = [NSString stringWithFormat:@"%c]1337;ReportVariable=%@%c", VT100CC_ESC, encodedValue ?: @"", VT100CC_BEL];
             [delegate_ terminalSendReport:[report dataUsingEncoding:self.encoding]];
         }
     }
