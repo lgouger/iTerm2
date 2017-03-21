@@ -67,6 +67,7 @@
 #import "iTermTipController.h"
 #import "iTermTipWindowController.h"
 #import "iTermToolbeltView.h"
+#import "iTermURLStore.h"
 #import "iTermWarning.h"
 #import "NSApplication+iTerm.h"
 #import "NSArray+iTerm.h"
@@ -83,8 +84,6 @@
 #import "PTYTextView.h"
 #import "PTYWindow.h"
 #import "QLPreviewPanel+iTerm.h"
-#import "Sparkle/SUStandardVersionComparator.h"
-#import "Sparkle/SUUpdater.h"
 #import "ToastWindowController.h"
 #import "VT100Terminal.h"
 
@@ -95,6 +94,8 @@
 #include <libproc.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+@import Sparkle;
 
 static NSString *kUseBackgroundPatternIndicatorKey = @"Use background pattern indicator";
 NSString *kUseBackgroundPatternIndicatorChangedNotification = @"kUseBackgroundPatternIndicatorChangedNotification";
@@ -107,6 +108,7 @@ NSString *const kShowFullscreenTabsSettingDidChange = @"kShowFullscreenTabsSetti
 NSString *const iTermRemoveAPIServerSubscriptionsNotification = @"iTermRemoveAPIServerSubscriptionsNotification";
 
 static NSString *const kScreenCharRestorableStateKey = @"kScreenCharRestorableStateKey";
+static NSString *const kURLStoreRestorableStateKey = @"kURLStoreRestorableStateKey";
 static NSString *const kHotkeyWindowRestorableState = @"kHotkeyWindowRestorableState";  // deprecated
 static NSString *const kHotkeyWindowsRestorableStates = @"kHotkeyWindowsRestorableState";  // deprecated
 static NSString *const iTermBuriedSessionState = @"iTermBuriedSessionState";
@@ -756,7 +758,7 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
     DLog(@"app encoding restorable state");
     NSTimeInterval start = [NSDate timeIntervalSinceReferenceDate];
     [coder encodeObject:ScreenCharEncodedRestorableState() forKey:kScreenCharRestorableStateKey];
-
+    [coder encodeObject:[[iTermURLStore sharedInstance] dictionaryValue] forKey:kURLStoreRestorableStateKey];
     [[iTermHotKeyController sharedInstance] saveHotkeyWindowStates];
 
     NSArray *hotkeyWindowsStates = [[iTermHotKeyController sharedInstance] restorableStates];
@@ -781,6 +783,11 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
     NSDictionary *screenCharState = [coder decodeObjectForKey:kScreenCharRestorableStateKey];
     if (screenCharState) {
         ScreenCharDecodeRestorableState(screenCharState);
+    }
+
+    NSDictionary *urlStoreState = [coder decodeObjectForKey:kURLStoreRestorableStateKey];
+    if (urlStoreState) {
+        [[iTermURLStore sharedInstance] loadFromDictionary:urlStoreState];
     }
 
     if ([[NSUserDefaults standardUserDefaults] boolForKey:@"NSQuitAlwaysKeepsWindows"]) {
@@ -1931,7 +1938,7 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
 #pragma mark - Private
 
 - (void)updateProcessType {
-    [[iTermApplication sharedApplication] setIsUIElementApplication:[iTermPreferences boolForKey:kPreferenceKeyUIElement]];
+    [[iTermApplication sharedApplication] setIsUIElement:[iTermPreferences boolForKey:kPreferenceKeyUIElement]];
 }
 
 - (PseudoTerminal *)terminalToOpenFileIn {
@@ -2046,12 +2053,12 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
 
 - (void)setSecureInput:(BOOL)secure {
     if (secure && _secureInputCount > 0) {
-        ELog(@"Want to turn on secure input but it's already on");
+        XLog(@"Want to turn on secure input but it's already on");
         return;
     }
 
     if (!secure && _secureInputCount == 0) {
-        ELog(@"Want to turn off secure input but it's already off");
+        XLog(@"Want to turn off secure input but it's already off");
         return;
     }
     DLog(@"Before: IsSecureEventInputEnabled returns %d", (int)IsSecureEventInputEnabled());
@@ -2067,7 +2074,7 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
         OSErr err = DisableSecureEventInput();
         DLog(@"DisableSecureEventInput err=%d", (int)err);
         if (err) {
-            ELog(@"DisableSecureEventInput failed with error %d", (int)err);
+            XLog(@"DisableSecureEventInput failed with error %d", (int)err);
         } else {
             --_secureInputCount;
         }
@@ -2159,7 +2166,7 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
     } else {
         processIdentifier = [iTermLSOF commandForProcess:pid execName:&processName];
         if (!processName || !processIdentifier) {
-            ELog(@"Could not identify name for process with pid %d", (int)pid);
+            XLog(@"Could not identify name for process with pid %d", (int)pid);
             return nil;
         }
         processName = [processName lastPathComponent];
@@ -2181,7 +2188,7 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
             NSDate *confirm = setting[kAPINextConfirmationDate];
             if ([[NSDate date] compare:confirm] == NSOrderedAscending) {
                 // No need to reauth, allow it.
-                ELog(@"Allowing API access to process id %d, name %@, bundle ID %@", pid, processName, processIdentifier);
+                XLog(@"Allowing API access to process id %d, name %@, bundle ID %@", pid, processName, processIdentifier);
                 return authorizedIdentity;
             }
 
@@ -2318,6 +2325,7 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
         ITMSetProfilePropertyResponse *response = [[[ITMSetProfilePropertyResponse alloc] init] autorelease];
         response.status = ITMSetProfilePropertyResponse_Status_SessionNotFound;
         handler(response);
+        return;
     }
 
     NSError *error = nil;
@@ -2325,7 +2333,7 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
                                                options:NSJSONReadingAllowFragments
                                                  error:&error];
     if (!value || error) {
-        ELog(@"JSON parsing error %@ for value in request %@", error, request);
+        XLog(@"JSON parsing error %@ for value in request %@", error, request);
         ITMSetProfilePropertyResponse *response = [[[ITMSetProfilePropertyResponse alloc] init] autorelease];
         response.status = ITMSetProfilePropertyResponse_Status_RequestMalformed;
         handler(response);
@@ -2354,6 +2362,20 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
 
         [response.windowsArray addObject:windowMessage];
     }
+    handler(response);
+}
+
+- (void)apiServerSendText:(ITMSendTextRequest *)request handler:(void (^)(ITMSendTextResponse *))handler {
+    PTYSession *session = [self sessionForAPIIdentifier:request.hasSession ? request.session : nil];
+    if (!session || session.exited) {
+        ITMSendTextResponse *response = [[[ITMSendTextResponse alloc] init] autorelease];
+        response.status = ITMSendTextResponse_Status_SessionNotFound;
+        handler(response);
+        return;
+    }
+    [session writeTask:request.text];
+    ITMSendTextResponse *response = [[[ITMSendTextResponse alloc] init] autorelease];
+    response.status = ITMSendTextResponse_Status_Ok;
     handler(response);
 }
 

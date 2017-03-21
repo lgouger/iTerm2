@@ -22,6 +22,7 @@
 #import "iTermInitialDirectory.h"
 #import "iTermKeyBindingMgr.h"
 #import "iTermKeyLabels.h"
+#import "iTermMenuOpener.h"
 #import "iTermMouseCursor.h"
 #import "iTermPasteHelper.h"
 #import "iTermPreferences.h"
@@ -282,9 +283,14 @@ static const NSUInteger kMaxHosts = 100;
     // top margin above the textview.
     TextViewWrapper *_wrapper;
 
+    BOOL _useGCDUpdateTimer;
     // This timer fires periodically to redraw textview, update the scroll position, tab appearance,
     // etc.
     NSTimer *_updateTimer;
+
+    // This is the experimental GCD version of the update timer that seems to have more regular refreshes.
+    dispatch_source_t _gcdUpdateTimer;
+    NSTimeInterval _cadence;
 
     // Anti-idle timer that sends a character every so often to the host.
     NSTimer *_antiIdleTimer;
@@ -473,6 +479,7 @@ static const NSUInteger kMaxHosts = 100;
 - (instancetype)init {
     self = [super init];
     if (self) {
+        _useGCDUpdateTimer = [iTermAdvancedSettingsModel useGCDUpdateTimer];
         _idleTime = [iTermAdvancedSettingsModel idleTimeSeconds];
         _triggerLineNumber = -1;
         _fakePromptDetectedAbsLine = -1;
@@ -601,7 +608,10 @@ ITERM_WEAKLY_REFERENCEABLE
     [_backgroundImagePath release];
     [_backgroundImage release];
     [_antiIdleTimer invalidate];
-    [_updateTimer invalidate];
+    if (_gcdUpdateTimer != nil) {
+        dispatch_source_cancel(_gcdUpdateTimer);
+        dispatch_release(_gcdUpdateTimer);
+    }
     [_originalProfile release];
     [_liveSession release];
     [_tmuxGateway release];
@@ -871,17 +881,23 @@ ITERM_WEAKLY_REFERENCEABLE
         theBookmark = [arrangement objectForKey:SESSION_ARRANGEMENT_BOOKMARK];
         needDivorce = YES;
     }
-    NSDictionary *tabColorDict = [ITAddressBookMgr encodeColor:[NSColor colorFromHexString:arrangement[SESSION_ARRANGEMENT_TMUX_TAB_COLOR]]];
-    if (tabColorDict) {
-        if (![iTermProfilePreferences boolForKey:KEY_USE_TAB_COLOR inProfile:theBookmark] ||
-            ![[ITAddressBookMgr decodeColor:[iTermProfilePreferences objectForKey:KEY_TAB_COLOR inProfile:theBookmark]] isEqual:tabColorDict]) {
-            theBookmark = [theBookmark dictionaryBySettingObject:tabColorDict forKey:KEY_TAB_COLOR];
-            theBookmark = [theBookmark dictionaryBySettingObject:@YES forKey:KEY_USE_TAB_COLOR];
+    if ([arrangement objectForKey:SESSION_ARRANGEMENT_TMUX_PANE]) {
+        // This is a tmux arrangement.
+        NSDictionary *tabColorDict = [ITAddressBookMgr encodeColor:[NSColor colorFromHexString:arrangement[SESSION_ARRANGEMENT_TMUX_TAB_COLOR]]];
+        if (tabColorDict) {
+            // We're restoring a tmux arrangement that specifies a tab color.
+            if (![iTermProfilePreferences boolForKey:KEY_USE_TAB_COLOR inProfile:theBookmark] ||
+                ![[ITAddressBookMgr decodeColor:[iTermProfilePreferences objectForKey:KEY_TAB_COLOR inProfile:theBookmark]] isEqual:tabColorDict]) {
+                // The tmux profile does not specify a tab color or it specifies a different one. Override it and divorce.
+                theBookmark = [theBookmark dictionaryBySettingObject:tabColorDict forKey:KEY_TAB_COLOR];
+                theBookmark = [theBookmark dictionaryBySettingObject:@YES forKey:KEY_USE_TAB_COLOR];
+                needDivorce = YES;
+            }
+        } else if ([iTermProfilePreferences boolForKey:KEY_USE_TAB_COLOR inProfile:theBookmark]) {
+            // There was no tab color but the tmux profile specifies one. Disable it and divorce.
+            theBookmark = [theBookmark dictionaryBySettingObject:@NO forKey:KEY_USE_TAB_COLOR];
             needDivorce = YES;
         }
-    } else if ([iTermProfilePreferences boolForKey:KEY_USE_TAB_COLOR inProfile:theBookmark]) {
-        theBookmark = [theBookmark dictionaryBySettingObject:@NO forKey:KEY_USE_TAB_COLOR];
-        needDivorce = YES;
     }
     if (needDivorce) {
         // Keep it from stepping on an existing sesion with the same guid. Assign a fresh GUID.
@@ -3896,9 +3912,17 @@ ITERM_WEAKLY_REFERENCEABLE
     }
 }
 
+- (BOOL)updateTimerIsValid {
+    if (_useGCDUpdateTimer) {
+        return _gcdUpdateTimer != nil;
+    } else {
+        return _updateTimer.isValid;
+    }
+}
+
 - (void)setActive:(BOOL)active {
     DLog(@"setActive:%@ timerRunning=%@ updateTimer.isValue=%@ lastTimeout=%f session=%@",
-         @(active), @(_timerRunning), @(_updateTimer.isValid), _lastTimeout, self);
+         @(active), @(_timerRunning), @(self.updateTimerIsValid), _lastTimeout, self);
     _active = active;
     [self changeCadenceIfNeeded];
 }
@@ -3924,6 +3948,14 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (void)setUpdateCadence:(NSTimeInterval)cadence {
+    if (_useGCDUpdateTimer) {
+        [self setGCDUpdateCadence:cadence];
+    } else {
+        [self setTimerUpdateCadence:cadence];
+    }
+}
+
+- (void)setTimerUpdateCadence:(NSTimeInterval)cadence {
     if (_updateTimer.timeInterval == cadence) {
         DLog(@"No change to cadence.");
         return;
@@ -3948,6 +3980,33 @@ ITERM_WEAKLY_REFERENCEABLE
                                                       userInfo:nil
                                                        repeats:YES];
     }
+}
+- (void)setGCDUpdateCadence:(NSTimeInterval)cadence {
+    const NSTimeInterval period = _inLiveResize ? kActiveUpdateCadence : cadence;
+    if (_cadence == period) {
+        DLog(@"No change to cadence.");
+        return;
+    }
+    DLog(@"Set cadence of %@ to %f", self, cadence);
+
+    _cadence = period;
+
+    if (_gcdUpdateTimer != nil) {
+        dispatch_source_cancel(_gcdUpdateTimer);
+        dispatch_release(_gcdUpdateTimer);
+        _gcdUpdateTimer = nil;
+    }
+
+    _gcdUpdateTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
+    dispatch_source_set_timer(_gcdUpdateTimer,
+                              dispatch_walltime(NULL, 0),
+                              period * NSEC_PER_SEC,
+                              0.005 * NSEC_PER_SEC);
+    PTYSession *weakSelf = self.weakSelf;
+    dispatch_source_set_event_handler(_gcdUpdateTimer, ^{
+        [weakSelf updateDisplay];
+    });
+    dispatch_resume(_gcdUpdateTimer);
 }
 
 - (void)doAntiIdle {
@@ -4102,8 +4161,10 @@ ITERM_WEAKLY_REFERENCEABLE
     if ([iTermAdvancedSettingsModel trackingRunloopForLiveResize]) {
         if (notification.object == self.textview.window) {
             _inLiveResize = YES;
-            if (_updateTimer) {
-                [[NSRunLoop currentRunLoop] addTimer:_updateTimer forMode:NSRunLoopCommonModes];
+            if (!_useGCDUpdateTimer) {
+                if (_updateTimer) {
+                    [[NSRunLoop currentRunLoop] addTimer:_updateTimer forMode:NSRunLoopCommonModes];
+                }
             }
         }
     }
@@ -4113,11 +4174,17 @@ ITERM_WEAKLY_REFERENCEABLE
     if ([iTermAdvancedSettingsModel trackingRunloopForLiveResize]) {
         if (notification.object == self.textview.window) {
             _inLiveResize = NO;
-            if (_updateTimer) {
-                NSTimeInterval cadence = _updateTimer.timeInterval;
-                [_updateTimer invalidate];
-                _updateTimer = nil;
+            if (_useGCDUpdateTimer) {
+                NSTimeInterval cadence = _cadence;
+                _cadence = 0;
                 [self setUpdateCadence:cadence];
+            } else {
+                if (_updateTimer) {
+                    NSTimeInterval cadence = _updateTimer.timeInterval;
+                    [_updateTimer invalidate];
+                    _updateTimer = nil;
+                    [self setUpdateCadence:cadence];
+                }
             }
         }
     }
@@ -4862,6 +4929,13 @@ ITERM_WEAKLY_REFERENCEABLE
     if (_hideAfterTmuxWindowOpens) {
         _hideAfterTmuxWindowOpens = NO;
         [self hideSession];
+
+        static NSString *const kAutoBurialKey = @"NoSyncAutoBurialReveal";
+        if (![[NSUserDefaults standardUserDefaults] boolForKey:kAutoBurialKey]) {
+            [iTermMenuOpener revealMenuWithPath:@[ @"Session", @"Buried Sessions" ]
+                                        message:@"The session that started tmux has been hidden.\nYou can restore it here, in “Buried Sessions.”"];
+            [[NSUserDefaults standardUserDefaults] setBool:YES forKey:kAutoBurialKey];
+        }
     }
 }
 - (void)tmuxUpdateLayoutForWindow:(int)windowId
@@ -5417,7 +5491,7 @@ ITERM_WEAKLY_REFERENCEABLE
             break;
 
         default:
-            ELog(@"Unknown key action %d", keyBindingAction);
+            XLog(@"Unknown key action %d", keyBindingAction);
             break;
     }
 }
@@ -6460,6 +6534,10 @@ ITERM_WEAKLY_REFERENCEABLE
     [self bury];
 }
 
+- (void)textViewShowHoverURL:(NSString *)url {
+    [_view setHoverURL:url];
+}
+
 - (void)bury {
     [_textview setDataSource:nil];
     [_textview setDelegate:nil];
@@ -7211,7 +7289,7 @@ ITERM_WEAKLY_REFERENCEABLE
             [self setPasteboard:NSGeneralPboard];
         }
     } else {
-        ELog(@"Clipboard access denied for CopyToClipboard");
+        XLog(@"Clipboard access denied for CopyToClipboard");
     }
 }
 
@@ -7299,7 +7377,7 @@ ITERM_WEAKLY_REFERENCEABLE
                         return [NSURL fileURLWithPath:[anObject.path stringByDeletingLastPathComponent]];
                     }
                 } else {
-                    ELog(@"Could not find %@", anObject.path);
+                    XLog(@"Could not find %@", anObject.path);
                     return nil;
                 }
             }];
@@ -7445,7 +7523,7 @@ ITERM_WEAKLY_REFERENCEABLE
         [self setSessionSpecificProfileValues:@{ KEY_BADGE_FORMAT: theFormat }];
         _textview.badgeLabel = [self badgeLabel];
     } else {
-        ELog(@"Badge is not properly base64 encoded: %@", base64Format);
+        XLog(@"Badge is not properly base64 encoded: %@", base64Format);
     }
 }
 
@@ -7516,28 +7594,28 @@ ITERM_WEAKLY_REFERENCEABLE
 
 - (void)screenSetTabColorRedComponentTo:(CGFloat)color {
     NSColor *curColor = [self tabColor];
-    [self setTabColor:[NSColor colorWithCalibratedRed:color
-                                                green:[curColor greenComponent]
-                                                 blue:[curColor blueComponent]
-                                                alpha:1]];
+    [self setTabColor:[NSColor colorWithSRGBRed:color
+                                          green:[curColor greenComponent]
+                                           blue:[curColor blueComponent]
+                                          alpha:1]];
     [[_delegate parentWindow] updateTabColors];
 }
 
 - (void)screenSetTabColorGreenComponentTo:(CGFloat)color {
     NSColor *curColor = [self tabColor];
-    [self setTabColor:[NSColor colorWithCalibratedRed:[curColor redComponent]
-                                                green:color
-                                                 blue:[curColor blueComponent]
-                                                alpha:1]];
+    [self setTabColor:[NSColor colorWithSRGBRed:[curColor redComponent]
+                                          green:color
+                                           blue:[curColor blueComponent]
+                                          alpha:1]];
     [[_delegate parentWindow] updateTabColors];
 }
 
 - (void)screenSetTabColorBlueComponentTo:(CGFloat)color {
     NSColor *curColor = [self tabColor];
-    [self setTabColor:[NSColor colorWithCalibratedRed:[curColor redComponent]
-                                                green:[curColor greenComponent]
-                                                 blue:color
-                                                alpha:1]];
+    [self setTabColor:[NSColor colorWithSRGBRed:[curColor redComponent]
+                                          green:[curColor greenComponent]
+                                           blue:color
+                                          alpha:1]];
     [[_delegate parentWindow] updateTabColors];
 }
 
@@ -8815,7 +8893,7 @@ ITERM_WEAKLY_REFERENCEABLE
 - (ITMSetProfilePropertyResponse *)handleSetProfilePropertyForKey:(NSString *)key value:(id)value {
     ITMSetProfilePropertyResponse *response = [[[ITMSetProfilePropertyResponse alloc] init] autorelease];
     if (![iTermProfilePreferences valueIsLegal:value forKey:key]) {
-        ELog(@"Value %@ is not legal for key %@", value, key);
+        XLog(@"Value %@ is not legal for key %@", value, key);
         response.status = ITMSetProfilePropertyResponse_Status_RequestMalformed;
         return response;
     }

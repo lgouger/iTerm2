@@ -49,9 +49,7 @@
 @property(nonatomic, retain) NSStatusItem *statusBarItem;
 @end
 
-@implementation iTermApplication {
-    BOOL _isUIElement;
-}
+@implementation iTermApplication
 
 - (void)dealloc {
     [_fakeCurrentEvent release];
@@ -358,7 +356,7 @@
     }];
 }
 
-- (void)setIsUIElementApplication:(BOOL)uiElement {
+- (void)setIsUIElement:(BOOL)uiElement {
     if (uiElement == _isUIElement) {
         return;
     }
@@ -398,6 +396,11 @@
 - (NSArray<NSWindow *> *)orderedWindowsPlusAllHotkeyPanels {
     NSArray<NSWindow *> *panels = [[iTermHotKeyController sharedInstance] allFloatingHotkeyWindows] ?: @[];
     return [panels arrayByAddingObjectsFromArray:[self orderedWindows]];
+}
+
+- (BOOL)sendAction:(SEL)action to:(nullable id)target from:(nullable id)sender {
+    ILog(@"sendAction:%@ to:%@ from:%@", NSStringFromSelector(action), target, sender);
+    return [super sendAction:action to:target from:sender];
 }
 
 @end

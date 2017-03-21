@@ -9,6 +9,7 @@
 #import "iTermTextExtractor.h"
 #import "DebugLogging.h"
 #import "iTermPreferences.h"
+#import "iTermURLStore.h"
 #import "NSStringITerm.h"
 #import "NSMutableAttributedString+iTerm.h"
 #import "RegexKitLite.h"
@@ -189,6 +190,47 @@ const NSInteger kUnlimitedMaximumWordLength = NSIntegerMax;
     } else {
         return nil;
     }
+}
+
+- (NSURL *)urlOfHypertextLinkAt:(VT100GridCoord)coord {
+    screen_char_t c = [self characterAt:coord];
+    return [[iTermURLStore sharedInstance] urlForCode:c.urlCode];
+}
+
+- (VT100GridWindowedRange)rangeOfCoordinatesAround:(VT100GridCoord)origin
+                                   maximumDistance:(int)maximumDistance
+                                       passingTest:(BOOL(^)(screen_char_t *c))block {
+    VT100GridCoord coord = origin;
+    VT100GridCoord previousCoord = origin;
+    coord = [self predecessorOfCoord:coord];
+    screen_char_t c = [self characterAt:coord];
+    int distanceLeft = maximumDistance;
+    while (distanceLeft > 0 && !VT100GridCoordEquals(coord, previousCoord) && block(&c)) {
+        previousCoord = coord;
+        coord = [self predecessorOfCoord:coord];
+        c = [self characterAt:coord];
+        distanceLeft--;
+    }
+
+    VT100GridWindowedRange range;
+    range.columnWindow = _logicalWindow;
+    range.coordRange.start = previousCoord;
+
+    coord = origin;
+    previousCoord = origin;
+    coord = [self successorOfCoord:coord];
+    c = [self characterAt:coord];
+    distanceLeft = maximumDistance;
+    while (distanceLeft > 0 && !VT100GridCoordEquals(coord, previousCoord) && block(&c)) {
+        previousCoord = coord;
+        coord = [self successorOfCoord:coord];
+        c = [self characterAt:coord];
+        distanceLeft--;
+    }
+
+    range.coordRange.end = coord;
+
+    return range;
 }
 
 - (VT100GridWindowedRange)rangeForWordAt:(VT100GridCoord)location
