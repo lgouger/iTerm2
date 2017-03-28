@@ -790,15 +790,17 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
         [[iTermURLStore sharedInstance] loadFromDictionary:urlStoreState];
     }
 
+    NSArray *hotkeyWindowsStates = nil;
+    NSDictionary *legacyState = nil;
     if ([[NSUserDefaults standardUserDefaults] boolForKey:@"NSQuitAlwaysKeepsWindows"]) {
-        NSArray *hotkeyWindowsStates = [coder decodeObjectForKey:kHotkeyWindowsRestorableStates];
+        hotkeyWindowsStates = [coder decodeObjectForKey:kHotkeyWindowsRestorableStates];
         if (hotkeyWindowsStates) {
             // We have to create the hotkey window now because we need to attach to servers before
             // launch finishes; otherwise any running hotkey window jobs will be treated as orphans.
             [[iTermHotKeyController sharedInstance] createHiddenWindowsFromRestorableStates:hotkeyWindowsStates];
         } else {
             // Restore hotkey window from pre-3.1 version.
-            NSDictionary *legacyState = [coder decodeObjectForKey:kHotkeyWindowRestorableState];
+            legacyState = [coder decodeObjectForKey:kHotkeyWindowRestorableState];
             if (legacyState) {
                 [[iTermHotKeyController sharedInstance] createHiddenWindowFromLegacyRestorableState:legacyState];
             }
@@ -807,6 +809,15 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
     _buriedSessionsState = [[coder decodeObjectForKey:iTermBuriedSessionState] retain];
     if (finishedLaunching_) {
         [self restoreBuriedSessionsState];
+    }
+    if ([iTermAdvancedSettingsModel logRestorableStateSize]) {
+        NSDictionary *dict = @{ kScreenCharRestorableStateKey: screenCharState ?: @{},
+                                kURLStoreRestorableStateKey: urlStoreState ?: @{},
+                                kHotkeyWindowsRestorableStates: hotkeyWindowsStates ?: @[],
+                                kHotkeyWindowRestorableState: legacyState ?: @{},
+                                iTermBuriedSessionState: _buriedSessionsState ?: @[] };
+        NSString *log = [dict sizeInfo];
+        [log writeToFile:[NSString stringWithFormat:@"/tmp/statesize.app-%p.txt", self] atomically:NO encoding:NSUTF8StringEncoding error:nil];
     }
 }
 
@@ -1497,14 +1508,12 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
     NSMenu *aMenu = [[NSMenu alloc] initWithTitle: @"SessionMenu"];
     PTYTabView *aTabView = [currentTerminal tabView];
     NSArray *tabViewItemArray = [aTabView tabViewItems];
-    NSEnumerator *enumerator = [tabViewItemArray objectEnumerator];
-    NSTabViewItem *aTabViewItem;
     int i=1;
 
     // clear whatever menu we already have
-    [selectTab setSubmenu: nil];
+    [selectTab setSubmenu:nil];
 
-    while ((aTabViewItem = [enumerator nextObject])) {
+    for (NSTabViewItem *aTabViewItem in tabViewItemArray) {
         PTYTab *aTab = [aTabViewItem identifier];
         NSMenuItem *aMenuItem;
 
