@@ -32,6 +32,7 @@
 #import "iTermTextExtractor.h"
 #import "iTermTextViewAccessibilityHelper.h"
 #import "iTermURLActionFactory.h"
+#import "iTermURLStore.h"
 #import "iTermWebViewWrapperViewController.h"
 #import "iTermWarning.h"
 #import "MovePaneController.h"
@@ -532,6 +533,7 @@ static const int kDragThreshold = 3;
 - (BOOL)resignFirstResponder {
     [_altScreenMouseScrollInferer firstResponderDidChange];
     [self removeUnderline];
+    [self placeFindCursorOnAutoHide];
     DLog(@"resignFirstResponder %@", self);
     DLog(@"%@", [NSThread callStackSymbols]);
     return YES;
@@ -2581,9 +2583,24 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
                 }
                 break;
             }
-            case kURLActionOpenURL:
-                [self openURL:[NSURL URLWithUserSuppliedString:action.string] inBackground:openInBackground];
+            case kURLActionOpenURL: {
+                NSURL *url = [NSURL URLWithUserSuppliedString:action.string];
+                if ([url.scheme isEqualToString:@"file"] && url.host.length > 0 && ![url.host isEqualToString:[VT100RemoteHost localHostName]]) {
+                    SCPPath *path = [[[SCPPath alloc] init] autorelease];
+                    path.path = url.path;
+                    path.hostname = url.host;
+                    path.username = [PTYTextView usernameToDownloadFileOnHost:url.host];
+                    if (path.username == nil) {
+                        return;
+                    }
+                    [self downloadFileAtSecureCopyPath:path
+                                           displayName:url.path.lastPathComponent
+                                        locationInView:action.range.coordRange];
+                } else {
+                    [self openURL:url inBackground:openInBackground];
+                }
                 break;
+            }
 
             case kURLActionSmartSelectionAction: {
                 DLog(@"Run smart selection selector %@", NSStringFromSelector(action.selector));
@@ -3558,6 +3575,12 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
                                   NSUnderlineStyleAttributeName: @(underlineStyle) };
     if ([iTermAdvancedSettingsModel excludeBackgroundColorsFromCopiedStyle]) {
         attributes = [attributes dictionaryByRemovingObjectForKey:NSBackgroundColorAttributeName];
+    }
+    if (c.urlCode) {
+        NSURL *url = [[iTermURLStore sharedInstance] urlForCode:c.urlCode];
+        if (url != nil) {
+            attributes = [attributes dictionaryBySettingObject:url forKey:NSLinkAttributeName];
+        }
     }
 
     return attributes;
@@ -6071,6 +6094,25 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
         DLog(@"Not allowing drag");
         return NSDragOperationNone;
     }
+}
+
++ (NSString *)usernameToDownloadFileOnHost:(NSString *)host {
+    NSAlert *alert = [[[NSAlert alloc] init] autorelease];
+    alert.messageText = [NSString stringWithFormat:@"Enter username for host %@ to download file with scp", host];
+    [alert addButtonWithTitle:@"OK"];
+    [alert addButtonWithTitle:@"Cancel"];
+
+    NSTextField *input = [[[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 200, 24)] autorelease];
+    [input setStringValue:NSUserName()];
+    [alert setAccessoryView:input];
+    [alert layout];
+    [[alert window] makeFirstResponder:input];
+    NSInteger button = [alert runModal];
+    if (button == NSAlertFirstButtonReturn) {
+        [input validateEditing];
+        return [[input stringValue] stringByReplacingOccurrencesOfString:@"\n" withString:@" "];
+    }
+    return nil;
 }
 
 // If iTerm2 is the handler for the scheme, then the profile is launched directly.

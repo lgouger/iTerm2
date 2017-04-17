@@ -192,20 +192,21 @@ const NSInteger kUnlimitedMaximumWordLength = NSIntegerMax;
     }
 }
 
-- (NSURL *)urlOfHypertextLinkAt:(VT100GridCoord)coord {
+- (NSURL *)urlOfHypertextLinkAt:(VT100GridCoord)coord urlId:(out NSString **)urlId {
     screen_char_t c = [self characterAt:coord];
+    *urlId = [[iTermURLStore sharedInstance] paramWithKey:@"id" forCode:c.urlCode];
     return [[iTermURLStore sharedInstance] urlForCode:c.urlCode];
 }
 
 - (VT100GridWindowedRange)rangeOfCoordinatesAround:(VT100GridCoord)origin
                                    maximumDistance:(int)maximumDistance
-                                       passingTest:(BOOL(^)(screen_char_t *c))block {
+                                       passingTest:(BOOL(^)(screen_char_t *c, VT100GridCoord coord))block {
     VT100GridCoord coord = origin;
     VT100GridCoord previousCoord = origin;
     coord = [self predecessorOfCoord:coord];
     screen_char_t c = [self characterAt:coord];
     int distanceLeft = maximumDistance;
-    while (distanceLeft > 0 && !VT100GridCoordEquals(coord, previousCoord) && block(&c)) {
+    while (distanceLeft > 0 && !VT100GridCoordEquals(coord, previousCoord) && block(&c, coord)) {
         previousCoord = coord;
         coord = [self predecessorOfCoord:coord];
         c = [self characterAt:coord];
@@ -221,7 +222,7 @@ const NSInteger kUnlimitedMaximumWordLength = NSIntegerMax;
     coord = [self successorOfCoord:coord];
     c = [self characterAt:coord];
     distanceLeft = maximumDistance;
-    while (distanceLeft > 0 && !VT100GridCoordEquals(coord, previousCoord) && block(&c)) {
+    while (distanceLeft > 0 && !VT100GridCoordEquals(coord, previousCoord) && block(&c, coord)) {
         previousCoord = coord;
         coord = [self successorOfCoord:coord];
         c = [self characterAt:coord];
@@ -309,7 +310,7 @@ const NSInteger kUnlimitedMaximumWordLength = NSIntegerMax;
                                   theChar.code < ITERM2_PRIVATE_BEGIN ||
                                   theChar.code > ITERM2_PRIVATE_END) {
                                   [indexesInSuffix addObject:@(stringFromLocation.length)];
-                                  [stringFromLocation appendString:ScreenCharToStr(&theChar)];
+                                  [stringFromLocation appendString:(ScreenCharToStr(&theChar) ?: @"")];
                                   [coords addObject:[NSValue valueWithGridCoord:coord]];
                               }
                           }

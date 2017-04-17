@@ -456,6 +456,11 @@ static const NSUInteger kMaxHosts = 100;
 
     // Used by auto-hide. We can't auto hide the tmux gateway session until at least one window has been opened.
     BOOL _hideAfterTmuxWindowOpens;
+
+    BOOL _useAdaptiveFrameRate;
+    NSInteger _adaptiveFrameRateThroughputThreshold;
+    double _slowFrameRate;
+
 }
 
 + (void)registerSessionInArrangement:(NSDictionary *)arrangement {
@@ -479,6 +484,9 @@ static const NSUInteger kMaxHosts = 100;
 - (instancetype)init {
     self = [super init];
     if (self) {
+        _useAdaptiveFrameRate = [iTermAdvancedSettingsModel useAdaptiveFrameRate];
+        _adaptiveFrameRateThroughputThreshold = [iTermAdvancedSettingsModel adaptiveFrameRateThroughputThreshold];
+        _slowFrameRate = [iTermAdvancedSettingsModel slowFrameRate];
         _useGCDUpdateTimer = [iTermAdvancedSettingsModel useGCDUpdateTimer];
         _idleTime = [iTermAdvancedSettingsModel idleTimeSeconds];
         _triggerLineNumber = -1;
@@ -2083,7 +2091,7 @@ ITERM_WEAKLY_REFERENCEABLE
     [self retain];
     dispatch_retain(_executionSemaphore);
     dispatch_async(dispatch_get_main_queue(), ^{
-        if ([iTermAdvancedSettingsModel useAdaptiveFrameRate]) {
+        if (_useAdaptiveFrameRate) {
             [_throughputEstimator addByteCount:length];
         }
         [self executeTokens:&vector bytesHandled:length];
@@ -3930,14 +3938,13 @@ ITERM_WEAKLY_REFERENCEABLE
 - (void)changeCadenceIfNeeded {
     BOOL effectivelyActive = (_active || !self.isIdle || [NSApp isActive]);
     if (effectivelyActive && [_delegate sessionBelongsToVisibleTab]) {
-        if ([iTermAdvancedSettingsModel useAdaptiveFrameRate]) {
-            const NSInteger kThroughputLimit =
-                [iTermAdvancedSettingsModel adaptiveFrameRateThroughputThreshold];
+        if (_useAdaptiveFrameRate) {
+            const NSInteger kThroughputLimit = _adaptiveFrameRateThroughputThreshold;
             const NSInteger estimatedThroughput = [_throughputEstimator estimatedThroughput];
             if (estimatedThroughput < kThroughputLimit && estimatedThroughput > 0) {
                 [self setUpdateCadence:kFastUpdateCadence];
             } else {
-                [self setUpdateCadence:1.0 / [iTermAdvancedSettingsModel slowFrameRate]];
+                [self setUpdateCadence:1.0 / _slowFrameRate];
             }
         } else {
             [self setUpdateCadence:kActiveUpdateCadence];
@@ -6396,11 +6403,26 @@ ITERM_WEAKLY_REFERENCEABLE
         [iTermShellHistoryController showInformationalMessage];
         return VT100GridAbsCoordRangeMake(-1, -1, -1, -1);
     } else {
-        DLog(@"Returning cached range.");
         iTermTextExtractor *extractor = [iTermTextExtractor textExtractorWithDataSource:_screen];
-        return [extractor rangeByTrimmingWhitespaceFromRange:_screen.lastCommandOutputRange
-                                                     leading:NO
-                                                    trailing:iTermTextExtractorTrimTrailingWhitespaceOneLine];
+        long long absCursorY = _screen.cursorY - 1 + _screen.numberOfScrollbackLines + _screen.totalScrollbackOverflow;
+
+        if (self.isAtShellPrompt ||
+            _screen.startOfRunningCommandOutput.x == -1 ||
+            (absCursorY == _screen.startOfRunningCommandOutput.y && _screen.cursorX == 1)) {
+            DLog(@"Returning cached range.");
+            return [extractor rangeByTrimmingWhitespaceFromRange:_screen.lastCommandOutputRange
+                                                         leading:NO
+                                                        trailing:iTermTextExtractorTrimTrailingWhitespaceOneLine];
+        } else {
+            DLog(@"Returning range of current command.");
+            VT100GridAbsCoordRange range = VT100GridAbsCoordRangeMake(_screen.startOfRunningCommandOutput.x,
+                                                                      _screen.startOfRunningCommandOutput.y,
+                                                                      _screen.cursorX - 1,
+                                                                      absCursorY);
+            return [extractor rangeByTrimmingWhitespaceFromRange:range
+                                                         leading:NO
+                                                        trailing:iTermTextExtractorTrimTrailingWhitespaceOneLine];
+        }
     }
 }
 

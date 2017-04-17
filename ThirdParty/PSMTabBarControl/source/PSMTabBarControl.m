@@ -7,6 +7,8 @@
 //
 
 #import "PSMTabBarControl.h"
+
+#import "DebugLogging.h"
 #import "PSMTabBarCell.h"
 #import "PSMOverflowPopUpButton.h"
 #import "PSMRolloverButton.h"
@@ -1287,6 +1289,7 @@ const NSInteger kPSMStartResizeAnimation = 0;
                 [[self delegate] respondsToSelector:@selector(tabView:shouldDragTabViewItem:fromTabBar:)] &&
                 [[self delegate] tabView:_tabView shouldDragTabViewItem:[cell representedObject] fromTabBar:self]) {
             _didDrag = YES;
+            ILog(@"Start dragging with mouse down event %@ in window %p with frame %@", [self lastMouseDownEvent], self.window, NSStringFromRect(self.window.frame));
             [[PSMTabDragAssistant sharedDragAssistant] startDraggingCell:cell fromTabBar:self withMouseDownEvent:[self lastMouseDownEvent]];
         }
     }
@@ -1383,6 +1386,13 @@ const NSInteger kPSMStartResizeAnimation = 0;
 }
 
 #pragma mark NSDraggingSource
+
+- (NSDraggingSession *)beginDraggingSessionWithItems:(NSArray<NSDraggingItem *> *)items event:(NSEvent *)event source:(id<NSDraggingSource>)source {
+    ILog(@"Begin dragging tab bar control %p with event %@ source from\n%@",
+         self, event, [NSThread callStackSymbols]);
+    return [super beginDraggingSessionWithItems:items event:event source:source];
+}
+
 - (NSDragOperation)draggingSourceOperationMaskForLocal:(BOOL)isLocal
 {
     return (isLocal ? NSDragOperationMove : NSDragOperationNone);
