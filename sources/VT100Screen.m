@@ -3252,7 +3252,7 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
         return;
     }
     NSURL *URL = [NSURL URLWithString:URLString];
-    if (!URL) {
+    if (!URL || URLString.length == 0) {
         return;
     }
     NSURLComponents *components = [[[NSURLComponents alloc] initWithURL:URL resolvingAgainstBaseURL:NO] autorelease];
@@ -3916,7 +3916,7 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
     
     NSDictionary<NSString *, NSNumber *> *lastVersionByShell =
         @{ @"tcsh": @2,
-           @"bash": @4,
+           @"bash": @5,
            @"zsh": @5,
            @"fish": @5 };
     NSInteger latestKnownVersion = [lastVersionByShell[shell ?: @""] integerValue];
