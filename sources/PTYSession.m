@@ -17,6 +17,7 @@
 #import "iTermColorPresets.h"
 #import "iTermCommandHistoryCommandUseMO+Addtions.h"
 #import "iTermController.h"
+#import "iTermCopyModeState.h"
 #import "iTermGrowlDelegate.h"
 #import "iTermHotKeyController.h"
 #import "iTermInitialDirectory.h"
@@ -98,6 +99,8 @@ static NSString *const PTYSessionDidRepairSavedArrangement = @"PTYSessionDidRepa
 // The format for a user defaults key that recalls if the user has already been pestered about
 // outdated key mappings for a give profile. The %@ is replaced with the profile's GUID.
 static NSString *const kAskAboutOutdatedKeyMappingKeyFormat = @"AskAboutOutdatedKeyMappingForGuid%@";
+
+NSString *const PTYSessionCreatedNotification = @"PTYSessionCreatedNotification";
 
 NSString *const kPTYSessionTmuxFontDidChange = @"kPTYSessionTmuxFontDidChange";
 NSString *const kPTYSessionCapturedOutputDidChange = @"kPTYSessionCapturedOutputDidChange";
@@ -457,6 +460,7 @@ static const NSUInteger kMaxHosts = 100;
     NSMutableDictionary<id, ITMNotificationRequest *> *_updateSubscriptions;
     NSMutableDictionary<id, ITMNotificationRequest *> *_promptSubscriptions;
     NSMutableDictionary<id, ITMNotificationRequest *> *_locationChangeSubscriptions;
+    NSMutableDictionary<id, ITMNotificationRequest *> *_customEscapeSequenceNotifications;
 
     // Used by auto-hide. We can't auto hide the tmux gateway session until at least one window has been opened.
     BOOL _hideAfterTmuxWindowOpens;
@@ -466,6 +470,8 @@ static const NSUInteger kMaxHosts = 100;
     double _slowFrameRate;
 
     uint32_t _autoLogId;
+
+    iTermCopyModeState *_copyModeState;
 }
 
 + (void)registerSessionInArrangement:(NSDictionary *)arrangement {
@@ -486,7 +492,7 @@ static const NSUInteger kMaxHosts = 100;
     [gRegisteredSessionContents removeAllObjects];
 }
 
-- (instancetype)init {
+- (instancetype)initSynthetic:(BOOL)synthetic {
     self = [super init];
     if (self) {
         _autoLogId = arc4random();
@@ -541,6 +547,7 @@ static const NSUInteger kMaxHosts = 100;
         _updateSubscriptions = [[NSMutableDictionary alloc] init];
         _promptSubscriptions = [[NSMutableDictionary alloc] init];
         _locationChangeSubscriptions = [[NSMutableDictionary alloc] init];
+        _customEscapeSequenceNotifications = [[NSMutableDictionary alloc] init];
 
         [[NSNotificationCenter defaultCenter] addObserver:self
                                                  selector:@selector(coprocessChanged)
@@ -591,6 +598,10 @@ static const NSUInteger kMaxHosts = 100;
                                                      name:NSWindowDidEndLiveResizeNotification
                                                    object:nil];
         [self updateVariables];
+
+        if (!synthetic) {
+            [[NSNotificationCenter defaultCenter] postNotificationName:PTYSessionCreatedNotification object:self];
+        }
     }
     return self;
 }
@@ -669,7 +680,10 @@ ITERM_WEAKLY_REFERENCEABLE
     [_updateSubscriptions release];
     [_promptSubscriptions release];
     [_locationChangeSubscriptions release];
+    [_customEscapeSequenceNotifications release];
 
+    [_copyModeState release];
+    
     [[NSNotificationCenter defaultCenter] removeObserver:self];
 
     if (_dvrDecoder) {
@@ -754,6 +768,51 @@ ITERM_WEAKLY_REFERENCEABLE
         screen_char_t *theLine = [source.screen getLineAtIndex:row];
         [_screen appendScreenChars:theLine length:width continuation:theLine[width]];
     }
+}
+
+- (void)educateAboutCopyMode {
+    [iTermMenuOpener revealMenuWithPath:@[ @"Help", @"Copy Mode Shortcuts" ]
+                                message:@"You have entered Copy Mode.\nWhile in copy mode, you use keyboard\nshortcuts to modify the selection.\nYou can always find the list of\nshortcuts in the Help menu."];
+
+}
+
+- (void)setCopyMode:(BOOL)copyMode {
+    if (copyMode) {
+        NSString *const key = @"NoSyncHaveUsedCopyMode";
+        if ([[NSUserDefaults standardUserDefaults] objectForKey:key] == nil) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                [self educateAboutCopyMode];
+            });
+        }
+        [[NSUserDefaults standardUserDefaults] setBool:YES forKey:key];
+    }
+
+    _copyMode = copyMode;
+    [_copyModeState autorelease];
+    if (copyMode) {
+        _copyModeState = [[iTermCopyModeState alloc] init];
+        _copyModeState.coord = VT100GridCoordMake(_screen.cursorX - 1,
+                                                  _screen.cursorY - 1 + _screen.numberOfScrollbackLines);
+        _copyModeState.numberOfLines = _screen.numberOfLines;
+        _copyModeState.textView = _textview;
+
+        if (_textview.selection.allSubSelections.count == 1) {
+            [_textview.window makeFirstResponder:_textview];
+            iTermSubSelection *sub = _textview.selection.allSubSelections.firstObject;
+            _copyModeState.start = sub.range.coordRange.start;
+            _copyModeState.coord = sub.range.coordRange.end;
+            _copyModeState.selecting = YES;
+            _copyModeState.start = sub.range.coordRange.start;
+            _copyModeState.coord = sub.range.coordRange.end;
+        }
+        [_textview scrollLineNumberRangeIntoView:VT100GridRangeMake(_copyModeState.coord.y, 1)];
+    } else {
+        if (_textview.selection.live) {
+            [_textview.selection endLiveSelection];
+        }
+        _copyModeState = nil;
+    }
+    [_textview setNeedsDisplay:YES];  // TODO optimize
 }
 
 - (void)updateVariables {
@@ -891,7 +950,7 @@ ITERM_WEAKLY_REFERENCEABLE
                           withDelegate:(id<PTYSessionDelegate>)delegate
                          forObjectType:(iTermObjectType)objectType {
     DLog(@"Restoring session from arrangement");
-    PTYSession* aSession = [[[PTYSession alloc] init] autorelease];
+    PTYSession* aSession = [[[PTYSession alloc] initSynthetic:NO] autorelease];
     aSession.view = sessionView;
 
     [[sessionView findViewController] setDelegate:aSession];
@@ -1935,6 +1994,162 @@ ITERM_WEAKLY_REFERENCEABLE
     [self writeTaskImpl:string encoding:encoding forceEncoding:forceEncoding canBroadcast:NO];
 }
 
+- (void)handleKeyPressInCopyMode:(NSEvent *)event {
+    [self.textview setNeedsDisplayOnLine:_copyModeState.coord.y];
+    BOOL wasSelecting = _copyModeState.selecting;
+    NSString *string = event.charactersIgnoringModifiers;
+    unichar code = [string length] > 0 ? [string characterAtIndex:0] : 0;
+    NSUInteger mask = (NSAlternateKeyMask | NSControlKeyMask | NSCommandKeyMask);
+    BOOL moved = NO;
+    if ((event.modifierFlags & mask) == NSControlKeyMask) {
+        switch (code) {
+            case 2:  // ^B
+                moved = [_copyModeState pageUp];
+                break;
+            case 6: // ^F
+                moved = [_copyModeState pageDown];
+                break;
+            case ' ':
+                _copyModeState.selecting = !_copyModeState.selecting;
+                _copyModeState.mode = kiTermSelectionModeCharacter;
+                break;
+            case 'c':
+                self.copyMode = NO;
+                break;
+            case 'g':
+                self.copyMode = NO;
+                break;
+            case 'k':
+                [_textview copySelectionAccordingToUserPreferences];
+                self.copyMode = NO;
+                break;
+            case 'v':
+                _copyModeState.selecting = !_copyModeState.selecting;
+                _copyModeState.mode = kiTermSelectionModeBox;
+                break;
+        }
+    } else if ((event.modifierFlags & mask) == NSAlternateKeyMask) {
+        switch (code) {
+            case 'b':
+            case NSLeftArrowFunctionKey:
+                moved = [_copyModeState moveBackwardWord];
+                break;
+
+            case 'f':
+            case NSRightArrowFunctionKey:
+                moved = [_copyModeState moveForwardWord];
+                break;
+            case 'm':
+                moved = [_copyModeState moveToStartOfIndentation];
+                break;
+        }
+    } else if ((event.modifierFlags & mask) == 0) {
+        switch (code) {
+            case NSPageUpFunctionKey:
+                moved = [_copyModeState pageUp];
+                break;
+            case NSPageDownFunctionKey:
+                moved = [_copyModeState pageDown];
+                break;
+            case '\t':
+                if (event.modifierFlags & NSShiftKeyMask) {
+                    moved = [_copyModeState moveBackwardWord];
+                } else {
+                    moved = [_copyModeState moveForwardWord];
+                }
+                break;
+            case '\n':
+            case '\r':
+                moved = [_copyModeState moveToStartOfNextLine];
+                break;
+            case 27:
+            case 'q':
+                self.copyMode = NO;
+                _copyModeState.selecting = NO;
+                moved = YES;
+                break;
+            case ' ':
+            case 'v':
+                _copyModeState.selecting = !_copyModeState.selecting;
+                _copyModeState.mode = kiTermSelectionModeCharacter;
+                break;
+            case 'b':
+                moved = [_copyModeState moveBackwardWord];
+                break;
+            case '0':
+                moved = [_copyModeState moveToStartOfLine];
+                break;
+            case 'H':
+                moved = [_copyModeState moveToTopOfVisibleArea];
+                break;
+            case 'G':
+                moved = [_copyModeState moveToEnd];
+                break;
+            case 'L':
+                moved = [_copyModeState moveToBottomOfVisibleArea];
+                break;
+            case 'M':
+                moved = [_copyModeState moveToMiddleOfVisibleArea];
+                break;
+            case 'V':
+                _copyModeState.selecting = !_copyModeState.selecting;
+                _copyModeState.mode = kiTermSelectionModeLine;
+                break;
+            case 'g':
+                moved = [_copyModeState moveToStart];
+                break;
+            case 'h':
+            case NSLeftArrowFunctionKey:
+                moved = [_copyModeState moveLeft];
+                break;
+            case 'j':
+            case NSDownArrowFunctionKey:
+                moved = [_copyModeState moveDown];
+                break;
+            case 'k':
+            case NSUpArrowFunctionKey:
+                moved = [_copyModeState moveUp];
+                break;
+            case 'l':
+            case NSRightArrowFunctionKey:
+                moved = [_copyModeState moveRight];
+                break;
+            case 'o':
+                [_copyModeState swap];
+                moved = YES;
+                break;
+            case 'w':
+                moved = [_copyModeState moveForwardWord];
+                break;
+            case 'y':
+                [_textview copySelectionAccordingToUserPreferences];
+                self.copyMode = NO;
+                break;
+            case '/':
+                [self showFindPanel];
+                break;
+            case '[':
+                moved = [_copyModeState previousMark];
+                break;
+            case ']':
+                moved = [_copyModeState nextMark];
+                break;
+            case '^':
+                moved = [_copyModeState moveToStartOfIndentation];
+                break;
+            case '$':
+                moved = [_copyModeState moveToEndOfLine];
+                break;
+        }
+    }
+    if (moved || (_copyModeState.selecting != wasSelecting)) {
+        if (self.copyMode) {
+            [_textview scrollLineNumberRangeIntoView:VT100GridRangeMake(_copyModeState.coord.y, 1)];
+        }
+        [self.textview setNeedsDisplayOnLine:_copyModeState.coord.y];
+    }
+}
+
 - (void)handleKeypressInTmuxGateway:(unichar)unicode
 {
     if (unicode == 27) {
@@ -2146,8 +2361,9 @@ ITERM_WEAKLY_REFERENCEABLE
     DLog(@"Session %@ begins executing tokens", self);
     int n = CVectorCount(vector);
 
-    if (_shell.paused) {
-        // Session was closed. The close may be undone, so queue up tokens.
+    if (_shell.paused || _copyMode) {
+        // Session was closed or is not accepting new tokens because it's in copy mode. These can
+        // be handled later (unclose or exit copy mode), so queu them up.
         for (int i = 0; i < n; i++) {
             [_queuedTokens addObject:CVectorGetObject(vector, i)];
         }
@@ -4161,6 +4377,7 @@ ITERM_WEAKLY_REFERENCEABLE
     [_keystrokeSubscriptions removeObjectForKey:notification.object];
     [_updateSubscriptions removeObjectForKey:notification.object];
     [_locationChangeSubscriptions removeObjectForKey:notification.object];
+    [_customEscapeSequenceNotifications removeObjectForKey:notification.object];
 }
 
 - (void)applicationWillTerminate:(NSNotification *)notification {
@@ -5196,6 +5413,10 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (BOOL)textViewShouldAcceptKeyDownEvent:(NSEvent *)event {
+    if (_copyMode) {
+        [self handleKeyPressInCopyMode:event];
+        return NO;
+    }
     if (event.keyCode == kVK_Return && _fakePromptDetectedAbsLine >= 0) {
         [self didInferEndOfCommand];
     }
@@ -6577,6 +6798,26 @@ ITERM_WEAKLY_REFERENCEABLE
     [_view setHoverURL:url];
 }
 
+- (BOOL)textViewCopyMode {
+    return _copyMode;
+}
+
+- (BOOL)textViewCopyModeSelecting {
+    return _copyModeState.selecting;
+}
+
+- (VT100GridCoord)textViewCopyModeCursorCoord {
+    return _copyModeState.coord;
+}
+
+- (void)textViewDidSelectRangeForFindOnPage:(VT100GridCoordRange)range {
+    if (_copyMode) {
+        _copyModeState.coord = range.start;
+        _copyModeState.start = range.end;
+        [self.textview setNeedsDisplay:YES];
+    }
+}
+
 - (void)bury {
     [_textview setDataSource:nil];
     [_textview setDelegate:nil];
@@ -7858,6 +8099,18 @@ ITERM_WEAKLY_REFERENCEABLE
     }];
 }
 
+- (void)screenDidReceiveCustomEscapeSequenceWithParameters:(NSDictionary<NSString *, NSString *> *)parameters
+                                                   payload:(NSString *)payload {
+    ITMNotification *notification = [[[ITMNotification alloc] init] autorelease];
+    notification.customEscapeSequenceNotification = [[[ITMCustomEscapeSequenceNotification alloc] init] autorelease];
+    notification.customEscapeSequenceNotification.session = self.guid;
+    notification.customEscapeSequenceNotification.senderIdentity = parameters[@"id"];
+    notification.customEscapeSequenceNotification.payload = payload;
+    [_customEscapeSequenceNotifications enumerateKeysAndObjectsUsingBlock:^(id  _Nonnull key, ITMNotificationRequest * _Nonnull obj, BOOL * _Nonnull stop) {
+        [[[iTermApplication sharedApplication] delegate] postAPINotification:notification toConnection:key];
+    }];
+}
+
 - (BOOL)screenShouldSendReport {
     return (_shell != nil) && (![self isTmuxClient]);
 }
@@ -8905,6 +9158,14 @@ ITERM_WEAKLY_REFERENCEABLE
             break;
         case ITMNotificationType_NotifyOnLocationChange:
             subscriptions = _locationChangeSubscriptions;
+            break;
+        case ITMNotificationType_NotifyOnCustomEscapeSequence:
+            subscriptions = _customEscapeSequenceNotifications;
+            break;
+
+        case ITMNotificationType_NotifyOnNewSession:
+            // We won't get called for this
+            assert(NO);
             break;
     }
     if (!subscriptions) {
