@@ -191,6 +191,9 @@ typedef enum {
 // Remove a session from the tab, even if it's the only one.
 - (void)sessionRemoveSession:(PTYSession *)session;
 
+// Returns the size of the tab in rows x cols. Initial tmux client size.
+- (VT100GridSize)sessionTmuxSizeWithProfile:(Profile *)profile;
+
 @end
 
 @class SessionView;
@@ -706,6 +709,8 @@ typedef enum {
 
 // Undoes burying of a session.
 - (void)disinter;
+
+- (void)jumpToLocationWhereCurrentStatusChanged;
 
 #pragma mark - API
 

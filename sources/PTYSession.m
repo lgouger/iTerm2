@@ -472,6 +472,9 @@ static const NSUInteger kMaxHosts = 100;
     uint32_t _autoLogId;
 
     iTermCopyModeState *_copyModeState;
+
+    // Absolute line number where touchbar status changed.
+    long long _statusChangedAbsLine;
 }
 
 + (void)registerSessionInArrangement:(NSDictionary *)arrangement {
@@ -490,6 +493,10 @@ static const NSUInteger kMaxHosts = 100;
 + (void)removeAllRegisteredSessions {
     DLog(@"Remove all registered sessions");
     [gRegisteredSessionContents removeAllObjects];
+}
+
+- (instancetype)initWithCoder:(NSCoder *)coder {
+    return [self initSynthetic:NO];
 }
 
 - (instancetype)initSynthetic:(BOOL)synthetic {
@@ -548,6 +555,8 @@ static const NSUInteger kMaxHosts = 100;
         _promptSubscriptions = [[NSMutableDictionary alloc] init];
         _locationChangeSubscriptions = [[NSMutableDictionary alloc] init];
         _customEscapeSequenceNotifications = [[NSMutableDictionary alloc] init];
+
+        _statusChangedAbsLine = -1;
 
         [[NSNotificationCenter defaultCenter] addObserver:self
                                                  selector:@selector(coprocessChanged)
@@ -1895,6 +1904,14 @@ ITERM_WEAKLY_REFERENCEABLE
     [_textview setDelegate:nil];
     [_textview removeFromSuperview];
     _textview = nil;
+}
+
+- (void)jumpToLocationWhereCurrentStatusChanged {
+    if (_statusChangedAbsLine >= _screen.totalScrollbackOverflow) {
+        int line = _statusChangedAbsLine - _screen.totalScrollbackOverflow;
+        [_textview scrollLineNumberRangeIntoView:VT100GridRangeMake(line, 1)];
+        [_textview highlightMarkOnLine:line hasErrorCode:NO];
+    }
 }
 
 - (void)disinter {
@@ -4431,18 +4448,20 @@ ITERM_WEAKLY_REFERENCEABLE
     }
 }
 
-- (void)synchronizeTmuxFonts:(NSNotification *)notification
-{
+- (void)synchronizeTmuxFonts:(NSNotification *)notification {
     if (!_exited && [self isTmuxClient]) {
-        NSArray *fonts = [notification object];
-        NSFont *font = [fonts objectAtIndex:0];
-        NSFont *nonAsciiFont = [fonts objectAtIndex:1];
-        NSNumber *hSpacing = [fonts objectAtIndex:2];
-        NSNumber *vSpacing = [fonts objectAtIndex:3];
-        [_textview setFont:font
-              nonAsciiFont:nonAsciiFont
-            horizontalSpacing:[hSpacing doubleValue]
-            verticalSpacing:[vSpacing doubleValue]];
+        NSArray *args = [notification object];
+        NSFont *font = args[0];
+        NSFont *nonAsciiFont = args[1];
+        NSNumber *hSpacing = args[2];
+        NSNumber *vSpacing = args[3];
+        TmuxController *controller = args[4];
+        if (controller == _tmuxController) {
+            [_textview setFont:font
+                  nonAsciiFont:nonAsciiFont
+             horizontalSpacing:[hSpacing doubleValue]
+               verticalSpacing:[vSpacing doubleValue]];
+        }
     }
 }
 
@@ -4455,7 +4474,8 @@ ITERM_WEAKLY_REFERENCEABLE
                                                             object:@[ _textview.font,
                                                                       _textview.nonAsciiFontEvenIfNotUsed,
                                                                       @(_textview.horizontalSpacing),
-                                                                      @(_textview.verticalSpacing) ]];
+                                                                      @(_textview.verticalSpacing),
+                                                                      _tmuxController ?: [NSNull null] ]];
         fontChangeNotificationInProgress = NO;
         [_delegate setTmuxFont:_textview.font
                   nonAsciiFont:_textview.nonAsciiFontEvenIfNotUsed
@@ -4913,14 +4933,19 @@ ITERM_WEAKLY_REFERENCEABLE
     }
     self.tmuxMode = TMUX_GATEWAY;
     _tmuxGateway = [[TmuxGateway alloc] initWithDelegate:self];
+    ProfileModel *model;
+    if (_isDivorced) {
+        model = [ProfileModel sessionsInstance];
+    } else {
+        model = [ProfileModel sharedInstance];
+    }
     _tmuxController = [[TmuxController alloc] initWithGateway:_tmuxGateway
-                                                   clientName:[self preferredTmuxClientName]];
+                                                   clientName:[self preferredTmuxClientName]
+                                                      profile:[iTermAdvancedSettingsModel tmuxUsesDedicatedProfile] ? [[ProfileModel sharedInstance] tmuxProfile] : self.profile
+                                                 profileModel:model];
     _tmuxController.ambiguousIsDoubleWidth = _treatAmbiguousWidthAsDoubleWidth;
     _tmuxController.unicodeVersion = _unicodeVersion;
-    NSSize theSize;
-    Profile *tmuxBookmark = [[ProfileModel sharedInstance] tmuxProfile];
-    theSize.width = MAX(1, [[tmuxBookmark objectForKey:KEY_COLUMNS] intValue]);
-    theSize.height = MAX(1, [[tmuxBookmark objectForKey:KEY_ROWS] intValue]);
+
     // We intentionally don't send anything to tmux yet. We wait to get a
     // begin-end pair from it to make sure everything is cool (we have a legit
     // session) and then we start going.
@@ -5345,20 +5370,20 @@ ITERM_WEAKLY_REFERENCEABLE
     [_tmuxController session:sessionId renamedTo:newName];
 }
 
-- (NSSize)tmuxBookmarkSize
-{
-    NSDictionary *dict = [[ProfileModel sharedInstance] tmuxProfile];
-    return NSMakeSize([[dict objectForKey:KEY_COLUMNS] intValue],
-                      [[dict objectForKey:KEY_ROWS] intValue]);
+- (VT100GridSize)tmuxClientSize {
+    return [_delegate sessionTmuxSizeWithProfile:_tmuxController.profile];
 }
 
-- (NSInteger)tmuxNumHistoryLinesInBookmark {
-    NSDictionary *dict = [[ProfileModel sharedInstance] tmuxProfile];
-    if ([[dict objectForKey:KEY_UNLIMITED_SCROLLBACK] boolValue]) {
+- (NSInteger)tmuxNumberOfLinesOfScrollbackHistory {
+    Profile *profile = _tmuxController.profile;
+    if ([iTermAdvancedSettingsModel tmuxUsesDedicatedProfile]) {
+        profile = [[ProfileModel sharedInstance] tmuxProfile];
+    }
+    if ([profile[KEY_UNLIMITED_SCROLLBACK] boolValue]) {
         // 10M is close enough to infinity to be indistinguishable.
         return 10 * 1000 * 1000;
     } else {
-        return [[dict objectForKey:KEY_SCROLLBACK_LINES] integerValue];
+        return [profile[KEY_SCROLLBACK_LINES] integerValue];
     }
 }
 
@@ -8566,7 +8591,15 @@ ITERM_WEAKLY_REFERENCEABLE
     if (!_keyLabels) {
         _keyLabels = [[NSMutableDictionary alloc] init];
     }
-    _keyLabels[keyName] = [[label copy] autorelease];
+    const BOOL changed = ![_keyLabels[keyName] isEqualToString:label];
+    if (label.length == 0) {
+        [_keyLabels removeObjectForKey:keyName];
+    } else {
+        _keyLabels[keyName] = [[label copy] autorelease];
+    }
+    if ([keyName isEqualToString:@"status"] && changed) {
+        _statusChangedAbsLine = _screen.cursorY - 1 + _screen.numberOfScrollbackLines + _screen.totalScrollbackOverflow;
+    }
     [_delegate sessionKeyLabelsDidChange:self];
 }
 
