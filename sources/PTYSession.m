@@ -101,6 +101,8 @@ static NSString *const PTYSessionDidRepairSavedArrangement = @"PTYSessionDidRepa
 static NSString *const kAskAboutOutdatedKeyMappingKeyFormat = @"AskAboutOutdatedKeyMappingForGuid%@";
 
 NSString *const PTYSessionCreatedNotification = @"PTYSessionCreatedNotification";
+NSString *const PTYSessionTerminatedNotification = @"PTYSessionTerminatedNotification";
+NSString *const PTYSessionRevivedNotification = @"PTYSessionRevivedNotification";
 
 NSString *const kPTYSessionTmuxFontDidChange = @"kPTYSessionTmuxFontDidChange";
 NSString *const kPTYSessionCapturedOutputDidChange = @"kPTYSessionCapturedOutputDidChange";
@@ -1870,6 +1872,7 @@ ITERM_WEAKLY_REFERENCEABLE
     [_pasteHelper abort];
 
     [[_delegate realParentWindow] sessionDidTerminate:self];
+    [[NSNotificationCenter defaultCenter] postNotificationName:PTYSessionTerminatedNotification object:self];
 
     _delegate = nil;
 }
@@ -1945,6 +1948,7 @@ ITERM_WEAKLY_REFERENCEABLE
         [[iTermSessionHotkeyController sharedInstance] setShortcut:shortcut forSession:self];
 
         [_view autorelease];  // This balances a retain in -terminate prior to calling -makeTerminationUndoable
+        [[NSNotificationCenter defaultCenter] postNotificationName:PTYSessionRevivedNotification object:self];
         return YES;
     } else {
         return NO;
@@ -4144,6 +4148,7 @@ ITERM_WEAKLY_REFERENCEABLE
     }
 
     [self checkPartialLineTriggers];
+    _passwordInput = _shell.passwordInput;
     _timerRunning = NO;
 }
 
@@ -6835,6 +6840,10 @@ ITERM_WEAKLY_REFERENCEABLE
     return _copyModeState.coord;
 }
 
+- (BOOL)textViewPasswordInput {
+    return _passwordInput;
+}
+
 - (void)textViewDidSelectRangeForFindOnPage:(VT100GridCoordRange)range {
     if (_copyMode) {
         _copyModeState.coord = range.start;
@@ -9197,6 +9206,7 @@ ITERM_WEAKLY_REFERENCEABLE
             break;
 
         case ITMNotificationType_NotifyOnNewSession:
+        case ITMNotificationType_NotifyOnTerminateSession:
             // We won't get called for this
             assert(NO);
             break;

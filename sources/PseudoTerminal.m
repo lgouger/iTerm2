@@ -86,7 +86,7 @@
 #import "VT100Screen.h"
 #import "VT100Terminal.h"
 #include "iTermFileDescriptorClient.h"
-
+#import <QuartzCore/QuartzCore.h>
 #include <unistd.h>
 
 @class QLPreviewPanel;
@@ -94,6 +94,7 @@
 NSString *const kCurrentSessionDidChange = @"kCurrentSessionDidChange";
 NSString *const kTerminalWindowControllerWasCreatedNotification = @"kTerminalWindowControllerWasCreatedNotification";
 NSString *const iTermDidDecodeWindowRestorableStateNotification = @"iTermDidDecodeWindowRestorableStateNotification";
+NSString *const iTermTabDidChangePositionInWindowNotification = @"iTermTabDidChangePositionInWindowNotification";
 
 static NSString *const kWindowNameFormat = @"iTerm Window %d";
 
@@ -344,6 +345,7 @@ static NSRect iTermRectCenteredVerticallyWithinRect(NSRect frameToCenter, NSRect
     // life because it remains possible to have no auto-layout as long as you don't use title bar
     // accessories. To see the whole mess, check out the clusterfuck[123] branches.
     iTermWindowShortcutLabelTitlebarAccessoryViewController *_shortcutAccessoryViewController;
+
 #endif
 
     // Is there a pending delayed-perform of enterFullScreen:? Used to figure
@@ -361,6 +363,8 @@ static NSRect iTermRectCenteredVerticallyWithinRect(NSRect frameToCenter, NSRect
 
     // Used to prevent infinite re-entrancy in windowDidChangeScreen:.
     BOOL _inWindowDidChangeScreen;
+
+    iTermPasswordManagerWindowController *_passwordManagerWindowController;
 }
 
 + (void)registerSessionsInArrangement:(NSDictionary *)arrangement {
@@ -815,6 +819,8 @@ ITERM_WEAKLY_REFERENCEABLE
     [_desiredTitle release];
     [_tabsTouchBarItem release];
     [_autocompleteCandidateListItem release];
+    [_passwordManagerWindowController release];
+
     [super dealloc];
 }
 
@@ -4707,6 +4713,7 @@ ITERM_WEAKLY_REFERENCEABLE
         }
     }
     [controller setPartialWindowIdOrder:windowIds];
+    [[NSNotificationCenter defaultCenter] postNotificationName:iTermTabDidChangePositionInWindowNotification object:nil];
 }
 
 - (PTYTabView *)tabView
@@ -4743,16 +4750,33 @@ ITERM_WEAKLY_REFERENCEABLE
     DLog(@"openPasswordManagerToAccountName:%@ inSession:%@", name, session);
     [session reveal];
     DLog(@"Show the password manager as a sheet");
-    iTermPasswordManagerWindowController *passwordManagerWindowController =
-        [[iTermPasswordManagerWindowController alloc] init];
-    passwordManagerWindowController.delegate = self;
+     _passwordManagerWindowController.delegate = nil;
+     [_passwordManagerWindowController autorelease];
+     _passwordManagerWindowController = [[iTermPasswordManagerWindowController alloc] init];
+    _passwordManagerWindowController.delegate = self;
+     BOOL noAnimations = [iTermAdvancedSettingsModel disablePasswordManagerAnimations];
+     if (noAnimations) {
+        [CATransaction begin];
+        [CATransaction setValue:@YES
+                         forKey:kCATransactionDisableActions];
+     }
 
-    [self.window beginSheet:[passwordManagerWindowController window] completionHandler:^(NSModalResponse returnCode) {
-        [[passwordManagerWindowController window] close];
-        [[passwordManagerWindowController window] release];
+    [self.window beginSheet:[_passwordManagerWindowController window] completionHandler:^(NSModalResponse returnCode) {
+        if (noAnimations) {
+            [CATransaction begin];
+            [CATransaction setValue:@YES
+                             forKey:kCATransactionDisableActions];
+        }
+        [[_passwordManagerWindowController window] close];
+        if (noAnimations) {
+            [CATransaction commit];
+        }
     }];
+     if (noAnimations) {
+         [CATransaction commit];
+     }
 
-    [passwordManagerWindowController selectAccountName:name];
+    [_passwordManagerWindowController selectAccountName:name];
 }
 
 - (void)genericCloseSheet:(NSWindow *)sheet
@@ -5318,18 +5342,23 @@ ITERM_WEAKLY_REFERENCEABLE
                      uniqueId:(int)tabUniqueId
                      sessions:(NSArray *)sessions
                  predecessors:(NSArray *)predecessors {
+    DLog(@"construct session map with sessions: %@\nArrangement:\n%@", sessions, arrangement);
     NSDictionary<NSString *, PTYSession *> *sessionMap = [PTYTab sessionMapWithArrangement:arrangement
                                                                                   sessions:sessions];
     if (!sessionMap) {
+        DLog(@"Failed to create a session map");
         // Can't do it. Just add each session as its own tab.
         for (PTYSession *session in sessions) {
+            DLog(@"Revive %@", session);
             if ([session revive]) {
+                DLog(@"Succeeded. Add revived session as a tab");
                 [self addRevivedSession:session];
             }
         }
         return;
     }
 
+    DLog(@"Creating a tab to receive the arrangement");
     PTYTab *tab = [PTYTab tabWithArrangement:arrangement
                                   inTerminal:self
                              hasFlexibleView:NO
@@ -5339,6 +5368,7 @@ ITERM_WEAKLY_REFERENCEABLE
     tab.uniqueId = tabUniqueId;
     for (NSString *theKey in sessionMap) {
         PTYSession *session = sessionMap[theKey];
+        DLog(@"Revive %@", session);
         assert([session revive]);  // TODO: This isn't guarantted
     }
 
@@ -5422,8 +5452,11 @@ ITERM_WEAKLY_REFERENCEABLE
     }
     [self fitTabsToWindow];
 
-    if (targetSession == [[self currentTab] activeSession] && ![iTermPreferences boolForKey:kPreferenceKeyFocusFollowsMouse]) {
-        [[self currentTab] setActiveSession:newSession];
+    if (targetSession == [[self currentTab] activeSession]) {
+        if (![iTermPreferences boolForKey:kPreferenceKeyFocusFollowsMouse] ||
+            [iTermAdvancedSettingsModel focusNewSplitPaneWithFocusFollowsMouse]) {
+            [[self currentTab] setActiveSession:newSession];
+        }
     }
     [[self currentTab] recheckBlur];
     [[self currentTab] numberOfSessionsDidChange];
@@ -5454,6 +5487,13 @@ ITERM_WEAKLY_REFERENCEABLE
 - (PTYSession *)splitVertically:(BOOL)isVertical
                    withBookmark:(Profile*)theBookmark
                   targetSession:(PTYSession*)targetSession {
+    return [self splitVertically:isVertical before:NO profile:theBookmark targetSession:targetSession];
+}
+
+- (PTYSession *)splitVertically:(BOOL)isVertical
+                         before:(BOOL)before
+                        profile:(Profile *)theBookmark
+                  targetSession:(PTYSession *)targetSession {
     if ([targetSession isTmuxClient]) {
         [self willSplitTmuxPane];
         [[targetSession tmuxController] selectPane:targetSession.tmuxPane];
@@ -5476,7 +5516,7 @@ ITERM_WEAKLY_REFERENCEABLE
 
     PTYSession* newSession = [[self newSessionWithBookmark:theBookmark] autorelease];
     [self splitVertically:isVertical
-                   before:NO
+                   before:before
             addingSession:newSession
             targetSession:targetSession
              performSetup:YES];
@@ -7291,8 +7331,7 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 // Allocate a new session and assign it a bookmark. Returns a retained object.
-- (PTYSession*)newSessionWithBookmark:(Profile*)bookmark
-{
+- (PTYSession*)newSessionWithBookmark:(Profile*)bookmark {
     assert(bookmark);
     PTYSession *aSession;
 

@@ -28,6 +28,8 @@ extern NSString *const kPTYSessionTmuxFontDidChange;
 extern NSString *const kPTYSessionCapturedOutputDidChange;
 
 extern NSString *const PTYSessionCreatedNotification;
+extern NSString *const PTYSessionTerminatedNotification;
+extern NSString *const PTYSessionRevivedNotification;
 
 @class CapturedOutput;
 @class FakeWindow;
@@ -442,6 +444,9 @@ typedef enum {
 @property(nonatomic, readonly) NSDictionary<NSString *, NSString *> *keyLabels;
 @property(nonatomic, readonly) iTermRestorableSession *restorableSession;
 @property(nonatomic) BOOL copyMode;
+
+// Is the user currently typing at a password prompt?
+@property(nonatomic, readonly) BOOL passwordInput;
 
 #pragma mark - methods
 

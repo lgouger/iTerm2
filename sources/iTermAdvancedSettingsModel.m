@@ -118,6 +118,7 @@ DEFINE_STRING(findUrlsRegex,
               @"((:[0-9]+)?)(/[a-zA-Z0-9;:/\\.\\-_+%~?&amp;@=#\\(\\)]*)?",
               @"Terminal: Regular expression for “Find URLs” command.");
 DEFINE_FLOAT(echoProbeDuration, 0.5, @"Terminal: Amount of time to wait while testing if echo is on (seconds).\nThis is used by the password manager to ensure you're at a password prompt.");
+DEFINE_BOOL(disablePasswordManagerAnimations, NO, @"Terminal: Disable animations for showing/hiding password manager.");
 DEFINE_BOOL(optionIsMetaForSpecialChars, YES, @"Terminal: When you press an arrow key or other function key that transmits the modifiers, should Option be translated to Meta?\nIf this is set to No then it will be translated to Alt.");
 DEFINE_BOOL(noSyncSilenceAnnoyingBellAutomatically, NO, @"Terminal: Automatically silence bell when it rings too much.");
 DEFINE_BOOL(restoreWindowContents, YES, @"Terminal: Restore window contents at startup.\nThis requires “System Prefs>General>Close windows when quitting an app” to be off.");
@@ -156,6 +157,7 @@ DEFINE_INT(terminalMargin, 5, @"General: Width of left and right margins in term
 DEFINE_INT(terminalVMargin, 2, @"General: Height of top and bottom margins in terminal panes\nHow much space to leave between the top and bottom edges of the terminal.\nYou must restart iTerm2 after modifying this property. Saved window arrangements should be re-created.");
 DEFINE_BOOL(zippyTextDrawing, YES, @"General: Use zippy text drawing algorithm?\nThis draws non-ASCII text more quickly but with lower fidelity. This setting is ignored if ligatures are enabled in Prefs > Profiles > Text.");
 DEFINE_BOOL(useVirtualKeyCodesForDetectingDigits, YES, @"General: On keyboards that require a modifier to press a digit, do not require that modifier for switching between windows, tabs, and panes by number.\nFor example, AZERTY requires you to hold down Shift to enter a number. To switch tabs with Cmd+Number on an AZERTY keyboard, you must enable this setting. Then, for example, Cmd-& switches to tab 1. When this setting is enabled, some user-defined shortcuts may become unavailable because the tab/window/pane switching behavior takes precedence.");
+DEFINE_STRING(viewManPageCommand, @"man %@", @"General: Command to view man pages.\nUsed when you press the man page button on the touch bar. %@ is replaced with the command.");
 
 #pragma mark - Semantic History
 DEFINE_BOOL(ignoreHardNewlinesInURLs, NO, @"Semantic History: Ignore hard newlines for the purposes of locating URLs and file names for Semantic History.\nIf a hard newline occurs at the end of a line then cmd-click will not see it all unless this setting is turned on. This is useful for some interactive applications. Turning this on will remove newlines from the \\3 and \\4 substitutions.");
@@ -178,7 +180,7 @@ DEFINE_BOOL(showSessionRestoredBanner, YES, @"Session: When restoring a session 
 DEFINE_STRING(autoLogFormat,
               @"\\(session.creationTimeString).\\(session.name).\\(session.termid).\\(iterm2.pid).\\(session.autoLogId).log",
               @"Session: Format for automatic session log filenames.\nSee the Badges documentation for supported substitutions.");
-
+DEFINE_BOOL(focusNewSplitPaneWithFocusFollowsMouse, YES, @"Session: When focus follows mouse is enabled, should new split panes automatically be focused?");
 
 
 #pragma mark - Window
@@ -275,5 +277,6 @@ DEFINE_BOOL(enableAPIServer, NO, @"Experimental Features: Enable websocket API s
 DEFINE_BOOL(useGCDUpdateTimer, YES, @"Experimental Features: Use GCD-based update timer instead of NSTimer.\nThis should cause more regular screen updates. Restart iTerm2 after changing this setting.");
 DEFINE_BOOL(drawOutlineAroundCursor, NO, @"Experimental Features: Draw outline around underline and vertical bar cursors using background color.");
 DEFINE_BOOL(killSessionsOnLogout, NO, @"Experimental Features: Kill sessions on logout.\nA possible fix for issue 4147.");
+DEFINE_BOOL(detectPasswordInput, NO, @"Experimental Features: Show key at cursor at password prompt?");
 
 @end
