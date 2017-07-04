@@ -189,5 +189,7 @@
 + (BOOL)disablePasswordManagerAnimations;
 + (BOOL)focusNewSplitPaneWithFocusFollowsMouse;
 + (NSString *)viewManPageCommand;
++ (BOOL)preventEscapeSequenceFromClearingHistory;
++ (BOOL)dwcLineCache;
 
 @end

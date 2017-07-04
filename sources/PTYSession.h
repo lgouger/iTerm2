@@ -448,6 +448,8 @@ typedef enum {
 // Is the user currently typing at a password prompt?
 @property(nonatomic, readonly) BOOL passwordInput;
 
+@property(nonatomic) BOOL isSingleUseSession;
+
 #pragma mark - methods
 
 + (NSDictionary *)repairedArrangement:(NSDictionary *)arrangement
@@ -648,7 +650,12 @@ typedef enum {
 - (void)setFocused:(BOOL)focused;
 - (BOOL)wantsContentChangedNotification;
 
-- (void)startTmuxMode;
+// The dcsID identifies the parser associated with this session. Parsers run in
+// a different thread and communication between the main thread and the parser
+// thread use the dcsID to ensure that the current parser is still the one that
+// the main thread is expecting.
+- (void)startTmuxMode:(NSString *)dcsID;
+
 - (void)tmuxDetach;
 // Two sessions are compatible if they may share the same tab. Tmux clients
 // impose this restriction because they must belong to the same controller.
