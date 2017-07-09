@@ -718,13 +718,16 @@ static const int kDragThreshold = 3;
     _secondaryFont.boldItalicVersion = [_secondaryFont computedBoldItalicVersion];
 
     [self updateMarkedTextAttributes];
-    [self setNeedsDisplay:YES];
 
     NSScrollView* scrollview = [self enclosingScrollView];
     [scrollview setLineScroll:[self lineHeight]];
     [scrollview setPageScroll:2 * [self lineHeight]];
     [self updateNoteViewFrames];
     [_delegate textViewFontDidChange];
+
+    // Refresh to avoid drawing before and after resize.
+    [self refresh];
+    [self setNeedsDisplay:YES];
 }
 
 - (void)changeFont:(id)fontManager
@@ -1128,6 +1131,8 @@ static const int kDragThreshold = 3;
     _drawingHelper.copyModeSelecting = _delegate.textViewCopyModeSelecting;
     _drawingHelper.copyModeCursorCoord = _delegate.textViewCopyModeCursorCoord;
     _drawingHelper.passwordInput = _delegate.textViewPasswordInput;
+
+    DLog(@"drawing document visible rect %@", NSStringFromRect(self.enclosingScrollView.documentVisibleRect));
     
     const NSRect *rectArray;
     NSInteger rectCount;
@@ -2838,6 +2843,7 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
 
 
 - (void)quickLookWithEvent:(NSEvent *)event {
+    DLog(@"Quick look with event %@\n%@", event, [NSThread callStackSymbols]);
     NSPoint clickPoint = [self clickPoint:event allowRightMarginOverflow:YES];
     URLAction *urlAction = [self urlActionForClickAtX:clickPoint.x y:clickPoint.y];
     if (!urlAction && [iTermAdvancedSettingsModel performDictionaryLookupOnQuickLook]) {
@@ -3754,7 +3760,8 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
               @(kOpenUrlContextMenuAction): NSStringFromSelector(@selector(contextMenuActionOpenURL:)),
               @(kRunCommandContextMenuAction): NSStringFromSelector(@selector(contextMenuActionRunCommand:)),
               @(kRunCoprocessContextMenuAction): NSStringFromSelector(@selector(contextMenuActionRunCoprocess:)),
-              @(kSendTextContextMenuAction): NSStringFromSelector(@selector(contextMenuActionSendText:)) };
+              @(kSendTextContextMenuAction): NSStringFromSelector(@selector(contextMenuActionSendText:)),
+              @(kRunCommandInWindowContextMenuAction): NSStringFromSelector(@selector(contextMenuActionRunCommandInWindow:)) };
 }
 
 - (SEL)selectorForSmartSelectionAction:(NSDictionary *)action {
@@ -3834,13 +3841,18 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
     }
 }
 
-- (void)contextMenuActionRunCommand:(id)sender
-{
+- (void)contextMenuActionRunCommand:(id)sender {
     NSString *command = [sender representedObject];
-    NSLog(@"Run command: %@", command);
+    ELog(@"Run command: %@", command);
     [NSThread detachNewThreadSelector:@selector(runCommand:)
                              toTarget:[self class]
                            withObject:command];
+}
+
+- (void)contextMenuActionRunCommandInWindow:(id)sender {
+    NSString *command = [sender representedObject];
+    ELog(@"Run command in window: %@", command);
+    [[iTermController sharedInstance] openSingleUseWindowWithCommand:command];
 }
 
 + (void)runCommand:(NSString *)command
@@ -4005,7 +4017,7 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
         }
         case kPTYTextViewSelectionExtensionUnitWord: {
             VT100GridWindowedRange rangeWithWordBeforeStart =
-                [extractor rangeForWordAt:coordBeforeStart maximumLength:kUnlimitedMaximumWordLength];
+                [extractor rangeForWordAt:coordBeforeStart maximumLength:kLongMaximumWordLength];
             rangeWithWordBeforeStart.coordRange.end = existingRange.coordRange.end;
             rangeWithWordBeforeStart.columnWindow = existingRange.columnWindow;
             return rangeWithWordBeforeStart;
@@ -4058,7 +4070,7 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
             BOOL startWasOnNull = [extractor characterAt:startCoord].code == 0;
             VT100GridWindowedRange rangeExcludingWordAtStart = existingRange;
             rangeExcludingWordAtStart.coordRange.start =
-            [extractor rangeForWordAt:startCoord  maximumLength:kUnlimitedMaximumWordLength].coordRange.end;
+            [extractor rangeForWordAt:startCoord  maximumLength:kLongMaximumWordLength].coordRange.end;
             // If the start of range moved from a null to a null, skip to the end of the line or past all the nulls.
             if (startWasOnNull &&
                 [extractor characterAt:rangeExcludingWordAtStart.coordRange.start].code == 0) {
@@ -4103,7 +4115,7 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
         case kPTYTextViewSelectionExtensionUnitWord: {
             VT100GridWindowedRange rangeExcludingWordAtEnd = existingRange;
             rangeExcludingWordAtEnd.coordRange.end =
-            [extractor rangeForWordAt:coordBeforeEnd maximumLength:kUnlimitedMaximumWordLength].coordRange.start;
+            [extractor rangeForWordAt:coordBeforeEnd maximumLength:kLongMaximumWordLength].coordRange.start;
             rangeExcludingWordAtEnd.columnWindow = existingRange.columnWindow;
             return rangeExcludingWordAtEnd;
         }
@@ -4151,9 +4163,9 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
         case kPTYTextViewSelectionExtensionUnitWord: {
             VT100GridWindowedRange rangeWithWordAfterEnd;
             if (endCoord.x > VT100GridRangeMax(existingRange.columnWindow)) {
-                rangeWithWordAfterEnd = [extractor rangeForWordAt:coordAfterEnd maximumLength:kUnlimitedMaximumWordLength];
+                rangeWithWordAfterEnd = [extractor rangeForWordAt:coordAfterEnd maximumLength:kLongMaximumWordLength];
             } else {
-                rangeWithWordAfterEnd = [extractor rangeForWordAt:endCoord maximumLength:kUnlimitedMaximumWordLength];
+                rangeWithWordAfterEnd = [extractor rangeForWordAt:endCoord maximumLength:kLongMaximumWordLength];
             }
             rangeWithWordAfterEnd.coordRange.start = existingRange.coordRange.start;
             rangeWithWordAfterEnd.columnWindow = existingRange.columnWindow;
@@ -5518,9 +5530,13 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
           totalScrollbackOverflow:[_dataSource totalScrollbackOverflow]];
 }
 
-- (void)clearHighlights {
+- (void)clearHighlights:(BOOL)resetContext {
     [_findOnPageHelper clearHighlights];
-    [_findOnPageHelper resetCopiedFindContext];
+    if (resetContext) {
+        [_findOnPageHelper resetCopiedFindContext];
+    } else {
+        [_findOnPageHelper removeAllSearchResults];
+    }
 }
 
 - (void)setTransparency:(double)fVal {
@@ -5800,7 +5816,7 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
     if (respectDividers) {
         [extractor restrictToLogicalWindowIncludingCoord:coord];
     }
-    VT100GridWindowedRange range = [extractor rangeForWordAt:coord  maximumLength:kUnlimitedMaximumWordLength];
+    VT100GridWindowedRange range = [extractor rangeForWordAt:coord  maximumLength:kLongMaximumWordLength];
     if (rangePtr) {
         *rangePtr = range;
     }
@@ -6580,6 +6596,7 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
             if (range.length > 0) {
                 foundDirty = YES;
                 [_findOnPageHelper removeHighlightsInRange:NSMakeRange(y + totalScrollbackOverflow, 1)];
+                [_findOnPageHelper removeSearchResultsInRange:NSMakeRange(y + totalScrollbackOverflow, 1)];
                 [self setNeedsDisplayOnLine:y inRange:range];
             }
         }
@@ -6791,7 +6808,8 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
         [extractor restrictToLogicalWindowIncludingCoord:coord];
     }
     return [extractor rangeForWrappedLineEncompassing:coord
-                                 respectContinuations:NO];
+                                 respectContinuations:NO
+                                             maxChars:-1];
 }
 
 - (int)selectionViewportWidth {

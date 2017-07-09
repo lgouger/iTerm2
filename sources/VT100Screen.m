@@ -3056,8 +3056,8 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
     }
 }
 
-- (void)terminalStartTmuxMode {
-    [delegate_ screenStartTmuxMode];
+- (void)terminalStartTmuxModeWithDCSIdentifier:(NSString *)dcsID {
+    [delegate_ screenStartTmuxModeWithDCSIdentifier:dcsID];
 }
 
 - (void)terminalHandleTmuxInput:(VT100Token *)token {
@@ -3301,7 +3301,9 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
 }
 
 - (void)terminalClearScrollbackBuffer {
-    [self clearScrollbackBuffer];
+    if (![iTermAdvancedSettingsModel preventEscapeSequenceFromClearingHistory]) {
+        [self clearScrollbackBuffer];
+    }
 }
 
 - (void)terminalClearBuffer {

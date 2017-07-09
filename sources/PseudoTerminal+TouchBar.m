@@ -37,7 +37,7 @@ static NSString *const iTermTouchBarIdentifierStatus = @"iTermTouchBarIdentifier
 
 ITERM_IGNORE_PARTIAL_BEGIN
 
-@implementation PseudoTerminal (TouchBar) 
+@implementation PseudoTerminal (TouchBar)
 
 - (void)updateTouchBarFunctionKeyLabels {
     if (!IsTouchBarAvailable()) {
@@ -469,19 +469,7 @@ ITERM_IGNORE_PARTIAL_BEGIN
 - (void)manPageTouchBarItemSelected:(iTermTouchBarButton *)sender {
     NSString *command = sender.keyBindingAction[@"command"];
     if (command) {
-        NSString *escapedCommand = [command stringWithEscapedShellCharactersIncludingNewlines:YES];
-        command = [NSString stringWithFormat:@"sh -c \"%@\"", escapedCommand];
-        [[iTermController sharedInstance] launchBookmark:nil
-                                              inTerminal:nil
-                                                 withURL:nil
-                                        hotkeyWindowType:iTermHotkeyWindowTypeNone
-                                                 makeKey:YES
-                                             canActivate:YES
-                                                 command:command
-                                                   block:^PTYSession *(Profile *profile, PseudoTerminal *term) {
-                                                       profile = [profile dictionaryBySettingObject:@"" forKey:KEY_INITIAL_TEXT];
-                                                       return [term createTabWithProfile:profile withCommand:command];
-                                                   }];
+        [[iTermController sharedInstance] openSingleUseWindowWithCommand:command];
     }
 }
 
