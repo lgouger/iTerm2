@@ -3542,9 +3542,10 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
     }
     [pboard declareTypes:types owner:self];
     if (copyAttributedString) {
-        NSData *RTFData = [copyAttributedString RTFFromRange:NSMakeRange(0, [copyAttributedString length])
-                                          documentAttributes:@{}];
-        [pboard setData:RTFData forType:NSRTFPboardType];
+        // I used to convert this to RTF data using
+        // RTFFromRange:documentAttributes: but images wouldn't paste right.
+        [pboard clearContents];
+        [pboard writeObjects:@[ copyAttributedString ]];
     }
     // I used to do
     //   [pboard setString:[copyAttributedString string] forType:NSStringPboardType]
@@ -3703,10 +3704,11 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
         [item action]==@selector(addNote:) ||
         [item action]==@selector(copy:) ||
         [item action]==@selector(copyWithStyles:) ||
-        [item action]==@selector(pasteSelection:) ||
         ([item action]==@selector(print:) && [item tag] == 1)) { // print selection
         // These commands are allowed only if there is a selection.
         return [_selection hasSelection];
+    } else if ([item action]==@selector(pasteSelection:)) {
+        return [[iTermController sharedInstance] lastSelection] != nil;
     } else if ([item action]==@selector(selectOutputOfLastCommand:)) {
         return [_delegate textViewCanSelectOutputOfLastCommand];
     } else if ([item action]==@selector(selectCurrentCommand:)) {
@@ -4457,41 +4459,8 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
     [panel setExtensionHidden:NO];
 
     if ([panel runModal] == NSModalResponseOK) {
-        NSBitmapImageFileType fileType = NSPNGFileType;
         NSString *filename = [panel legacyFilename];
-        if ([filename hasSuffix:@".bmp"]) {
-            fileType = NSBMPFileType;
-        } else if ([filename hasSuffix:@".gif"]) {
-            fileType = NSGIFFileType;
-        } else if ([filename hasSuffix:@".jp2"]) {
-            fileType = NSJPEG2000FileType;
-        } else if ([filename hasSuffix:@".jpg"] || [filename hasSuffix:@".jpeg"]) {
-            fileType = NSJPEGFileType;
-        } else if ([filename hasSuffix:@".png"]) {
-            fileType = NSPNGFileType;
-        } else if ([filename hasSuffix:@".tiff"]) {
-            fileType = NSTIFFFileType;
-        }
-
-        NSData *data = nil;
-        NSDictionary *universalTypeToCocoaMap = @{ (NSString *)kUTTypeBMP: @(NSBMPFileType),
-                                                   (NSString *)kUTTypeGIF: @(NSGIFFileType),
-                                                   (NSString *)kUTTypeJPEG2000: @(NSJPEG2000FileType),
-                                                   (NSString *)kUTTypeJPEG: @(NSJPEGFileType),
-                                                   (NSString *)kUTTypePNG: @(NSPNGFileType),
-                                                   (NSString *)kUTTypeTIFF: @(NSTIFFFileType) };
-        NSString *imageType = imageInfo.imageType;
-        if (imageType) {
-            NSNumber *nsTypeNumber = universalTypeToCocoaMap[imageType];
-            if (nsTypeNumber.integerValue == fileType) {
-                data = imageInfo.data;
-            }
-        }
-        if (!data) {
-            NSBitmapImageRep *rep = [imageInfo.image.images.firstObject bitmapImageRep];
-            data = [rep representationUsingType:fileType properties:@{}];
-        }
-        [data writeToFile:filename atomically:NO];
+        [imageInfo saveToFile:filename];
     }
 }
 
@@ -5583,11 +5552,18 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
 // service stuff
 - (id)validRequestorForSendType:(NSString *)sendType returnType:(NSString *)returnType
 {
-    if (sendType != nil && [sendType isEqualToString: NSStringPboardType]) {
-        return self;
+    NSSet *acceptedReturnTypes = [NSSet setWithArray:@[ (NSString *)kUTTypeUTF8PlainText,
+                                                        NSStringPboardType ]];
+    NSSet *acceptedSendTypes = nil;
+    if (self._haveShortSelection) {
+        acceptedSendTypes = acceptedReturnTypes;
     }
-
-    return ([super validRequestorForSendType: sendType returnType: returnType]);
+    if ((sendType == nil || [acceptedSendTypes containsObject:sendType]) &&
+        (returnType == nil || [acceptedReturnTypes containsObject:returnType])) {
+        return self;
+    } else {
+        return nil;
+    }
 }
 
 // Service
@@ -5610,9 +5586,14 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
 }
 
 // Service
-- (BOOL)readSelectionFromPasteboard:(NSPasteboard *)pboard
-{
-    return NO;
+- (BOOL)readSelectionFromPasteboard:(NSPasteboard *)pboard {
+    NSString *string = [pboard stringForType:NSStringPboardType];
+    if (string.length) {
+        [_delegate insertText:string];
+        return YES;
+    } else {
+        return NO;
+    }
 }
 
 // This textview is about to be hidden behind another tab.
@@ -6762,14 +6743,17 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
 #pragma mark - iTermSelectionDelegate
 
 - (void)selectionDidChange:(iTermSelection *)selection {
-    if ([selection hasSelection]) {
-        _selectionTime = [[NSDate date] timeIntervalSince1970];
-    } else {
-        _selectionTime = 0;
-    }
     [_delegate refresh];
-    DLog(@"Update selection time to %lf. selection=%@. stack=%@",
-         (double)_selectionTime, selection, [NSThread callStackSymbols]);
+    if (!_selection.live && selection.hasSelection) {
+        const NSInteger MAX_SELECTION_SIZE = 10 * 1000 * 1000;
+        NSString *selection = [self selectedTextWithCappedAtSize:MAX_SELECTION_SIZE minimumLineNumber:0];
+        if (selection.length == MAX_SELECTION_SIZE) {
+            selection = nil;
+        }
+        [[iTermController sharedInstance] setLastSelection:selection];
+    }
+    DLog(@"Selection did change: selection=%@. stack=%@",
+         selection, [NSThread callStackSymbols]);
 }
 
 - (VT100GridRange)selectionRangeOfTerminalNullsOnLine:(int)lineNumber {

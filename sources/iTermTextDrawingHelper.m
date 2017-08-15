@@ -388,27 +388,12 @@ typedef struct iTermTextColorContext {
 
     // Now iterate over the lines and paint the characters.
     CGContextRef ctx = (CGContextRef)[[NSGraphicsContext currentContext] graphicsPort];
-    iTermBackgroundColorRunsInLine *representativeRunArray = nil;
-    NSInteger count = 0;
-    for (iTermBackgroundColorRunsInLine *runArray in backgroundRunArrays) {
-        if (count == 0) {
-            representativeRunArray = runArray;
-            count = runArray.numberOfEquivalentRows;
-        }
-        count--;
-        [self drawCharactersForLine:runArray.line
-                                atY:runArray.y
-                     backgroundRuns:representativeRunArray.array
-                            context:ctx];
-        [self drawNoteRangesOnLine:runArray.line];
-
-        if (_debug) {
-            NSString *s = [NSString stringWithFormat:@"%d", runArray.line];
-            [s drawAtPoint:NSMakePoint(0, runArray.y)
-                withAttributes:@{ NSForegroundColorAttributeName: [NSColor blackColor],
-                                  NSBackgroundColorAttributeName: [NSColor whiteColor],
-                                  NSFontAttributeName: [NSFont systemFontOfSize:8] }];
-        }
+    if (self.minimumContrast > 0) {
+        [self drawForegroundForBackgroundRunArrays:backgroundRunArrays
+                                               ctx:ctx];
+    } else {
+        [self drawNoMinimumContrastContrastForegroundWithBackgroundRunArrays:backgroundRunArrays
+                                                                         ctx:ctx];
     }
 
     [self drawTopMargin];
@@ -940,6 +925,82 @@ typedef struct iTermTextColorContext {
     }
 }
 
+#pragma mark - Drawing: Foreground
+
+// Draw assuming no minimum contrast. Keeps glyphs together in a single background color run across different background colors.
+- (void)drawNoMinimumContrastContrastForegroundWithBackgroundRunArrays:(NSArray<iTermBackgroundColorRunsInLine *> *)backgroundRunArrays
+                                                                   ctx:(CGContextRef)ctx {
+    // Combine runs on each line, except those with different values of
+    // `selected` or `match`. Those properties affect foreground color and must
+    // split ligatures up.
+    NSArray<iTermBackgroundColorRunsInLine *> *fakeRunArrays = [backgroundRunArrays mapWithBlock:^id(iTermBackgroundColorRunsInLine *runs) {
+        NSMutableArray<iTermBoxedBackgroundColorRun *> *combinedRuns = [NSMutableArray array];
+        iTermBackgroundColorRun previousRun = { {0} };
+        BOOL havePreviousRun = NO;
+        for (iTermBoxedBackgroundColorRun *run in runs.array) {
+            if (!havePreviousRun) {
+                havePreviousRun = YES;
+                previousRun = *run.valuePointer;
+            } else if (run.valuePointer->selected == previousRun.selected &&
+                       run.valuePointer->isMatch == previousRun.isMatch) {
+                previousRun.range = NSUnionRange(previousRun.range, run.valuePointer->range);
+            } else {
+                [combinedRuns addObject:[iTermBoxedBackgroundColorRun boxedBackgroundColorRunWithValue:previousRun]];
+                previousRun = *run.valuePointer;
+            }
+        }
+        if (havePreviousRun) {
+            [combinedRuns addObject:[iTermBoxedBackgroundColorRun boxedBackgroundColorRunWithValue:previousRun]];
+        }
+
+        iTermBackgroundColorRunsInLine *fakeRuns = [[[iTermBackgroundColorRunsInLine alloc] init] autorelease];
+        fakeRuns.line = runs.line;
+        fakeRuns.y = runs.y;
+        fakeRuns.numberOfEquivalentRows = runs.numberOfEquivalentRows;
+        fakeRuns.array = combinedRuns;
+        return fakeRuns;
+    }];
+    [self drawForegroundForBackgroundRunArrays:fakeRunArrays
+                                           ctx:ctx];
+}
+
+// Draws 
+- (void)drawForegroundForBackgroundRunArrays:(NSArray<iTermBackgroundColorRunsInLine *> *)backgroundRunArrays
+                                         ctx:(CGContextRef)ctx {
+    iTermBackgroundColorRunsInLine *representativeRunArray = nil;
+    NSInteger count = 0;
+    for (iTermBackgroundColorRunsInLine *runArray in backgroundRunArrays) {
+        if (count == 0) {
+            representativeRunArray = runArray;
+            count = runArray.numberOfEquivalentRows;
+        }
+        count--;
+        [self drawForegroundForLineNumber:runArray.line
+                                        y:runArray.y
+                           backgroundRuns:representativeRunArray.array
+                                  context:ctx];
+    }
+}
+
+- (void)drawForegroundForLineNumber:(int)line
+                                  y:(CGFloat)y
+                     backgroundRuns:(NSArray<iTermBoxedBackgroundColorRun *> *)backgroundRuns
+                            context:(CGContextRef)ctx {
+    [self drawCharactersForLine:line
+                            atY:y
+                 backgroundRuns:backgroundRuns
+                        context:ctx];
+    [self drawNoteRangesOnLine:line];
+
+    if (_debug) {
+        NSString *s = [NSString stringWithFormat:@"%d", line];
+        [s drawAtPoint:NSMakePoint(0, y)
+        withAttributes:@{ NSForegroundColorAttributeName: [NSColor blackColor],
+                          NSBackgroundColorAttributeName: [NSColor whiteColor],
+                          NSFontAttributeName: [NSFont systemFontOfSize:8] }];
+    }
+}
+
 #pragma mark - Drawing: Text
 
 - (void)drawCharactersForLine:(int)line
@@ -1124,8 +1185,8 @@ typedef struct iTermTextColorContext {
 
     int savedFontSmoothingStyle = 0;
     const CGFloat *components = CGColorGetComponents(color);
-    const CGFloat brightness = PerceivedBrightness(components[0], components[1], components[2]);
-    BOOL useThinStrokes = [self useThinStrokes] && ([backgroundColor brightnessComponent] < brightness);
+    const BOOL useThinStrokes = [self useThinStrokesAgainstBackgroundColor:backgroundColor
+                                                           foregroundColor:color];
     if (useThinStrokes) {
         CGContextSetShouldSmoothFonts(ctx, YES);
         // This seems to be available at least on 10.8 and later. The only reference to it is in
@@ -1266,9 +1327,8 @@ typedef struct iTermTextColorContext {
     }
 
     int savedFontSmoothingStyle = 0;
-    const CGFloat *components = CGColorGetComponents(cgColor);
-    const CGFloat brightness = PerceivedBrightness(components[0], components[1], components[2]);
-    BOOL useThinStrokes = [self useThinStrokes] && ([backgroundColor brightnessComponent] < brightness);
+    BOOL useThinStrokes = [self useThinStrokesAgainstBackgroundColor:backgroundColor
+                                                     foregroundColor:cgColor];
     if (useThinStrokes) {
         CGContextSetShouldSmoothFonts(cgContext, YES);
         // This seems to be available at least on 10.8 and later. The only reference to it is in
@@ -1983,17 +2043,30 @@ static BOOL iTermTextDrawingHelperIsCharacterDrawable(screen_char_t *c,
     iTermPreciseTimerStatsMeasureAndAccumulate(&_stats[TIMER_ADVANCES]);
 }
 
-- (BOOL)useThinStrokes {
+- (BOOL)useThinStrokesAgainstBackgroundColor:(NSColor *)backgroundColor
+                             foregroundColor:(CGColorRef)foregroundColor {
+    const CGFloat *components = CGColorGetComponents(foregroundColor);
+
     switch (self.thinStrokes) {
         case iTermThinStrokesSettingAlways:
             return YES;
 
+        case iTermThinStrokesSettingDarkBackgroundsOnly:
+            break;
+
         case iTermThinStrokesSettingNever:
             return NO;
             
+        case iTermThinStrokesSettingRetinaDarkBackgroundsOnly:
+            if (!_isRetina) {
+                return NO;
+            }
+            break;
+
         case iTermThinStrokesSettingRetinaOnly:
             return _isRetina;
     }
+    return [backgroundColor brightnessComponent] < PerceivedBrightness(components[0], components[1], components[2]);
 }
 
 - (void)drawUnderlineOfColor:(NSColor *)color

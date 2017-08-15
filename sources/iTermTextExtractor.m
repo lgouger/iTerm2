@@ -8,7 +8,9 @@
 
 #import "iTermTextExtractor.h"
 #import "DebugLogging.h"
+#import "iTermImageInfo.h"
 #import "iTermPreferences.h"
+#import "iTermSystemVersion.h"
 #import "iTermURLStore.h"
 #import "NSStringITerm.h"
 #import "NSMutableAttributedString+iTerm.h"
@@ -1210,9 +1212,34 @@ const NSInteger kLongMaximumWordLength = 100000;
     }
     const NSUInteger kMaximumOversizeAmountWhenTruncatingHead = 1024 * 100;
     int width = [_dataSource width];
+    __block BOOL lineContainsNonImage = NO;
+    __block BOOL lineContainsImage = NO;
+    __block BOOL copiedImage = NO;
     [self enumerateCharsInRange:windowedRange
                       charBlock:^BOOL(screen_char_t *currentLine, screen_char_t theChar, VT100GridCoord coord) {
-                          if (theChar.code == TAB_FILLER && !theChar.complexChar) {
+                          if (theChar.image) {
+                              lineContainsImage = YES;
+                          } else {
+                              lineContainsNonImage = YES;
+                          }
+                          if (theChar.image) {
+                              if (attributeProvider && theChar.foregroundColor == 0 && theChar.backgroundColor == 0) {
+                                  iTermImageInfo *imageInfo = GetImageInfo(theChar.code);
+                                  NSImage *image = imageInfo.image.images.firstObject;
+                                  if (image) {
+                                      if (IsElCapitanOrLater()) {
+                                          copiedImage = YES;
+                                          NSTextAttachment *textAttachment = [[[NSTextAttachment alloc] init] autorelease];
+                                          ITERM_IGNORE_PARTIAL_BEGIN
+                                          textAttachment.image = imageInfo.image.images.firstObject;
+                                          ITERM_IGNORE_PARTIAL_END
+                                          NSAttributedString *attributedStringWithAttachment = [NSAttributedString attributedStringWithAttachment:textAttachment];
+                                          [result appendAttributedString:attributedStringWithAttachment];
+                                          [coords addObject:[NSValue valueWithGridCoord:coord]];
+                                      }
+                                  }
+                              }
+                          } else if (theChar.code == TAB_FILLER && !theChar.complexChar) {
                               // Convert orphan tab fillers (those without a subsequent
                               // tab character) into spaces.
                               if ([self tabFillerAtIndex:coord.x isOrphanInLine:currentLine]) {
@@ -1262,6 +1289,11 @@ const NSInteger kLongMaximumWordLength = 100000;
                           return NO;
                       }
                        eolBlock:^BOOL(unichar code, int numPreceedingNulls, int line) {
+                           BOOL ignore = (!copiedImage && !lineContainsNonImage && lineContainsImage);
+                           copiedImage = lineContainsNonImage = lineContainsImage = NO;
+                           if (ignore) {
+                               return NO;
+                           }
                            int right;
                            if (windowedRange.columnWindow.length) {
                                right = windowedRange.columnWindow.location + windowedRange.columnWindow.length;
@@ -1269,6 +1301,7 @@ const NSInteger kLongMaximumWordLength = 100000;
                                right = width;
                            }
                            // If there is no text after this, insert a hard line break.
+                           BOOL shouldAppendNewline = YES;
                            if (pad) {
                                for (int i = 0; i < numPreceedingNulls; i++) {
                                    VT100GridCoord coord =
@@ -1280,6 +1313,7 @@ const NSInteger kLongMaximumWordLength = 100000;
                                    case kiTermTextExtractorNullPolicyFromLastToEnd:
                                        [result deleteCharactersInRange:NSMakeRange(0, [result length])];
                                        [coords removeAllObjects];
+                                       shouldAppendNewline = NO;
                                        break;
                                    case kiTermTextExtractorNullPolicyFromStartToFirst:
                                        return YES;
@@ -1293,6 +1327,7 @@ const NSInteger kLongMaximumWordLength = 100000;
                                }
                            }
                            if (code == EOL_HARD &&
+                               shouldAppendNewline &&
                                (includeLastNewline || line < windowedRange.coordRange.end.y)) {
                                if (trimSelectionTrailingSpaces) {
                                    NSInteger lengthBeforeTrimming = [result length];
@@ -1586,7 +1621,16 @@ const NSInteger kLongMaximumWordLength = 100000;
                continuationChars:continuationChars
                           coords:coords];
     if (!respectHardNewlines) {
-        content = [content stringByReplacingOccurrencesOfString:@"\n" withString:@""];
+        if (coords == nil) {
+            content = [content stringByReplacingOccurrencesOfString:@"\n" withString:@""];
+        } else {
+            NSMutableString *mutableContent = [[content mutableCopy] autorelease];
+            [content reverseEnumerateSubstringsEqualTo:@"\n" block:^(NSRange range) {
+                [mutableContent replaceCharactersInRange:range withString:@""];
+                [coords removeObjectsInRange:range];
+            }];
+            content = mutableContent;
+        }
     }
     return content;
 }

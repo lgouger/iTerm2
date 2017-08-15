@@ -1686,6 +1686,13 @@ ITERM_WEAKLY_REFERENCEABLE
         env[PWD_ENVNAME] = [PWD_ENVVALUE stringByExpandingTildeInPath];
     }
 
+    // Remove trailing slashes, unless the path is just "/"
+    NSString *trimmed = [env[PWD_ENVNAME] stringByTrimmingTrailingCharactersFromCharacterSet:[NSCharacterSet characterSetWithCharactersInString:@"/"]];
+    if (trimmed.length == 0) {
+        trimmed = @"/";
+    }
+    env[PWD_ENVNAME] = trimmed;
+
     NSString *itermId = [self sessionId];
     env[@"ITERM_SESSION_ID"] = itermId;
     env[@"TERM_PROGRAM_VERSION"] = [[[NSBundle mainBundle] infoDictionary] objectForKey:@"CFBundleShortVersionString"];
@@ -5710,7 +5717,7 @@ ITERM_WEAKLY_REFERENCEABLE
             break;
 
         case KEY_ACTION_PASTE_SPECIAL_FROM_SELECTION: {
-            NSString *string = [self mostRecentlySelectedText];
+            NSString *string = [[iTermController sharedInstance] lastSelection];
             if (string.length) {
                 [_pasteHelper pasteString:string
                              stringConfig:keyBindingText];
@@ -6489,19 +6496,8 @@ ITERM_WEAKLY_REFERENCEABLE
     [[_delegate realParentWindow] restartSessionWithConfirmation:self];
 }
 
-- (NSString *)mostRecentlySelectedText {
-    PTYSession *session = [[iTermController sharedInstance] sessionWithMostRecentSelection];
-    if (session) {
-        PTYTextView *textview = [session textview];
-        if ([textview isAnyCharSelected]) {
-            return [textview selectedText];
-        }
-    }
-    return nil;
-}
-
 - (void)textViewPasteFromSessionWithMostRecentSelection:(PTYSessionPasteFlags)flags {
-    NSString *string = [self mostRecentlySelectedText];
+    NSString *string = [[iTermController sharedInstance] lastSelection];
     if (string) {
         [self pasteString:string flags:flags];
     }
