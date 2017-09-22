@@ -621,6 +621,8 @@ static NSRect iTermRectCenteredVerticallyWithinRect(NSRect frameToCenter, NSRect
     DLog(@"initWithContentRect:%@ styleMask:%d", [NSValue valueWithRect:initialFrame], (int)styleMask);
     iTermTerminalWindow *myWindow;
     Class windowClass = (hotkeyWindowType == iTermHotkeyWindowTypeFloatingPanel) ? [iTermPanel class] : [iTermWindow class];
+    // TODO: Some day when I have more appetite for risk, I think this should be
+    // myWindow = [[windowClass alloc] initWithContentRect:[NSWindow contentRectForFrameRect:initialFrame styleMask:styleMask]
     myWindow = [[windowClass alloc] initWithContentRect:initialFrame
                                               styleMask:styleMask
                                                 backing:NSBackingStoreBuffered
@@ -1507,10 +1509,13 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (IBAction)closeCurrentTab:(id)sender {
-    NSTabViewItem *tabViewItem = [_contentView.tabView selectedTabViewItem];
     PTYTab *tab = self.currentTab;
+    [self closeTabIfConfirmed:tab];
+}
+
+- (void)closeTabIfConfirmed:(PTYTab *)tab {
     const BOOL shouldClose = [self tabView:_contentView.tabView
-                    shouldCloseTabViewItem:tabViewItem
+                    shouldCloseTabViewItem:tab.tabViewItem
                       suppressConfirmation:[self willShowTmuxWarningWhenClosingTab:tab]];
     if (shouldClose) {
         [self closeTab:tab];
@@ -1526,10 +1531,10 @@ ITERM_WEAKLY_REFERENCEABLE
     }
 }
 
-- (void)closeSessionWithConfirmation:(PTYSession *)aSession
-{
-    if ([[[self tabForSession:aSession] sessions] count] == 1) {
-        [self closeCurrentTab:self];
+- (void)closeSessionWithConfirmation:(PTYSession *)aSession {
+    PTYTab *tab = [self tabForSession:aSession];
+    if ([[tab sessions] count] == 1) {
+        [self closeTabIfConfirmed:tab];
         return;
     }
     BOOL okToClose = NO;
@@ -1795,18 +1800,8 @@ ITERM_WEAKLY_REFERENCEABLE
     return windowType;
 }
 
-+ (int)_screenIndexForArrangement:(NSDictionary*)arrangement
-{
-    int screenIndex;
-    if ([arrangement objectForKey:TERMINAL_ARRANGEMENT_SCREEN_INDEX]) {
-        screenIndex = [[arrangement objectForKey:TERMINAL_ARRANGEMENT_SCREEN_INDEX] intValue];
-    } else {
-        screenIndex = 0;
-    }
-    if (screenIndex < 0 || screenIndex >= [[NSScreen screens] count]) {
-        screenIndex = 0;
-    }
-    return screenIndex;
++ (int)_screenIndexForArrangement:(NSDictionary*)arrangement {
+    return [[arrangement objectForKey:TERMINAL_ARRANGEMENT_SCREEN_INDEX] intValue];
 }
 
 + (void)drawArrangementPreview:(NSDictionary*)terminalArrangement
@@ -1814,6 +1809,9 @@ ITERM_WEAKLY_REFERENCEABLE
 {
     int windowType = [PseudoTerminal _windowTypeForArrangement:terminalArrangement];
     int screenIndex = [PseudoTerminal _screenIndexForArrangement:terminalArrangement];
+    if (screenIndex < 0 || screenIndex >= [[NSScreen screens] count]) {
+        screenIndex = 0;
+    }
     NSRect virtualScreenFrame = [[frames objectAtIndex:screenIndex] rectValue];
     NSRect screenFrame = [[[NSScreen screens] objectAtIndex:screenIndex] frame];
     double xScale = virtualScreenFrame.size.width / screenFrame.size.width;
@@ -2098,11 +2096,10 @@ ITERM_WEAKLY_REFERENCEABLE
                     break;
             }
         }
-        // TODO: this looks like a bug - are X-of-screen windows not restored to the right screen?
         term = [[[PseudoTerminal alloc] initWithSmartLayout:NO
                                                  windowType:windowType
                                             savedWindowType:WINDOW_TYPE_NORMAL
-                                                     screen:-1
+                                                     screen:screenIndex
                                            hotkeyWindowType:hotkeyWindowType] autorelease];
 
         NSRect rect;
@@ -2279,6 +2276,16 @@ ITERM_WEAKLY_REFERENCEABLE
     rect.size.width = [[arrangement objectForKey:TERMINAL_ARRANGEMENT_WIDTH] doubleValue];
     rect.size.height = [[arrangement objectForKey:TERMINAL_ARRANGEMENT_HEIGHT] doubleValue];
 
+    // TODO: The anchored screen isn't always respected, e.g., if the screen's origin/size changes
+    // then rect might not lie inside it.
+    if (windowType == WINDOW_TYPE_LION_FULL_SCREEN) {
+        NSArray *screens = [NSScreen screens];
+        if (_anchoredScreenNumber >= 0 && _anchoredScreenNumber < screens.count) {
+            NSScreen *screen = screens[_anchoredScreenNumber];
+            rect = [self traditionalFullScreenFrameForScreen:screen];
+        }
+    }
+
     // 10.11 starts you off with a tiny little frame. I don't know why they do
     // that, but this fixes it.
     if ([[self class] useElCapitanFullScreenLogic] &&
@@ -2386,7 +2393,11 @@ ITERM_WEAKLY_REFERENCEABLE
 
     result[TERMINAL_ARRANGEMENT_WINDOW_TYPE] = @([self lionFullScreen] ? WINDOW_TYPE_LION_FULL_SCREEN : windowType_);
     result[TERMINAL_ARRANGEMENT_SAVED_WINDOW_TYPE] = @(savedWindowType_);
-    result[TERMINAL_ARRANGEMENT_SCREEN_INDEX] = @([[NSScreen screens] indexOfObjectIdenticalTo:[[self window] screen]]);
+    if (_hotkeyWindowType == iTermHotkeyWindowTypeNone) {
+        result[TERMINAL_ARRANGEMENT_SCREEN_INDEX] = @([[NSScreen screens] indexOfObjectIdenticalTo:[[self window] screen]]);
+    } else {
+        result[TERMINAL_ARRANGEMENT_SCREEN_INDEX] = @(_screenNumberFromFirstProfile);
+    }
     result[TERMINAL_ARRANGEMENT_DESIRED_ROWS] = @(desiredRows_);
     result[TERMINAL_ARRANGEMENT_DESIRED_COLUMNS] = @(desiredColumns_);
 
@@ -7499,10 +7510,13 @@ ITERM_WEAKLY_REFERENCEABLE
                                                       userInfo:nil];
 }
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wpartial-availability"
 - (NSFontPanelModeMask)validModesForFontPanel:(NSFontPanel *)fontPanel
 {
     return kValidModesForFontPanel;
 }
+#pragma clang diagnostic pop
 
 - (void)incrementBadge {
     if (![iTermAdvancedSettingsModel indicateBellsInDockBadgeLabel]) {
