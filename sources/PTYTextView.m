@@ -44,6 +44,7 @@
 #import "NSFileManager+iTerm.h"
 #import "NSImage+iTerm.h"
 #import "NSMutableAttributedString+iTerm.h"
+#import "NSObject+iTerm.h"
 #import "NSPasteboard+iTerm.h"
 #import "NSStringITerm.h"
 #import "NSURL+iTerm.h"
@@ -1488,6 +1489,7 @@ static const int kDragThreshold = 3;
 
         if (!eschewCocoaTextHandling) {
             _eventBeingHandled = event;
+            // TODO: Consider going straight to interpretKeyEvents: for repeats. See issue 6052.
             if ([iTermAdvancedSettingsModel experimentalKeyHandling]) {
               // This may cause -insertText:replacementRange: or -doCommandBySelector: to be called.
               // These methods have a side-effect of setting _keyPressHandled if they dispatched the event
@@ -3238,7 +3240,8 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
             } else {
                 [theSelectedText appendString:content];
             }
-            if (eol && ![content hasSuffix:@"\n"]) {
+            NSString *contentString = attributed ? [content string] : content;
+            if (eol && ![contentString hasSuffix:@"\n"]) {
                 if (attributed) {
                     [theSelectedText iterm_appendString:@"\n"];
                 } else {
@@ -3787,7 +3790,7 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
 
 - (void)contextMenuActionOpenFile:(id)sender
 {
-    NSLog(@"Open file: '%@'", [sender representedObject]);
+    DLog(@"Open file: '%@'", [sender representedObject]);
     [[NSWorkspace sharedWorkspace] openFile:[[sender representedObject] stringByExpandingTildeInPath]];
 }
 
@@ -3795,16 +3798,16 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
 {
     NSURL *url = [NSURL URLWithUserSuppliedString:[sender representedObject]];
     if (url) {
-        NSLog(@"Open URL: %@", [sender representedObject]);
+        DLog(@"Open URL: %@", [sender representedObject]);
         [[NSWorkspace sharedWorkspace] openURL:url];
     } else {
-        NSLog(@"%@ is not a URL", [sender representedObject]);
+        DLog(@"%@ is not a URL", [sender representedObject]);
     }
 }
 
 - (void)contextMenuActionRunCommand:(id)sender {
     NSString *command = [sender representedObject];
-    ELog(@"Run command: %@", command);
+    DLog(@"Run command: %@", command);
     [NSThread detachNewThreadSelector:@selector(runCommand:)
                              toTarget:[self class]
                            withObject:command];
@@ -3812,7 +3815,7 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
 
 - (void)contextMenuActionRunCommandInWindow:(id)sender {
     NSString *command = [sender representedObject];
-    ELog(@"Run command in window: %@", command);
+    DLog(@"Run command in window: %@", command);
     [[iTermController sharedInstance] openSingleUseWindowWithCommand:command];
 }
 
@@ -3827,14 +3830,14 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
 - (void)contextMenuActionRunCoprocess:(id)sender
 {
     NSString *command = [sender representedObject];
-    NSLog(@"Run coprocess: %@", command);
+    DLog(@"Run coprocess: %@", command);
     [_delegate launchCoprocessWithCommand:command];
 }
 
 - (void)contextMenuActionSendText:(id)sender
 {
     NSString *command = [sender representedObject];
-    NSLog(@"Send text: %@", command);
+    DLog(@"Send text: %@", command);
     [_delegate insertText:command];
 }
 

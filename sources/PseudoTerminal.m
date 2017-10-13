@@ -16,6 +16,7 @@
 #import "iTerm.h"
 #import "iTermAboutWindow.h"
 #import "iTermAdvancedSettingsModel.h"
+#import "iTermAnnouncementView.h"
 #import "iTermApplication.h"
 #import "iTermApplicationDelegate.h"
 #import "iTermColorPresets.h"
@@ -1172,6 +1173,10 @@ ITERM_WEAKLY_REFERENCEABLE
     // This is kind of cheating; we shouldn't assume that a session's delegate
     // is a tab. But it always is, and it would be slow to search.
     return (PTYTab *)session.delegate;
+}
+
+- (void)tabTitleDidChange:(PTYTab *)tab {
+    [self updateTouchBarIfNeeded];
 }
 
 // Allow frame to go off-screen while hotkey window is sliding in or out.
@@ -3203,14 +3208,18 @@ ITERM_WEAKLY_REFERENCEABLE
           NSStringFromSize(proposedFrameSize),
           NSStringFromSize(originalProposal),
           NSStringFromSize(NSMakeSize(charWidth, charHeight)));
-    if (snapWidth && proposedFrameSize.width + charWidth > screenFrame.size.width) {
+    if (snapWidth &&
+        proposedFrameSize.width + charWidth > screenFrame.size.width &&
+        proposedFrameSize.width < screenFrame.size.width) {
         CGFloat snappedMargin = screenFrame.size.width - proposedFrameSize.width;
         CGFloat desiredMargin = screenFrame.size.width - originalProposal.width;
         if (desiredMargin <= ceil(snappedMargin / 2.0)) {
             proposedFrameSize.width = screenFrame.size.width;
         }
     }
-    if (snapHeight && proposedFrameSize.height + charHeight > screenFrame.size.height) {
+    if (snapHeight &&
+        proposedFrameSize.height + charHeight > screenFrame.size.height &&
+        proposedFrameSize.height < screenFrame.size.height) {
         CGFloat snappedMargin = screenFrame.size.height - proposedFrameSize.height;
         CGFloat desiredMargin = screenFrame.size.height - originalProposal.height;
         if (desiredMargin <= ceil(snappedMargin / 2.0)) {
@@ -3402,7 +3411,7 @@ ITERM_WEAKLY_REFERENCEABLE
     frameMinusMenuBar.size.height -= [[[NSApplication sharedApplication] mainMenu] menuBarHeight];
     BOOL menuBarIsVisible = NO;
 
-    if (![iTermPreferences boolForKey:kPreferenceKeyHideMenuBarInFullscreen]) {
+    if (![iTermPreferences boolForKey:kPreferenceKeyHideMenuBarInFullscreen] || [iTermPreferences boolForKey:kPreferenceKeyUIElement]) {
         // Menu bar can show in fullscreen...
         // There is a menu bar on all screens.
         menuBarIsVisible = YES;
@@ -4792,6 +4801,7 @@ ITERM_WEAKLY_REFERENCEABLE
     } else {
         self.window.appearance = nil;
     }
+    [[NSNotificationCenter defaultCenter] postNotificationName:iTermWindowAppearanceDidChange object:self.window];
 }
 
 
@@ -6739,7 +6749,7 @@ ITERM_WEAKLY_REFERENCEABLE
     PtyLog(@"Open session with prefs: %@", tempPrefs);
     int rows = [[tempPrefs objectForKey:KEY_ROWS] intValue];
     int columns = [[tempPrefs objectForKey:KEY_COLUMNS] intValue];
-    if (desiredRows_ < 0) {
+    if (self.tabs.count == 0 && desiredRows_ < 0) {
         desiredRows_ = rows;
         desiredColumns_ = columns;
     }
