@@ -653,21 +653,12 @@ static const int kDragThreshold = 3;
 
 + (NSSize)charSizeForFont:(NSFont *)aFont
         horizontalSpacing:(double)hspace
-          verticalSpacing:(double)vspace
-                 baseline:(double *)baseline {
+          verticalSpacing:(double)vspace {
     FontSizeEstimator* fse = [FontSizeEstimator fontSizeEstimatorForFont:aFont];
     NSSize size = [fse size];
     size.width = ceil(size.width * hspace);
     size.height = ceil(vspace * ceil(size.height + [aFont leading]));
-    if (baseline) {
-        *baseline = [fse baseline];
-    }
     return size;
-}
-
-+ (NSSize)charSizeForFont:(NSFont*)aFont horizontalSpacing:(double)hspace verticalSpacing:(double)vspace
-{
-    return [PTYTextView charSizeForFont:aFont horizontalSpacing:hspace verticalSpacing:vspace baseline:nil];
 }
 
 - (void)setFont:(NSFont*)aFont
@@ -675,11 +666,9 @@ static const int kDragThreshold = 3;
     horizontalSpacing:(double)horizontalSpacing
     verticalSpacing:(double)verticalSpacing
 {
-    double baseline;
     NSSize sz = [PTYTextView charSizeForFont:aFont
                            horizontalSpacing:1.0
-                             verticalSpacing:1.0
-                                    baseline:&baseline];
+                             verticalSpacing:1.0];
 
     _charWidthWithoutSpacing = sz.width;
     _charHeightWithoutSpacing = sz.height;
@@ -2354,6 +2343,15 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
             NSPoint clickPoint = [self clickPoint:event allowRightMarginOverflow:NO];
             [_findOnPageHelper setStartPoint:VT100GridAbsCoordMake(clickPoint.x,
                                                                    [_dataSource totalScrollbackOverflow] + clickPoint.y)];
+        }
+        if (_delegate.textViewPasswordInput && !altPressed && !cmdPressed) {
+            NSPoint clickPoint = [self clickPoint:event allowRightMarginOverflow:NO];
+            VT100GridCoord clickCoord = VT100GridCoordMake(clickPoint.x, clickPoint.y);
+            VT100GridCoord cursorCoord = VT100GridCoordMake([_dataSource cursorX] - 1,
+                                                            [_dataSource numberOfLines] - [_dataSource height] + [_dataSource cursorY] - 1);
+            if (VT100GridCoordEquals(clickCoord, cursorCoord)) {
+                [_delegate textViewDidSelectPasswordPrompt];
+            }
         }
     } else if (isShiftedSingleClick && _findOnPageHelper.haveFindCursor && ![_selection hasSelection]) {
         VT100GridAbsCoord absCursor = [_findOnPageHelper findCursorAbsCoord];
@@ -5526,7 +5524,7 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
     NSSet *acceptedReturnTypes = [NSSet setWithArray:@[ (NSString *)kUTTypeUTF8PlainText,
                                                         NSStringPboardType ]];
     NSSet *acceptedSendTypes = nil;
-    if (self._haveShortSelection) {
+    if ([_selection hasSelection] && [_selection length] <= [_dataSource width] * 10000) {
         acceptedSendTypes = acceptedReturnTypes;
     }
     if ((sendType == nil || [acceptedSendTypes containsObject:sendType]) &&

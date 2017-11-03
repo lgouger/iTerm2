@@ -1468,6 +1468,7 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
 // grid.
 - (screen_char_t *)getLineAtIndex:(int)theIndex withBuffer:(screen_char_t*)buffer
 {
+    ITBetaAssert(theIndex >= 0, @"Negative index to getLineAtIndex");
     int numLinesInLineBuffer = [linebuffer_ numLinesWithWidth:currentGrid_.size.width];
     if (theIndex >= numLinesInLineBuffer) {
         // Get a line from the circular screen buffer
@@ -2426,16 +2427,15 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
     }
     if (allNulls) {
         int i;
-        screen_char_t filler;
-        InitializeScreenChar(&filler, [terminal_ foregroundColorCode], [terminal_ backgroundColorCode]);
-        filler.code = TAB_FILLER;
         for (i = currentGrid_.cursorX; i < nextTabStop - 1; i++) {
-            aLine[i] = filler;
+            aLine[i].image = NO;
+            aLine[i].complexChar = NO;
+            aLine[i].code = TAB_FILLER;
         }
 
-        screen_char_t tab = filler;
-        tab.code = '\t';
-        aLine[i] = tab;
+        aLine[i].image = NO;
+        aLine[i].complexChar = NO;
+        aLine[i].code = '\t';
     }
     currentGrid_.cursorX = nextTabStop;
 }
@@ -4239,6 +4239,7 @@ static void SwapInt(int *a, int *b) {
     VT100GridRun result = run;
     int x = result.origin.x;
     int y = result.origin.y;
+    ITBetaAssert(y >= 0, @"Negative y to runByTrimmingNullsFromRun");
     screen_char_t *line = [self getLineAtIndex:y];
     int numberOfLines = [self numberOfLines];
     int width = [self width];
