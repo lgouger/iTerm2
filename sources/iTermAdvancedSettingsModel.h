@@ -84,7 +84,7 @@
 + (BOOL)optionIsMetaForSpecialChars;
 
 + (BOOL)startDebugLoggingAutomatically;
-+ (BOOL)aboutToPasteTabs;
++ (BOOL)aboutToPasteTabsWithCancel;
 
 + (BOOL)alwaysAcceptFirstMouse;
 
@@ -198,5 +198,6 @@
 + (BOOL)disableCustomBoxDrawing;
 + (BOOL)useExperimentalFontMetrics;
 + (BOOL)supportREPCode;
++ (BOOL)showBlockBoundaries;
 
 @end

@@ -1176,7 +1176,7 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (void)tabTitleDidChange:(PTYTab *)tab {
-    [self updateTouchBarIfNeeded];
+    [self updateTouchBarIfNeeded:NO];
 }
 
 // Allow frame to go off-screen while hotkey window is sliding in or out.
@@ -1506,11 +1506,11 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (void)keyBindingsDidChange:(NSNotification *)notification {
-    [self updateTouchBarIfNeeded];
+    [self updateTouchBarIfNeeded:NO];
 }
 
 - (void)colorPresetsDidChange:(NSNotification *)notification {
-    [self updateTouchBarIfNeeded];
+    [self updateColorPresets];
 }
 
 - (IBAction)closeCurrentTab:(id)sender {
@@ -3659,7 +3659,7 @@ ITERM_WEAKLY_REFERENCEABLE
     [self updateTabColors];
     [self saveTmuxWindowOrigins];
 
-    [self updateTouchBarIfNeeded];
+    [self updateTouchBarIfNeeded:NO];
 }
 
 - (BOOL)fullScreen
@@ -3796,7 +3796,7 @@ ITERM_WEAKLY_REFERENCEABLE
         [_didEnterLionFullscreen release];
         _didEnterLionFullscreen = nil;
     }
-    [self updateTouchBarIfNeeded];
+    [self updateTouchBarIfNeeded:NO];
 }
 
 - (void)windowWillExitFullScreen:(NSNotification *)notification
@@ -3832,7 +3832,7 @@ ITERM_WEAKLY_REFERENCEABLE
     [self notifyTmuxOfWindowResize];
     [self saveTmuxWindowOrigins];
     [self.window makeFirstResponder:self.currentSession.textview];
-    [self updateTouchBarIfNeeded];
+    [self updateTouchBarIfNeeded:NO];
 }
 
 - (NSRect)windowWillUseStandardFrame:(NSWindow *)sender defaultFrame:(NSRect)defaultFrame {
@@ -3930,6 +3930,15 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 // Contextual menu
+- (void)editSession:(NSMenuItem *)item {
+    NSTabViewItem *tabViewItem = item.representedObject;
+    PTYTab *tab = tabViewItem.identifier;
+    PTYSession *session = tab.activeSession;
+    if (session) {
+        [self editSession:session makeKey:NO];
+    }
+}
+
 - (void)editCurrentSession:(id)sender
 {
     PTYSession* session = [self currentSession];
@@ -4119,7 +4128,7 @@ ITERM_WEAKLY_REFERENCEABLE
     if ([[PreferencePanel sessionsInstance] isWindowLoaded]) {
         [self editSession:self.currentSession makeKey:NO];
     }
-    [self updateTouchBarIfNeeded];
+    [self updateTouchBarIfNeeded:NO];
 
     NSInteger darkCount = 0;
     NSInteger lightCount = 0;
@@ -4456,7 +4465,7 @@ ITERM_WEAKLY_REFERENCEABLE
 
     [self updateTabColors];
     [self _updateTabObjectCounts];
-    [self updateTouchBarIfNeeded];
+    [self updateTouchBarIfNeeded:NO];
 
     if (_contentView.tabView.numberOfTabViewItems == 1 &&
         _previousNumberOfTabs == 0 &&
@@ -4501,6 +4510,12 @@ ITERM_WEAKLY_REFERENCEABLE
    }
 
     // add tasks
+    item = [[[NSMenuItem alloc] initWithTitle:@"Edit Session…"
+                                       action:@selector(editSession:)
+                                keyEquivalent:@""] autorelease];
+    [item setRepresentedObject:tabViewItem];
+    [rootMenu addItem:item];
+
     item = [[[NSMenuItem alloc] initWithTitle:@"Close Tab"
                                        action:@selector(closeTabContextualMenuAction:)
                                 keyEquivalent:@""] autorelease];
@@ -5063,7 +5078,7 @@ ITERM_WEAKLY_REFERENCEABLE
     iTermSubSelection *sub = [selection.allSubSelections lastObject];
     if (sub) {
         [self showRangeOfLines:NSMakeRange(sub.range.coordRange.start.y,
-                                           sub.range.coordRange.end.y - sub.range.coordRange.start.y)
+                                           sub.range.coordRange.end.y - sub.range.coordRange.start.y + 1)
                      inSession:session];
     }
 }
@@ -5702,7 +5717,7 @@ ITERM_WEAKLY_REFERENCEABLE
     if ([[PreferencePanel sessionsInstance] isWindowLoaded]) {
         [self editSession:self.currentSession makeKey:NO];
     }
-    [self updateTouchBarIfNeeded];
+    [self updateTouchBarIfNeeded:NO];
     [self updateCurrentLocation];
 }
 
@@ -7424,7 +7439,7 @@ ITERM_WEAKLY_REFERENCEABLE
                  @(_anchoredScreenNumber), @(_isAnchoredToScreen), self);
         }
     }
-    [self updateTouchBarIfNeeded];
+    [self updateTouchBarIfNeeded:NO];
 }
 
 // Called when the parameter panel should close.
@@ -7594,6 +7609,7 @@ ITERM_WEAKLY_REFERENCEABLE
         currentSession = currentSession.tmuxGatewaySession;
     }
     if (currentSession) {
+        DLog(@"Getting current local working directory");
         previousDirectory = [currentSession currentLocalWorkingDirectory];
     }
 

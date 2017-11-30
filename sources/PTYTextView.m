@@ -306,7 +306,11 @@ static const int kDragThreshold = 3;
                                                  selector:@selector(imageDidLoad:)
                                                      name:iTermImageDidLoad
                                                    object:nil];
-        
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(applicationDidResignActive:)
+                                                     name:NSApplicationDidResignActiveNotification
+                                                   object:nil];
+
         _semanticHistoryController = [[iTermSemanticHistoryController alloc] init];
         _semanticHistoryController.delegate = self;
         _semanticHistoryDragged = NO;
@@ -504,10 +508,12 @@ static const int kDragThreshold = 3;
 }
 
 - (void)refuseFirstResponderAtCurrentMouseLocation {
+    DLog(@"set refuse location");
     _mouseLocationToRefuseFirstResponderAt = [NSEvent mouseLocation];
 }
 
 - (void)resetMouseLocationToRefuseFirstResponderAt {
+    DLog(@"reset refuse location from\n%@", [NSThread callStackSymbols]);
     _mouseLocationToRefuseFirstResponderAt = NSMakePoint(DBL_MAX, DBL_MAX);
 }
 
@@ -1099,7 +1105,9 @@ static const int kDragThreshold = 3;
     _drawingHelper.copyMode = _delegate.textViewCopyMode;
     _drawingHelper.copyModeSelecting = _delegate.textViewCopyModeSelecting;
     _drawingHelper.copyModeCursorCoord = _delegate.textViewCopyModeCursorCoord;
-    _drawingHelper.passwordInput = _delegate.textViewPasswordInput;
+    _drawingHelper.passwordInput = ([self isInKeyWindow] &&
+                                    [_delegate textViewIsActiveSession] &&
+                                    _delegate.textViewPasswordInput);
 
     DLog(@"drawing document visible rect %@", NSStringFromRect(self.enclosingScrollView.documentVisibleRect));
     
@@ -1853,7 +1861,11 @@ static const int kDragThreshold = 3;
         _keyFocusStolenCount = 0;
         [self setNeedsDisplay:YES];
     }
-    [self resetMouseLocationToRefuseFirstResponderAt];
+    if ([NSApp isActive]) {
+        [self resetMouseLocationToRefuseFirstResponderAt];
+    } else {
+        DLog(@"Ignore mouse exited because app is not active");
+    }
     [self updateUnderlinedURLs:event];
     [_delegate textViewShowHoverURL:nil];
 }
@@ -6148,6 +6160,10 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
     if ([self imageIsVisible:notification.object]) {
         [self setNeedsDisplay:YES];
     }
+}
+
+- (void)applicationDidResignActive:(NSNotification *)notification {
+    [self refuseFirstResponderAtCurrentMouseLocation];
 }
 
 - (BOOL)imageIsVisible:(iTermImageInfo *)image {
