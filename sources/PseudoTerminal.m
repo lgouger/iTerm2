@@ -1567,13 +1567,24 @@ ITERM_WEAKLY_REFERENCEABLE
 - (void)restartSessionWithConfirmation:(PTYSession *)aSession {
     assert(aSession.isRestartable);
     [[self retain] autorelease];
-    NSAlert *alert = [[[NSAlert alloc] init] autorelease];
-    alert.messageText = @"Restart session?";
-    alert.informativeText = @"Running jobs will be killed.";
-    [alert addButtonWithTitle:@"OK"];
-    [alert addButtonWithTitle:@"Cancel"];
-    if (aSession.exited || [alert runModal] == NSAlertFirstButtonReturn) {
+    if (aSession.exited) {
         [aSession restartSession];
+    } else {
+        iTermWarningAction *cancel = [iTermWarningAction warningActionWithLabel:@"Cancel" block:nil];
+        iTermWarningAction *ok =
+            [iTermWarningAction warningActionWithLabel:@"OK"
+                                                 block:^(iTermWarningSelection selection) {
+                                                     if (selection == kiTermWarningSelection0) {
+                                                         [aSession restartSession];
+                                                     }
+                                                 }];
+        iTermWarning *warning = [[[iTermWarning alloc] init] autorelease];
+        warning.heading = @"Restart session?";
+        warning.title = @"Running jobs will be killed.";
+        warning.warningActions = @[ ok, cancel ];
+        warning.identifier = @"NoSyncSuppressRestartSessionConfirmationAlert";
+        warning.warningType = kiTermWarningTypePermanentlySilenceable;
+        [warning runModal];
     }
 }
 
@@ -1615,10 +1626,12 @@ ITERM_WEAKLY_REFERENCEABLE
         [self.window makeKeyAndOrderFront:nil];
     }
     [_contentView.tabView selectTabViewItem:tab.tabViewItem];
-    if (tab.isMaximized) {
-        [tab unmaximize];
+    if (tab.activeSession != session) {
+        if (tab.isMaximized) {
+            [tab unmaximize];
+        }
+        [tab setActiveSession:session];
     }
-    [tab setActiveSession:session];
 }
 
 - (PTYSession *)currentSession {
@@ -3404,18 +3417,33 @@ ITERM_WEAKLY_REFERENCEABLE
     return [self traditionalFullScreenFrameForScreen:self.window.screen];
 }
 
+- (BOOL)menuBarVisibleInFullScreen {
+    if (![iTermPreferences boolForKey:kPreferenceKeyHideMenuBarInFullscreen]) {
+        return YES;
+    }
+    // LSUIElement cannot hide the menu bar, but floating panels have a very high level and overlap it.
+    if ([iTermPreferences boolForKey:kPreferenceKeyUIElement] && ![self.window isKindOfClass:[iTermPanel class]]) {
+        return YES;
+    }
+    return NO;
+}
+
 - (NSRect)traditionalFullScreenFrameForScreen:(NSScreen *)screen {
     NSRect screenFrame = [screen frame];
     NSRect frameMinusMenuBar = screenFrame;
     frameMinusMenuBar.size.height -= [[[NSApplication sharedApplication] mainMenu] menuBarHeight];
     BOOL menuBarIsVisible = NO;
 
-    if (![iTermPreferences boolForKey:kPreferenceKeyHideMenuBarInFullscreen] || [iTermPreferences boolForKey:kPreferenceKeyUIElement]) {
+    if ([self menuBarVisibleInFullScreen]) {
         // Menu bar can show in fullscreen...
         // There is a menu bar on all screens.
         menuBarIsVisible = YES;
     }
-
+    if (menuBarIsVisible) {
+        PtyLog(@"Subtract menu bar from frame");
+    } else {
+        PtyLog(@"Do not subtract menu bar from frame");
+    }
     return menuBarIsVisible ? frameMinusMenuBar : screenFrame;
 }
 

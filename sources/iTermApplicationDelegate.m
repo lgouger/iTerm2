@@ -162,6 +162,7 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
     IBOutlet NSMenuItem *windowArrangements_;
     IBOutlet NSMenuItem *windowArrangementsAsTabs_;
     IBOutlet NSMenu *_buriedSessions;
+    NSMenu *_statusIconBuriedSessions;  // unsafe unretained
 
     IBOutlet NSMenuItem *showFullScreenTabs;
     IBOutlet NSMenuItem *useTransparency;
@@ -457,12 +458,23 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
 }
 
 - (void)updateBuriedSessionsMenu {
-    [_buriedSessions removeAllItems];
+    [self updateBuriedSessionsMenu:_buriedSessions];
+    [self updateBuriedSessionsMenu:_statusIconBuriedSessions];
+}
+
+- (void)updateBuriedSessionsMenu:(NSMenu *)menu {
+    if (!menu) {
+        return;
+    }
+    [menu removeAllItems];
     for (PTYSession *session in [[iTermBuriedSessions sharedInstance] buriedSessions]) {
         NSMenuItem *item = [[[NSMenuItem alloc] initWithTitle:session.name action:@selector(disinter:) keyEquivalent:@""] autorelease];
         item.representedObject = session;
-        [_buriedSessions addItem:item];
+        [menu addItem:item];
     }
+    [[menu.supermenu.itemArray objectPassingTest:^BOOL(NSMenuItem *element, NSUInteger index, BOOL *stop) {
+        return element.submenu == menu;
+    }] setEnabled:menu.itemArray.count > 0];
 }
 
 - (void)disinter:(NSMenuItem *)menuItem {
@@ -1084,6 +1096,14 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
                                        action:@selector(arrangeInFront:)
                                 keyEquivalent:@""] autorelease];
     [menu addItem:item];
+
+    item = [[[NSMenuItem alloc] init] autorelease];
+    _statusIconBuriedSessions = [[[NSMenu alloc] init] autorelease];
+    item.submenu = _statusIconBuriedSessions;
+    item.title = @"Buried Sessions";
+    [menu addItem:item];
+
+    [self updateBuriedSessionsMenu:_statusIconBuriedSessions];
 
     item = [[[NSMenuItem alloc] initWithTitle:@"Check For Updates"
                                        action:@selector(checkForUpdatesFromMenu:)
@@ -1956,6 +1976,14 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
     [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:@"https://www.iterm2.com/documentation.html"]];
 }
 
+- (void)addFile:(NSString *)file toScriptMenu:(NSMenu *)scriptMenu {
+    NSMenuItem *scriptItem = [[[NSMenuItem alloc] initWithTitle:file
+                                                         action:@selector(launchScript:)
+                                                  keyEquivalent:@""] autorelease];
+    [scriptItem setTarget:[iTermController sharedInstance]];
+    [scriptMenu addItem:scriptItem];
+}
+
 - (IBAction)buildScriptMenu:(id)sender {
     static NSString *kScriptTitle = @"Scripts";
     static const int kScriptMenuItemIndex = 5;
@@ -1967,14 +1995,14 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
     NSMenuItem *scriptMenuItem = [[[NSMenuItem alloc] initWithTitle:kScriptTitle action: nil keyEquivalent: @""] autorelease];
 
     // create submenu
-    int count = 0;
-    NSMenu *scriptMenu = [[NSMenu alloc] initWithTitle:kScriptTitle];
-    [scriptMenuItem setSubmenu: scriptMenu];
+    NSMenu *scriptMenu = [[[NSMenu alloc] initWithTitle:kScriptTitle] autorelease];
+    [scriptMenuItem setSubmenu:scriptMenu];
     // populate the submenu with ascripts found in the script directory
     NSString *scriptsPath = [[NSFileManager defaultManager] scriptsPath];
     NSDirectoryEnumerator *directoryEnumerator =
         [[NSFileManager defaultManager] enumeratorAtPath:scriptsPath];
     NSWorkspace *workspace = [NSWorkspace sharedWorkspace];
+    NSMutableArray<NSString *> *files = [NSMutableArray array];
     for (NSString *file in directoryEnumerator) {
         NSString *path = [scriptsPath stringByAppendingPathComponent:file];
         if ([workspace isFilePackageAtPath:path]) {
@@ -1982,29 +2010,21 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
         }
         if ([[file pathExtension] isEqualToString:@"scpt"] ||
             [[file pathExtension] isEqualToString:@"app"] ) {
-            NSMenuItem *scriptItem = [[NSMenuItem alloc] initWithTitle:file
-                                                                action:@selector(launchScript:)
-                                                         keyEquivalent:@""];
-            [scriptItem setTarget:[iTermController sharedInstance]];
-            [scriptMenu addItem:scriptItem];
-            count++;
-            [scriptItem release];
+            [files addObject:file];
         }
     }
-    if (count > 0) {
-            [scriptMenu addItem:[NSMenuItem separatorItem]];
-            NSMenuItem *scriptItem = [[NSMenuItem alloc] initWithTitle:@"Refresh"
-                                                                action:@selector(buildScriptMenu:)
-                                                         keyEquivalent:@""];
-            [scriptItem setTarget:self];
-            [scriptMenu addItem:scriptItem];
-            count++;
-            [scriptItem release];
+    [files sortUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
+    for (NSString *file in files) {
+        [self addFile:file toScriptMenu:scriptMenu];
     }
-    [scriptMenu release];
+    if (files.count > 0) {
+        [scriptMenu addItem:[NSMenuItem separatorItem]];
+        NSMenuItem *scriptItem = [[[NSMenuItem alloc] initWithTitle:@"Refresh"
+                                                             action:@selector(buildScriptMenu:)
+                                                      keyEquivalent:@""] autorelease];
+        [scriptItem setTarget:self];
+        [scriptMenu addItem:scriptItem];
 
-    // add new menu item
-    if (count) {
         [[NSApp mainMenu] insertItem:scriptMenuItem atIndex:kScriptMenuItemIndex];
         [scriptMenuItem setTitle:kScriptTitle];
     }
