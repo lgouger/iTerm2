@@ -7,10 +7,25 @@
 //
 
 #import <Foundation/Foundation.h>
+#include <assert.h>
 
 extern BOOL gDebugLogging;
 
 #define USE_STOPWATCH 0
+
+#define ENABLE_EXTRA_DEBUGGING 0
+#if ENABLE_EXTRA_DEBUGGING
+#define ITExtraDebugAssert assert
+#else
+#define ITExtraDebugAssert(condition)
+#endif
+
+#if ITERM_DEBUG
+#define ITDebugAssert assert
+#else
+// Cast condition to void to avoid unused variable warnings.
+#define ITDebugAssert(condition) ((void)(condition))
+#endif
 
 #if !ITERM_DEBUG && USE_STOPWATCH
 #define STOPWATCH_START(name) \

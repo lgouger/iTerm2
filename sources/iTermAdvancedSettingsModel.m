@@ -171,7 +171,7 @@ DEFINE_BOOL(statusBarIcon, YES, @"General: Add status bar icon when excluded fro
 #pragma mark - Drawing
 DEFINE_BOOL(zippyTextDrawing, YES, @"Drawing: Use zippy text drawing algorithm?\nThis draws non-ASCII text more quickly but with lower fidelity. This setting is ignored if ligatures are enabled in Prefs > Profiles > Text.");
 DEFINE_BOOL(lowFiCombiningMarks, NO, @"Drawing: Prefer speed to accuracy for characters with combining marks?");
-DEFINE_BOOL(useAdaptiveFrameRate, YES, @"Drawing: Use adaptive framerate.\nWhen throughput is low, the screen will update at 60 frames per second. When throughput is higher, it will drop to a configurable rate (15 fps by default).");
+DEFINE_BOOL(useAdaptiveFrameRate, YES, @"Drawing: Use adaptive framerate.\nWhen throughput is low, the screen will update at 60 frames per second. When throughput is higher, it will drop to a configurable rate (15 fps by default). Does not apply to Metal renderer.");
 DEFINE_FLOAT(slowFrameRate, 15.0, @"Drawing: When adaptive framerate is enabled, refresh at this rate during high throughput conditions (FPS).");
 DEFINE_INT(adaptiveFrameRateThroughputThreshold, 10000, @"Drawing: Throughput threshold for adaptive frame rate.\nIf more than this many bytes per second are received, use the lower frame rate of 30 fps.");
 DEFINE_BOOL(dwcLineCache, YES, @"Drawing: Enable cache of double-width character locations?\nThis should improve performance. It is always on in nightly builds. You must restart iTerm2 for this setting to take effect.");
@@ -278,8 +278,6 @@ DEFINE_INT(badgeTopMargin, 10, @"Badge: Top Margin for the badge\nHow much space
 
 #pragma mark - Experimental Features
 
-// This is half implemented and should not be turned on by default.
-DEFINE_BOOL(useLayers, NO, @"Experimental Features: Use Core Animation layers for opaque terminal views");
 DEFINE_BOOL(enableAPIServer, NO, @"Experimental Features: Enable websocket API server.\nYou must restart iTerm2 for this change to take effect.");
 DEFINE_BOOL(killSessionsOnLogout, NO, @"Experimental Features: Kill sessions on logout.\nA possible fix for issue 4147.");
 
@@ -294,5 +292,7 @@ DEFINE_BOOL(supportREPCode, NO, @"Experimental Features: Enable support for REP 
 #endif
 
 DEFINE_BOOL(showBlockBoundaries, NO, @"Debugging: Show line buffer block boundaries (issue 6207)");
+DEFINE_BOOL(useMetal, NO, @"Experimental Features: Use Metal GPU-based renderer.\nThis should provide higher performance but it does not support transparent windows or ligatures and may have other missing features.");
+DEFINE_BOOL(showMetalFPSmeter, NO, @"Experimental Features: Show FPS meter\nRequires Metal renderer");
 
 @end

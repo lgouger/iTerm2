@@ -9,6 +9,8 @@
 #import "iTermColorMap.h"
 #import "ITAddressBookMgr.h"
 #import "NSColor+iTerm.h"
+#include <unordered_map>
+#import <simd/simd.h>
 
 const int kColorMapForeground = 0;
 const int kColorMapBackground = 1;
@@ -53,6 +55,8 @@ const int kColorMapAnsiBrightModifier = 8;
     // This one actually uses four components.
     CGFloat _lastBackgroundComponents[4];
     NSColor *_lastBackgroundColor;
+
+    std::unordered_map<int, vector_float4> *_fastMap;
 }
 
 + (iTermColorMapKey)keyFor8bitRed:(int)red
@@ -65,6 +69,7 @@ const int kColorMapAnsiBrightModifier = 8;
     self = [super init];
     if (self) {
         _map = [[NSMutableDictionary alloc] init];
+        _fastMap = new std::unordered_map<int, vector_float4>();
     }
     return self;
 }
@@ -73,6 +78,7 @@ const int kColorMapAnsiBrightModifier = 8;
     [_map release];
     [_lastTextColor release];
     [_lastBackgroundColor release];
+    delete _fastMap;
     [super dealloc];
 }
 
@@ -92,12 +98,15 @@ const int kColorMapAnsiBrightModifier = 8;
 
     if (!theColor) {
         [_map removeObjectForKey:@(theKey)];
+        _fastMap->erase(theKey);
         return;
     }
 
     if (theColor == _map[@(theKey)])
         return;
 
+    CGFloat components[4];
+    [theColor getComponents:components];
     if (theKey == kColorMapBackground) {
         _backgroundRed = [theColor redComponent];
         _backgroundGreen = [theColor greenComponent];
@@ -111,6 +120,12 @@ const int kColorMapAnsiBrightModifier = 8;
     }
 
     _map[@(theKey)] = theColor;
+    (*_fastMap)[theKey] = (vector_float4){
+        (float)components[0],
+        (float)components[1],
+        (float)components[2],
+        (float)components[3]
+   };
 
     [_delegate colorMap:self didChangeColorForKey:theKey];
 }
@@ -126,6 +141,23 @@ const int kColorMapAnsiBrightModifier = 8;
         return [NSColor colorWith8BitRed:red green:green blue:blue];
     } else {
         return _map[@(theKey)];
+    }
+}
+
+- (vector_float4)fastColorForKey:(iTermColorMapKey)theKey {
+    if (theKey == kColorMapInvalid) {
+        return simd_make_float4(1, 0, 0, 1);
+    } else if (theKey >= kColorMap24bitBase) {
+        int n = theKey - kColorMap24bitBase;
+        int blue = (n & 0xff);
+        int green = (n >> 8) & 0xff;
+        int red = (n >> 16) & 0xff;
+        return simd_make_float4(red / 255.0,
+                                green / 255.0,
+                                blue / 255.0,
+                                1);
+    } else {
+        return (*_fastMap)[theKey];
     }
 }
 
@@ -145,6 +177,16 @@ const int kColorMapAnsiBrightModifier = 8;
         result[i] = rgb1[i] * (1 - alpha) + rgb2[i] * alpha;
     }
     result[3] = rgb1[3];
+}
+
+- (vector_float4)fastAverageComponents:(vector_float4)rgb1 with:(vector_float4)rgb2 alpha:(float)alpha {
+    vector_float4 result = {
+        rgb1.x * (1 - alpha) + rgb2.x * alpha,
+        rgb1.y * (1 - alpha) + rgb2.y * alpha,
+        rgb1.z * (1 - alpha) + rgb2.z * alpha,
+        rgb1.w
+    };
+    return result;
 }
 
 // There is an issue where where the passed-in color can be in a different color space than the
@@ -220,6 +262,28 @@ const int kColorMapAnsiBrightModifier = 8;
     CGFloat components[4];
     [color getComponents:components];
 
+    vector_float4 colorVector = simd_make_float4(components[0],
+                                                 components[1],
+                                                 components[2],
+                                                 components[3]);
+    vector_float4 v = [self commonColorByMutingColor:colorVector];
+
+    CGFloat mutedRgb[4] = { v.x, v.y, v.z, v.w };
+    return [NSColor colorWithColorSpace:color.colorSpace
+                             components:mutedRgb
+                                  count:4];
+}
+
+- (vector_float4)fastColorByMutingColor:(vector_float4)color {
+    if (_mutingAmount < 0.01) {
+        return color;
+    }
+
+    return [self commonColorByMutingColor:color];
+}
+
+- (vector_float4)commonColorByMutingColor:(vector_float4)color {
+    CGFloat components[4] = { color.x, color.y, color.z, color.w };
     CGFloat defaultBackgroundComponents[4];
     [_map[@(kColorMapBackground)] getComponents:defaultBackgroundComponents];
 
@@ -230,9 +294,7 @@ const int kColorMapAnsiBrightModifier = 8;
                         alpha:_mutingAmount];
     mutedRgb[3] = components[3];
 
-    return [NSColor colorWithColorSpace:color.colorSpace
-                             components:mutedRgb
-                                  count:4];
+    return simd_make_float4(mutedRgb[0], mutedRgb[1], mutedRgb[2], components[3]);
 }
 
 // There is an issue where where the passed-in color can be in a different color space than the
@@ -263,6 +325,40 @@ const int kColorMapAnsiBrightModifier = 8;
     return [NSColor colorWithColorSpace:color.colorSpace
                              components:dimmedRgb
                                   count:4];
+}
+
+- (vector_float4)fastProcessedBackgroundColorForBackgroundColor:(vector_float4)backgroundColor {
+    vector_float4 defaultBackgroundComponents = (*_fastMap)[kColorMapBackground];
+    const vector_float4 mutedRgb = [self fastAverageComponents:backgroundColor with:defaultBackgroundComponents alpha:_mutingAmount];
+    vector_float4 grayRgb { 0.5, 0.5, 0.5, 1 };
+
+    BOOL shouldDim = !_dimOnlyText && _dimmingAmount > 0;
+    // If dimOnlyText is set then text and non-default background colors get dimmed toward black.
+    if (_dimOnlyText) {
+        const BOOL isDefaultBackgroundColor =
+        (fabs(backgroundColor.x - defaultBackgroundComponents.x) < 0.01 &&
+         fabs(backgroundColor.y - defaultBackgroundComponents.y) < 0.01 &&
+         fabs(backgroundColor.z - defaultBackgroundComponents.z) < 0.01);
+        if (!isDefaultBackgroundColor) {
+            grayRgb = (vector_float4){
+                (float)_backgroundBrightness,
+                (float)_backgroundBrightness,
+                (float)_backgroundBrightness,
+                1
+            };
+            shouldDim = YES;
+        }
+    }
+
+    vector_float4 dimmedRgb;
+    if (shouldDim) {
+        dimmedRgb = [self fastAverageComponents:mutedRgb with:grayRgb alpha:_dimmingAmount];
+    } else {
+        dimmedRgb = mutedRgb;
+    }
+    dimmedRgb.w = backgroundColor.w;
+
+    return dimmedRgb;
 }
 
 // There is an issue where where the passed-in color can be in a different color space than the
@@ -381,6 +477,41 @@ const int kColorMapAnsiBrightModifier = 8;
     }
 
     return nil;
+}
+
+- (id)copyWithZone:(NSZone *)zone {
+    iTermColorMap *other = [[iTermColorMap alloc] init];
+    if (!other) {
+        return nil;
+    }
+
+    other->_backgroundBrightness = _backgroundBrightness;
+    other->_backgroundRed = _backgroundRed;
+    other->_backgroundGreen = _backgroundGreen;
+    other->_backgroundBlue = _backgroundBlue;
+
+    memmove(other->_lastTextComponents, _lastTextComponents, sizeof(_lastTextComponents));
+    other->_lastTextColor = [_lastTextColor retain];
+
+    memmove(other->_lastBackgroundComponents, _lastBackgroundComponents, sizeof(_lastBackgroundComponents));
+    other->_lastBackgroundColor = [_lastBackgroundColor retain];
+
+    other->_dimOnlyText = _dimOnlyText;
+    other->_dimmingAmount = _dimmingAmount;
+
+    other->_mutingAmount = _mutingAmount;
+
+    other->_minimumContrast = _minimumContrast;
+
+    other->_delegate = _delegate;
+
+    [other->_map release];
+    other->_map = [_map mutableCopy];
+
+    delete other->_fastMap;
+    other->_fastMap = new std::unordered_map<int, vector_float4>(*_fastMap);
+
+    return other;
 }
 
 @end

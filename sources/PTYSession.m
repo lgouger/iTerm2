@@ -19,10 +19,13 @@
 #import "iTermController.h"
 #import "iTermCopyModeState.h"
 #import "iTermGrowlDelegate.h"
+#import "iTermHistogram.h"
 #import "iTermHotKeyController.h"
 #import "iTermInitialDirectory.h"
 #import "iTermKeyBindingMgr.h"
 #import "iTermKeyLabels.h"
+#import "iTermMetalGlue.h"
+#import "iTermMetalDriver.h"
 #import "iTermMenuOpener.h"
 #import "iTermMouseCursor.h"
 #import "iTermPasteHelper.h"
@@ -221,6 +224,7 @@ static const NSUInteger kMaxHosts = 100;
     iTermAutomaticProfileSwitcherDelegate,
     iTermCoprocessDelegate,
     iTermHotKeyNavigableSession,
+    iTermMetalGlueDelegate,
     iTermPasteHelperDelegate,
     iTermSessionViewDelegate,
     iTermUpdateCadenceControllerDelegate>
@@ -466,6 +470,10 @@ static const NSUInteger kMaxHosts = 100;
     long long _statusChangedAbsLine;
 
     iTermUpdateCadenceController *_cadenceController;
+
+    iTermMetalGlue *_metalGlue NS_AVAILABLE_MAC(10_11);
+
+    int _updateCount;
 }
 
 + (void)registerSessionInArrangement:(NSDictionary *)arrangement {
@@ -549,6 +557,11 @@ static const NSUInteger kMaxHosts = 100;
         _customEscapeSequenceNotifications = [[NSMutableDictionary alloc] init];
 
         _statusChangedAbsLine = -1;
+        if (@available(macOS 10.11, *)) {
+            _metalGlue = [[iTermMetalGlue alloc] init];
+            _metalGlue.delegate = self;
+            _metalGlue.screen = _screen;
+        }
 
         [[NSNotificationCenter defaultCenter] addObserver:self
                                                  selector:@selector(coprocessChanged)
@@ -598,6 +611,10 @@ static const NSUInteger kMaxHosts = 100;
                                                  selector:@selector(windowDidEndLiveResize:)
                                                      name:NSWindowDidEndLiveResizeNotification
                                                    object:nil];
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(annotationVisibilityDidChange:)
+                                                     name:iTermAnnotationVisibilityDidChange
+                                                   object:nil];
         [self updateVariables];
 
         if (!synthetic) {
@@ -611,6 +628,9 @@ ITERM_WEAKLY_REFERENCEABLE
 
 - (void)iterm_dealloc {
     [_view release];
+    if (@available(macOS 10.11, *)) {
+        [_metalGlue release];
+    }
     [self stopTailFind];  // This frees the substring in the tail find context, if needed.
     _shell.delegate = nil;
     dispatch_release(_executionSemaphore);
@@ -1306,6 +1326,9 @@ ITERM_WEAKLY_REFERENCEABLE
     NSDictionary *liveArrangement = arrangement[SESSION_ARRANGEMENT_LIVE_SESSION];
     if (liveArrangement) {
         SessionView *liveView = [[[SessionView alloc] initWithFrame:sessionView.frame] autorelease];
+        if (@available(macOS 10.11, *)) {
+            liveView.driver.dataSource = aSession->_metalGlue;
+        }
         [delegate addHiddenLiveView:liveView];
         aSession.liveSession = [self sessionFromArrangement:liveArrangement
                                                      inView:liveView
@@ -1357,6 +1380,9 @@ ITERM_WEAKLY_REFERENCEABLE
     // Allocate the root per-session view.
     if (!_view) {
         self.view = [[[SessionView alloc] initWithFrame:NSMakeRect(0, 0, aRect.size.width, aRect.size.height)] autorelease];
+        if (@available(macOS 10.11, *)) {
+            self.view.driver.dataSource = _metalGlue;
+        }
         [[_view findViewController] setDelegate:self];
     }
 
@@ -1368,6 +1394,9 @@ ITERM_WEAKLY_REFERENCEABLE
 
     _textview = [[PTYTextView alloc] initWithFrame: NSMakeRect(0, [iTermAdvancedSettingsModel terminalVMargin], aSize.width, aSize.height)
                                           colorMap:_colorMap];
+    if (@available(macOS 10.11, *)) {
+        _metalGlue.textView = _textview;
+    }
     _colorMap.dimOnlyText = [iTermPreferences boolForKey:kPreferenceKeyDimOnlyText];
     [_textview setAutoresizingMask: NSViewWidthSizable | NSViewHeightSizable];
     [_textview setFont:[ITAddressBookMgr fontWithDesc:[_profile objectForKey:KEY_NORMAL_FONT]]
@@ -1418,6 +1447,11 @@ ITERM_WEAKLY_REFERENCEABLE
     _newOutput = NO;
     [_view updateScrollViewFrame];
     [self useTransparencyDidChange];
+
+    if (@available(macOS 10.11, *)) {
+        [self updateMetalDriver];
+    }
+
     return YES;
 }
 
@@ -1513,6 +1547,9 @@ ITERM_WEAKLY_REFERENCEABLE
     if (!_tailFindTimer &&
         [_delegate sessionBelongsToVisibleTab]) {
         [self beginTailFind];
+    }
+    if (@available(macOS 10.11, *)) {
+        [self updateMetalDriver];
     }
 }
 
@@ -1920,6 +1957,9 @@ ITERM_WEAKLY_REFERENCEABLE
     [_textview setDelegate:nil];
     [_textview removeFromSuperview];
     _textview = nil;
+    if (@available(macOS 10.11, *)) {
+        _metalGlue.textView = nil;
+    }
 }
 
 - (void)jumpToLocationWhereCurrentStatusChanged {
@@ -2367,7 +2407,7 @@ ITERM_WEAKLY_REFERENCEABLE
         dispatch_semaphore_signal(_executionSemaphore);
         dispatch_release(_executionSemaphore);
         [self release];
-        });
+    });
 }
 
 - (void)synchronousReadTask:(NSString *)string {
@@ -3703,6 +3743,9 @@ ITERM_WEAKLY_REFERENCEABLE
     [_view autorelease];
     _view = [newView retain];
     newView.delegate = self;
+    if (@available(macOS 10.11, *)) {
+        newView.driver.dataSource = _metalGlue;
+    }
     [newView updateTitleFrame];
     [[_view findViewController] setDelegate:self];
 }
@@ -3759,22 +3802,15 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (BOOL)viewShouldWantLayer {
-    if (![iTermAdvancedSettingsModel useLayers]) {
-        return NO;
-    }
-    if (!_delegate.realParentWindow || !_textview) {
-        return YES;
-    }
-    BOOL isTransparent = ([[_delegate realParentWindow] useTransparency] && [_textview transparency] > 0);
-    return !isTransparent;
+    return NO;
 }
 
 - (void)useTransparencyDidChange {
     // The view does not like getting replaced during the spin of the runloop during which it is created.
-    if (_view.window && _delegate.realParentWindow && _textview && self.viewShouldWantLayer != _view.useSubviewWithLayer) {
+    if (_view.window && _delegate.realParentWindow && _textview) {
         dispatch_async(dispatch_get_main_queue(), ^{
-            if (_view.window && _delegate.realParentWindow && _textview && self.viewShouldWantLayer != _view.useSubviewWithLayer) {
-                _view.useSubviewWithLayer = self.viewShouldWantLayer;
+            if (_view.window && _delegate.realParentWindow && _textview) {
+                [_delegate sessionUpdateMetalAllowed];
             }
         });
     }
@@ -4136,6 +4172,13 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (void)updateDisplay {
+    _updateCount++;
+    if (@available(macOS 10.11, *)) {
+        if (_useMetal && _updateCount % 10 == 0) {
+            iTermPreciseTimerSaveLog([NSString stringWithFormat:@"%@: updateDisplay interval", _view.driver.identifier],
+                                     _cadenceController.histogram.stringValue);
+        }
+    }
     _timerRunning = YES;
     
     // Set attributes of tab to indicate idle, processing, etc.
@@ -4371,6 +4414,15 @@ ITERM_WEAKLY_REFERENCEABLE
             _inLiveResize = NO;
             [_cadenceController liveResizeDidEnd];
         }
+    }
+}
+
+// Metal is disabled when any note anywhere is visible because compositing NSViews over Metal
+// is a horror and besides these are subviews of PTYTextView and I really don't
+// want to invest any more in this little-used feature.
+- (void)annotationVisibilityDidChange:(NSNotification *)notification {
+    if ([iTermAdvancedSettingsModel useMetal]) {
+        [_delegate sessionUpdateMetalAllowed];
     }
 }
 
@@ -4678,6 +4730,74 @@ ITERM_WEAKLY_REFERENCEABLE
                                                     }
                                                 }];
     [self queueAnnouncement:announcement identifier:@"AbortUploadOnKeyPressAnnouncement"];
+}
+
+#pragma mark - Metal Support
+
+- (void)metalGlueDidDrawFrameAndNeedsRedraw:(BOOL)redrawAsap NS_AVAILABLE_MAC(10_11) {
+    if (_view.useMetal) {
+        // If the text view had been visible, hide it. Hiding it before the
+        // first frame is drawn causes a flash of gray.
+        DLog(@"metalGlueDidDrawFrame");
+        _wrapper.useMetal = YES;
+        _textview.suppressDrawing = YES;
+        _view.metalView.alphaValue = 1;
+        if (redrawAsap) {
+            [_textview setNeedsDisplay:YES];
+        }
+    }
+}
+
+- (BOOL)metalAllowed {
+    static dispatch_once_t onceToken;
+    static BOOL machineSupportsMetal;
+    if (@available(macOS 10.11, *)) {
+        dispatch_once(&onceToken, ^{
+            NSArray<id<MTLDevice>> *devices = MTLCopyAllDevices();
+            machineSupportsMetal = devices.count > 0;
+            [devices release];
+        });
+    }
+    return ([iTermAdvancedSettingsModel useMetal] &&
+            machineSupportsMetal &&
+            _textview.transparencyAlpha == 1 &&
+            ![iTermProfilePreferences boolForKey:KEY_ASCII_LIGATURES inProfile:self.profile] &&
+            ![iTermProfilePreferences boolForKey:KEY_NON_ASCII_LIGATURES inProfile:self.profile] &&
+            ![PTYNoteViewController anyNoteVisible] &&
+            _view.currentAnnouncement == nil);
+}
+
+- (void)setUseMetal:(BOOL)useMetal {
+    if (@available(macOS 10.11, *)) {
+        if (useMetal == _useMetal) {
+            return;
+        }
+        _useMetal = useMetal;
+        // The metalview's alpha will initially be 0. Once it has drawn a frame we'll swap what is visible.
+        [self setUseMetal:useMetal dataSource:_metalGlue];
+        if (useMetal) {
+            [self updateMetalDriver];
+            // wrapper.useMetal becomes YES after the first frame is done drawing
+        } else {
+            _wrapper.useMetal = NO;
+        }
+        [_textview setNeedsDisplay:YES];
+        [_cadenceController changeCadenceIfNeeded];
+    }
+}
+
+- (void)setUseMetal:(BOOL)useMetal dataSource:(id<iTermMetalDriverDataSource>)dataSource NS_AVAILABLE_MAC(10_11) {
+    [_view setUseMetal:useMetal dataSource:dataSource];
+    if (!useMetal) {
+        _textview.suppressDrawing = NO;
+    }
+}
+
+- (void)updateMetalDriver NS_AVAILABLE_MAC(10_11) {
+    [_view.driver setCellSize:CGSizeMake(_textview.charWidth, _textview.lineHeight)
+       cellSizeWithoutSpacing:CGSizeMake(_textview.charWidthWithoutSpacing, _textview.charHeightWithoutSpacing)
+                     gridSize:_screen.currentGrid.size
+                        scale:_view.window.screen.backingScaleFactor];
 }
 
 #pragma mark - Captured Output
@@ -6238,6 +6358,9 @@ ITERM_WEAKLY_REFERENCEABLE
         [self notifyTmuxFontChange];
     }
     [_view updateScrollViewFrame];
+    if (@available(macOS 10.11, *)) {
+        [self updateMetalDriver];
+    }
 }
 
 - (BOOL)textViewHasBackgroundImage {
@@ -6312,6 +6435,10 @@ ITERM_WEAKLY_REFERENCEABLE
         [[[self processedBackgroundColor] colorWithAlphaComponent:alpha] set];
         NSRectFillUsingOperation(rect, NSCompositeCopy);
     }
+}
+
+- (NSImage *)textViewBackgroundImage {
+    return _backgroundImage;
 }
 
 - (NSColor *)processedBackgroundColor {
@@ -6807,6 +6934,7 @@ ITERM_WEAKLY_REFERENCEABLE
 
 - (void)textViewBackgroundColorDidChange {
     [_delegate sessionBackgroundColorDidChange:self];
+    [_delegate sessionUpdateMetalAllowed];
 }
 
 - (void)textViewBurySession {
@@ -6844,6 +6972,27 @@ ITERM_WEAKLY_REFERENCEABLE
         _copyModeState.coord = range.start;
         _copyModeState.start = range.end;
         [self.textview setNeedsDisplay:YES];
+    }
+}
+
+- (void)textViewNeedsDisplayInRect:(NSRect)rect {
+    if (@available(macOS 10.11, *)) {
+        NSRect visibleRect = NSIntersectionRect(rect, _textview.enclosingScrollView.documentVisibleRect);
+        [_view setMetalViewNeedsDisplayInTextViewRect:visibleRect];
+    }
+}
+
+- (BOOL)textViewShouldDrawRect {
+    if (@available(macOS 10.11, *)) {
+        return !_textview.suppressDrawing;
+    } else {
+        return YES;
+    }
+}
+
+- (void)textViewDidHighightMark {
+    if (self.useMetal) {
+        [_textview setNeedsDisplay:YES];
     }
 }
 
@@ -9020,6 +9169,16 @@ ITERM_WEAKLY_REFERENCEABLE
     [self.textview.window makeFirstResponder:self.textview];
 }
 
+- (void)sessionViewDidChangeWindow {
+    if (@available(macOS 10.11, *)) {
+        [self updateMetalDriver];
+    }
+}
+
+- (void)sessionViewAnnouncementDidChange:(SessionView *)sessionView {
+    [self.delegate sessionUpdateMetalAllowed];
+}
+
 #pragma mark - iTermCoprocessDelegate
 
 - (void)coprocess:(Coprocess *)coprocess didTerminateWithErrorOutput:(NSString *)errors {
@@ -9053,7 +9212,7 @@ ITERM_WEAKLY_REFERENCEABLE
     state.active = _active;
     state.idle = self.isIdle;
     state.visible = [_delegate sessionBelongsToVisibleTab];
-    state.useAdaptiveFrameRate = _useAdaptiveFrameRate;
+    state.useAdaptiveFrameRate = _useAdaptiveFrameRate && !self.useMetal;
     state.adaptiveFrameRateThroughputThreshold = _adaptiveFrameRateThroughputThreshold;
     state.slowFrameRate = _slowFrameRate;
     state.liveResizing = _inLiveResize;

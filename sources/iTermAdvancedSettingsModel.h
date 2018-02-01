@@ -156,7 +156,6 @@
 + (double)timeBetweenTips;
 + (void)setTimeBetweenTips:(double)time;
 + (BOOL)openFileOverridesSendText;
-+ (BOOL)useLayers;
 + (int)terminalMargin;
 + (int)terminalVMargin;
 + (BOOL)useColorfgbgFallback;
@@ -188,7 +187,7 @@
 + (BOOL)detectPasswordInput;
 + (BOOL)disablePasswordManagerAnimations;
 + (BOOL)focusNewSplitPaneWithFocusFollowsMouse;
-+ (BOOL)suppressRestartSessionConfirmationAlert;
++ (BOOL)NoSyncSuppressRestartSessionConfirmationAlert;
 + (NSString *)viewManPageCommand;
 + (BOOL)preventEscapeSequenceFromClearingHistory;
 + (BOOL)dwcLineCache;
@@ -200,5 +199,7 @@
 + (BOOL)useExperimentalFontMetrics;
 + (BOOL)supportREPCode;
 + (BOOL)showBlockBoundaries;
++ (BOOL)useMetal;
++ (BOOL)showMetalFPSmeter;
 
 @end

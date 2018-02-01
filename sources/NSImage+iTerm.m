@@ -11,6 +11,35 @@
 
 @implementation NSImage (iTerm)
 
++ (NSImage *)imageOfSize:(NSSize)size color:(NSColor *)color {
+    return [self imageOfSize:size drawBlock:^{
+        [color set];
+        NSRectFill(NSMakeRect(0, 0, size.width, size.height));
+    }];
+}
+
++ (instancetype)imageOfSize:(NSSize)size drawBlock:(void (^)(void))block {
+    NSImage *image = [[[NSImage alloc] initWithSize:size] autorelease];
+
+    [image lockFocus];
+    block();
+    [image unlockFocus];
+
+    return image;
+}
+
++ (NSMutableData *)argbDataForImageOfSize:(NSSize)size drawBlock:(void (^)(CGContextRef context))block {
+    NSMutableData *data = [NSMutableData data];
+    CGContextRef context = [NSImage newBitmapContextOfSize:size storage:data];
+    NSGraphicsContext *graphicsContext = [NSGraphicsContext graphicsContextWithCGContext:context flipped:NO];
+    NSGraphicsContext *savedContext = [NSGraphicsContext currentContext];
+    [NSGraphicsContext setCurrentContext:graphicsContext];
+    block(context);
+    [NSGraphicsContext setCurrentContext:savedContext];
+    CGContextRelease(context);
+    return data;
+}
+
 + (instancetype)imageWithRawData:(NSData *)data
                             size:(NSSize)size
                    bitsPerSample:(NSInteger)bitsPerSample
@@ -88,8 +117,7 @@
     return destination;
 }
 
-- (CGContextRef)newBitmapContextWithStorage:(NSMutableData *)data {
-  NSSize size = self.size;
++ (CGContextRef)newBitmapContextOfSize:(NSSize)size storage:(NSMutableData *)data {
   NSInteger bytesPerRow = size.width * 4;
   NSUInteger storageNeeded = bytesPerRow * size.height;
   [data setLength:storageNeeded];
@@ -109,6 +137,11 @@
 
 
   return context;
+}
+
+- (CGContextRef)newBitmapContextWithStorage:(NSMutableData *)data {
+    NSSize size = self.size;
+    return [NSImage newBitmapContextOfSize:size storage:data];
 }
 
 - (NSImage *)imageWithColor:(NSColor *)color {
@@ -139,6 +172,10 @@
   CGImageRelease(image);
 
   return coloredImage;
+}
+
+- (void)saveAsPNGTo:(NSString *)filename {
+    [[self dataForFileOfType:NSPNGFileType] writeToFile:filename atomically:NO];
 }
 
 // TODO: Should this use -bitmapImageRep?
@@ -190,6 +227,23 @@
     [NSGraphicsContext restoreGraphicsState];
     
     return [rep autorelease];
+}
+
+- (NSImageRep *)bestRepresentationForScale:(CGFloat)desiredScale {
+    NSImageRep *best = nil;
+    double bestScale = 0;
+    CGFloat width = self.size.width;
+    if (width <= 0) {
+        return nil;
+    }
+    for (NSImageRep *rep in self.representations) {
+        const double scale = best.pixelsWide / width;
+        if (!best || fabs(desiredScale - scale) < fabs(desiredScale - bestScale)) {
+            best = rep;
+            bestScale = scale;
+        }
+    }
+    return best;
 }
 
 @end

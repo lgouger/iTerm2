@@ -53,6 +53,7 @@ static const CGFloat kMaximumToolbeltSizeAsFractionOfWindow = 0.5;
         
         // Create the tab view.
         self.tabView = [[[PTYTabView alloc] initWithFrame:self.bounds] autorelease];
+        self.tabView.drawsBackground = !_useMetal;
         _tabView.autoresizingMask = (NSViewWidthSizable | NSViewHeightSizable);
         _tabView.autoresizesSubviews = YES;
         _tabView.allowsTruncatedLabels = NO;
@@ -119,6 +120,25 @@ static const CGFloat kMaximumToolbeltSizeAsFractionOfWindow = 0.5;
     [super dealloc];
 }
 
+- (void)drawRect:(NSRect)dirtyRect {
+    if (_useMetal) {
+        return;
+    } else {
+        [super drawRect:dirtyRect];
+    }
+}
+
+- (void)setUseMetal:(BOOL)useMetal {
+    _useMetal = useMetal;
+    self.tabView.drawsBackground = !_useMetal;
+
+    [_divisionView removeFromSuperview];
+    [_divisionView release];
+    _divisionView = nil;
+
+    [self updateDivisionView];
+}
+
 #pragma mark - Division View
 
 - (void)updateDivisionView {
@@ -130,7 +150,8 @@ static const CGFloat kMaximumToolbeltSizeAsFractionOfWindow = 0.5;
                                               self.bounds.size.width,
                                               kDivisionViewHeight);
         if (!_divisionView) {
-            _divisionView = [[SolidColorView alloc] initWithFrame:divisionViewFrame];
+            Class theClass = _useMetal ? [iTermLayerBackedSolidColorView class] : [SolidColorView class];
+            _divisionView = [[theClass alloc] initWithFrame:divisionViewFrame];
             _divisionView.autoresizingMask = (NSViewWidthSizable | NSViewMinYMargin);
             [self addSubview:_divisionView];
         }

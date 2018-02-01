@@ -55,6 +55,7 @@
 #import "iTermOpenQuicklyWindowController.h"
 #import "iTermOrphanServerAdopter.h"
 #import "iTermPasswordManagerWindowController.h"
+#import "iTermPreciseTimer.h"
 #import "iTermPreferences.h"
 #import "iTermPromptOnCloseReason.h"
 #import "iTermProfilePreferences.h"
@@ -89,7 +90,7 @@
 #import "TmuxDashboardController.h"
 #import "ToastWindowController.h"
 #import "VT100Terminal.h"
-
+#import "iTermSubpixelModelBuilder.h"
 #import <Quartz/Quartz.h>
 #import <objc/runtime.h>
 
@@ -339,6 +340,8 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
         return YES;
     } else if ([menuItem action] == @selector(makeDefaultTerminal:)) {
         return ![[iTermLaunchServices sharedInstance] iTermIsDefaultTerminal];
+    } else if ([menuItem action] == @selector(checkForIncompatibleSoftware:)) {
+        return [iTermAdvancedSettingsModel logDrawingPerformance];
     } else if (menuItem == maximizePane) {
         if ([[[iTermController sharedInstance] currentTerminal] inInstantReplay]) {
             // Things get too complex if you allow this. It crashes.
@@ -926,6 +929,7 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
     }
     
     [self hideStuckToolTips];
+    iTermPreciseTimerClearLogs();
 }
 
 - (void)applicationWillFinishLaunching:(NSNotification *)aNotification {
@@ -1509,6 +1513,13 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
         [alert addButtonWithTitle:@"OK"];
         [alert runModal];
     }
+}
+
+- (IBAction)copyPerformanceStats:(id)sender {
+    NSString *copyString = iTermPreciseTimerGetSavedLogs();
+    NSPasteboard *pboard = [NSPasteboard generalPasteboard];
+    [pboard declareTypes:[NSArray arrayWithObject:NSStringPboardType] owner:self];
+    [pboard setString:copyString forType:NSStringPboardType];
 }
 
 - (IBAction)checkForUpdatesFromMenu:(id)sender {

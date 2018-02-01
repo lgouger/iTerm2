@@ -9,6 +9,7 @@
 #import <Foundation/Foundation.h>
 #import "ITAddressBookMgr.h"
 #import "iTermCursor.h"
+#import "iTermTimestampDrawHelper.h"
 #import "ScreenChar.h"
 #import "VT100GridTypes.h"
 
@@ -18,6 +19,8 @@
 @class iTermTextExtractor;
 @class PTYFontInfo;
 @class VT100ScreenMark;
+
+BOOL CheckFindMatchAtIndex(NSData *findMatches, int index);
 
 @protocol iTermTextDrawingHelperDelegate <NSObject>
 
@@ -48,7 +51,7 @@
                           isBackground:(BOOL)isBackground;
 
 - (PTYFontInfo *)drawingHelperFontForChar:(UniChar)ch
-                                isComplex:(BOOL)complex
+                                isComplex:(BOOL)isComplex
                                renderBold:(BOOL *)renderBold
                              renderItalic:(BOOL *)renderItalic;
 
@@ -270,12 +273,83 @@
 // Show the password input cursor?
 @property(nonatomic) BOOL passwordInput;
 
+@property(nonatomic) NSRect indicatorFrame;
+
+@property(nonatomic, readonly) iTermTimestampDrawHelper *timestampDrawHelper;
+
+@property(nonatomic, readonly) NSColor *defaultBackgroundColor;
+
+// imageSize: size of image to draw
+// destinationRect: rect bounding the region of a scrollview's content view (i.e., very tall view) that's being drawn
+// destinationFrameSize: size of the scrollview's content view
+// visibleSize: size of visible portion of scrollview
+// sourceRectPtr: filled in with source frame to draw from
+//
+// Returns: destination frame to draw to
++ (NSRect)rectForBadgeImageOfSize:(NSSize)imageSize
+                  destinationRect:(NSRect)destinationRect
+             destinationFrameSize:(NSSize)destinationFrameSize
+                      visibleSize:(NSSize)visibleSize
+                    sourceRectPtr:(NSRect *)sourceRectPtr;
+
+// Indicates whether the cursor should take its color from the background (if YES) or text color (if NO).
++ (BOOL)cursorUsesBackgroundColorForScreenChar:(screen_char_t)screenChar
+                                wantBackground:(BOOL)wantBackgroundColor
+                                  reverseVideo:(BOOL)reverseVideo;
+
 // Updates self.blinkingFound.
 - (void)drawTextViewContentInRect:(NSRect)rect
                          rectsPtr:(const NSRect *)rectArray
                         rectCount:(NSInteger)rectCount;
 
-// Draw timestamps. Returns the width of the widest timestamp.
-- (CGFloat)drawTimestamps;
+- (NSImage *)imageForCoord:(VT100GridCoord)coord size:(CGSize)size;
+
+// If timestamps are to be shown, call this just before drawing.
+- (void)createTimestampDrawingHelper;
+
+// Draw timestamps.
+- (void)drawTimestamps;
+
+- (VT100GridCoordRange)coordRangeForRect:(NSRect)rect;
+
+- (CGFloat)yOriginForUnderlineGivenFontXHeight:(CGFloat)xHeight yOffset:(CGFloat)yOffset;
+- (CGFloat)underlineThicknessForFont:(NSFont *)font;
+- (NSRange)underlinedRangeOnLine:(long long)row;
 
 @end
+
+NS_INLINE BOOL iTermTextDrawingHelperIsCharacterDrawable(screen_char_t *c,
+                                                         BOOL isStringifiable,
+                                                         BOOL blinkingItemsVisible,
+                                                         BOOL blinkAllowed) {
+    const unichar code = c->code;
+    if (!c->complexChar) {
+        if (code == DWC_RIGHT ||
+            code == DWC_SKIP ||
+            code == TAB_FILLER ||
+            code < ' ') {
+            return NO;
+        } else if (code == ' ' && !c->underline) {
+            return NO;
+        }
+    }
+    if (blinkingItemsVisible || !(blinkAllowed && c->blink)) {
+        // This char is either not blinking or during the "on" cycle of the
+        // blink. It should be drawn.
+
+        if (c->complexChar) {
+            // TODO: Not all composed/surrogate pair grapheme clusters are drawable
+            return !isStringifiable;
+        } else {
+            // Non-complex char
+            // TODO: There are other spaces in unicode that should be supported.
+            return (code != 0 &&
+                    code != '\t' &&
+                    !(code >= ITERM2_PRIVATE_BEGIN && code <= ITERM2_PRIVATE_END));
+
+        }
+    } else {
+        // Chatacter hidden because of blinking.
+        return NO;
+    }
+}

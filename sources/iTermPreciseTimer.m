@@ -17,6 +17,13 @@
 
 #if ENABLE_PRECISE_TIMERS
 static BOOL gPreciseTimersEnabled;
+static NSMutableDictionary *sLogs;
+
+@interface iTermPreciseTimersLock : NSObject
+@end
+
+@implementation iTermPreciseTimersLock
+@end
 
 void iTermPreciseTimerSetEnabled(BOOL enabled) {
     gPreciseTimersEnabled = enabled;
@@ -72,7 +79,7 @@ NSTimeInterval iTermPreciseTimerMeasure(iTermPreciseTimer *timer) {
     return nanoseconds / 1000000000.0;
 }
 
-void iTermPreciseTimerStatsInit(iTermPreciseTimerStats *stats, char *name) {
+void iTermPreciseTimerStatsInit(iTermPreciseTimerStats *stats, const char *name) {
     if (!gPreciseTimersEnabled) {
         return;
     }
@@ -80,6 +87,8 @@ void iTermPreciseTimerStatsInit(iTermPreciseTimerStats *stats, char *name) {
     stats->totalEventCount = 0;
     stats->mean = 0;
     stats->m2 = 0;
+    stats->min = INFINITY;
+    stats->max = -INFINITY;
     iTermPreciseTimerReset(&stats->timer);
     if (name) {
         strlcpy(stats->name, name, sizeof(stats->name));
@@ -146,6 +155,8 @@ void iTermPreciseTimerStatsRecord(iTermPreciseTimerStats *stats, NSTimeInterval 
     double delta = value - stats->mean;
     stats->mean += delta / stats->n;
     stats->m2 += delta * (value - stats->mean);
+    stats->min = MIN(stats->min, value);
+    stats->max = MAX(stats->max, value);
 }
 
 NSTimeInterval iTermPreciseTimerStatsGetMean(iTermPreciseTimerStats *stats) {
@@ -166,7 +177,8 @@ NSTimeInterval iTermPreciseTimerStatsGetStddev(iTermPreciseTimerStats *stats) {
     }
 }
 
-void iTermPreciseTimerPeriodicLog(iTermPreciseTimerStats stats[],
+void iTermPreciseTimerPeriodicLog(NSString *identifier,
+                                  iTermPreciseTimerStats stats[],
                                   size_t count,
                                   NSTimeInterval interval,
                                   BOOL logToConsole) {
@@ -179,27 +191,113 @@ void iTermPreciseTimerPeriodicLog(iTermPreciseTimerStats stats[],
     }
 
     if (iTermPreciseTimerMeasure(&gLastLog) >= interval) {
-        NSMutableString *log = [[@"-- Precise Timers --\n" mutableCopy] autorelease];
-        for (size_t i = 0; i < count; i++) {
-            NSTimeInterval mean = iTermPreciseTimerStatsGetMean(&stats[i]) * 1000.0;
-            NSTimeInterval stddev = iTermPreciseTimerStatsGetStddev(&stats[i]) * 1000.0;
-            [log appendFormat:@"%20s: µ=%0.3fms σ=%.03fms (95%% CI ≅ %0.3fms–%0.3fms) 𝚺=%.2fms N=%@ avg. events=%01.f\n",
-                stats[i].name,
-                mean,
-                stddev,
-                MAX(0, mean - stddev),
-                mean + stddev,
-                stats[i].n * mean,
-                @(stats[i].n),
-                (double)stats[i].totalEventCount / (double)stats[i].n];
-               iTermPreciseTimerStatsInit(&stats[i], NULL);
-        }
-        if (logToConsole) {
-            ELog(@"%@", log);
-        } else {
-            DLog(@"%@", log);
-        }
+        iTermPreciseTimerLog(identifier, stats, count, logToConsole);
         iTermPreciseTimerStart(&gLastLog);
     }
 }
+
+static NSString *iTermEmojiForDuration(double ms) {
+    if (ms > 100) {
+        return @"😱";
+    } else if (ms > 10) {
+        return @"😳";
+    } else if (ms > 5) {
+        return @"😢";
+    } else if (ms > 1) {
+        return @"🙁";
+    } else if (ms > 0.5) {
+        return @"🤔";
+    } else {
+        return @"  ";
+    }
+}
+
+void iTermPreciseTimerLog(NSString *identifier,
+                          iTermPreciseTimerStats stats[],
+                          size_t count,
+                          BOOL logToConsole) {
+    NSMutableString *log = [[@"-- Precise Timers --\n" mutableCopy] autorelease];
+    for (size_t i = 0; i < count; i++) {
+        NSTimeInterval mean = iTermPreciseTimerStatsGetMean(&stats[i]) * 1000.0;
+        NSTimeInterval stddev = iTermPreciseTimerStatsGetStddev(&stats[i]) * 1000.0;
+        [log appendFormat:@"%@ %20s: µ=%0.3fms σ=%.03fms (95%% CI ≅ %0.3fms–%0.3fms) 𝚺=%.2fms N=%@ avg. events=%01.f\n",
+         iTermEmojiForDuration(mean),
+         stats[i].name,
+         mean,
+         stddev,
+         MAX(0, mean - stddev),
+         mean + stddev,
+         stats[i].n * mean,
+         @(stats[i].n),
+         (double)stats[i].totalEventCount / (double)stats[i].n];
+        iTermPreciseTimerStatsInit(&stats[i], NULL);
+    }
+    if (logToConsole) {
+        NSLog(@"%@", log);
+    }
+    iTermPreciseTimerSaveLog(identifier, log);
+    DLog(@"%@", log);
+}
+
+void iTermPreciseTimerLogOneEvent(NSString *identifier,
+                                  iTermPreciseTimerStats stats[],
+                                  size_t count,
+                                  BOOL logToConsole) {
+    NSMutableString *log = [[@"-- Precise Timers (One Event) --\n" mutableCopy] autorelease];
+    for (size_t i = 0; i < count; i++) {
+        if (stats[i].n == 0) {
+            continue;
+        }
+        const char *cname = stats[i].name;
+        int length = strlen(cname);
+        NSMutableString *name = [NSMutableString string];
+        while (length > 1 && cname[length - 1] == '<') {
+            length--;
+            [name appendString:@"    "];
+        }
+        NSTimeInterval ms = stats[i].n * iTermPreciseTimerStatsGetMean(&stats[i]) * 1000.0;
+        NSString *emoji = iTermEmojiForDuration(ms);
+        [name appendString:[[NSString alloc] initWithBytes:cname length:length encoding:NSUTF8StringEncoding]];
+        NSString *other = @"";
+        if (stats[i].n > 1) {
+            int count = iTermPreciseTimerStatsGetCount(&stats[i]);
+            double mean = iTermPreciseTimerStatsGetMean(&stats[i]);
+            other = [NSString stringWithFormat:@"N=%@ µ=%0.1fms [%0.1fms…%0.1fms]", @(count), mean * 1000, stats[i].min * 1000, stats[i].max * 1000];
+        }
+        [log appendFormat:@"%@ %0.1fms %@ %@\n", emoji, ms, name, other];
+    }
+    if (logToConsole) {
+        NSLog(@"%@", log);
+    }
+    iTermPreciseTimerSaveLog(identifier, log);
+
+    DLog(@"%@", log);
+}
+
+void iTermPreciseTimerSaveLog(NSString *identifier, NSString *log) {
+    @synchronized([iTermPreciseTimersLock class]) {
+        if (!sLogs) {
+            sLogs = [[NSMutableDictionary alloc] init];
+        }
+        sLogs[identifier] = log;
+    }
+}
+
+NSString *iTermPreciseTimerGetSavedLogs(void) {
+    @synchronized([iTermPreciseTimersLock class]) {
+        NSMutableString *result = [NSMutableString string];
+        [sLogs enumerateKeysAndObjectsUsingBlock:^(id  _Nonnull key, id  _Nonnull obj, BOOL * _Nonnull stop) {
+            NSInteger numLines = [[obj componentsSeparatedByString:@"\n"] count];
+            [result appendFormat:@"Precise timers %@:%@%@\n", key, numLines > 1 ? @"\n" : @"", obj];
+        }];
+        return result;
+    }
+}
+
+void iTermPreciseTimerClearLogs(void) {
+    @synchronized([iTermPreciseTimersLock class]) {
+        [sLogs removeAllObjects];
+    }
+}
+
 #endif
