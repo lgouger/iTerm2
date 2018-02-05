@@ -450,6 +450,7 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
                                              width:_columns
                                     drawableGlyphs:&drawableGlyphs
                                               date:&date];
+        rowData.backgroundColorRLEData.length = rles * sizeof(iTermMetalBackgroundColorRLE);
         rowData.date = date;
         rowData.numberOfBackgroundRLEs = rles;
         rowData.numberOfDrawableGlyphs = drawableGlyphs;
@@ -1031,7 +1032,8 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
 
 - (void)populateMarginRendererTransientStateWithFrameData:(iTermMetalFrameData *)frameData {
     iTermMarginRendererTransientState *tState = [frameData transientStateForRenderer:_marginRenderer];
-    [tState setColor:frameData.perFrameState.defaultBackgroundColor];
+    vector_float4 color = frameData.perFrameState.processedDefaultBackgroundColor;
+    [tState setColor:color];
 }
 
 - (void)populateImageRendererTransientStateWithFrameData:(iTermMetalFrameData *)frameData {
@@ -1240,15 +1242,15 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
 }
 
 - (void)drawContentBehindTextWithFrameData:(iTermMetalFrameData *)frameData {
-    [self drawCellRenderer:_marginRenderer
-                 frameData:frameData
-                      stat:&frameData.stats[iTermMetalFrameDataStatPqEnqueueDrawMargin]];
-
     [self drawRenderer:_backgroundImageRenderer
              frameData:frameData
                   stat:&frameData.stats[iTermMetalFrameDataStatPqEnqueueDrawBackgroundImage]];
 
-    [self drawCellRenderer:_backgroundColorRenderer
+    [self drawCellRenderer:_marginRenderer
+                 frameData:frameData
+                      stat:&frameData.stats[iTermMetalFrameDataStatPqEnqueueDrawMargin]];
+
+     [self drawCellRenderer:_backgroundColorRenderer
                  frameData:frameData
                       stat:&frameData.stats[iTermMetalFrameDataStatPqEnqueueDrawBackgroundColor]];
 

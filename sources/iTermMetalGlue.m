@@ -13,6 +13,7 @@
 #import "iTermCharacterSource.h"
 #import "iTermColorMap.h"
 #import "iTermController.h"
+#import "iTermData.h"
 #import "iTermImageInfo.h"
 #import "iTermMarkRenderer.h"
 #import "iTermSelection.h"
@@ -81,7 +82,7 @@ static NSColor *ColorForVector(vector_float4 v) {
     vector_float4 _lastUnprocessedColor;
     BOOL _havePreviousForegroundColor;
     vector_float4 _previousForegroundColor;
-    NSMutableArray<NSMutableData *> *_lines;
+    NSMutableArray<iTermData *> *_lines;
     NSMutableArray<NSDate *> *_dates;
     NSMutableArray<NSIndexSet *> *_selectedIndexes;
     NSMutableDictionary<NSNumber *, NSData *> *_matches;
@@ -132,7 +133,7 @@ static NSColor *ColorForVector(vector_float4 v) {
     NSColor *_cursorGuideColor;
     NSMutableArray<iTermIndicatorDescriptor *> *_indicators;
     vector_float4 _fullScreenFlashColor;
-    NSColor *_defaultBackgroundColor;
+    NSColor *_processedDefaultBackgroundColor;  // dimmed, etc.
     BOOL _timestampsEnabled;
     long long _firstVisibleAbsoluteLineNumber;
     long long _lastVisibleAbsoluteLineNumber;
@@ -328,7 +329,7 @@ static NSColor *ColorForVector(vector_float4 v) {
     _asciiAntialias = drawingHelper.asciiAntiAlias;
     _nonasciiAntialias = drawingHelper.nonAsciiAntiAlias;
     _showBroadcastStripes = drawingHelper.showStripes;
-    _defaultBackgroundColor = [drawingHelper defaultBackgroundColor];
+    _processedDefaultBackgroundColor = [drawingHelper defaultBackgroundColor];
     _timestampsEnabled = drawingHelper.showTimestamps;
     _isFrontTextView = (textView == [[iTermController sharedInstance] frontTextView]);
     _unfocusedSelectionColor = VectorForColor([[_colorMap colorForKey:kColorMapSelection] colorDimmedBy:2.0/3.0
@@ -348,7 +349,7 @@ static NSColor *ColorForVector(vector_float4 v) {
         if (_timestampsEnabled) {
             [_dates addObject:[textView drawingHelperTimestampForLine:i]];
         }
-        NSMutableData *data = [NSMutableData uninitializedDataWithLength:rowSize];
+        iTermData *data = [iTermData dataOfLength:rowSize];
         screen_char_t *myBuffer = data.mutableBytes;
         screen_char_t *line = [screen getLineAtIndex:i withBuffer:myBuffer];
         if (line != myBuffer) {
@@ -416,7 +417,7 @@ static NSColor *ColorForVector(vector_float4 v) {
         _cursorInfo.cursorColor = [self backgroundColorForCursor];
         if (_cursorInfo.type == CURSOR_BOX) {
             _cursorInfo.shouldDrawText = YES;
-            const screen_char_t *line = (screen_char_t *)_lines[_cursorInfo.coord.y].bytes;
+            const screen_char_t *line = (screen_char_t *)_lines[_cursorInfo.coord.y].mutableBytes;
             screen_char_t screenChar = line[_cursorInfo.coord.x];
             const BOOL focused = ((_isInKeyWindow && _textViewIsActiveSession) || _shouldDrawFilledInCursor);
 
@@ -679,7 +680,7 @@ ambiguousIsDoubleWidth:(BOOL)ambiguousIsDoubleWidth
 
 - (NSColor *)timestampsBackgroundColor {
     assert(_timestampsEnabled);
-    return _defaultBackgroundColor;
+    return _processedDefaultBackgroundColor;
 }
 
 - (void)enumerateIndicatorsInFrame:(NSRect)frame block:(void (^)(iTermIndicatorDescriptor * _Nonnull))block {
@@ -750,6 +751,13 @@ ambiguousIsDoubleWidth:(BOOL)ambiguousIsDoubleWidth
                             1);
 }
 
+- (vector_float4)processedDefaultBackgroundColor {
+    return simd_make_float4((float)_processedDefaultBackgroundColor.redComponent,
+                            (float)_processedDefaultBackgroundColor.greenComponent,
+                            (float)_processedDefaultBackgroundColor.blueComponent,
+                            _backgroundImage ? 1 - _backgroundImageBlending : 1);
+}
+
 // Private queue
 - (nullable iTermMetalCursorInfo *)metalDriverCursorInfo {
     return _cursorInfo;
@@ -778,7 +786,7 @@ ambiguousIsDoubleWidth:(BOOL)ambiguousIsDoubleWidth
     if (_timestampsEnabled) {
         *datePtr = _dates[row];
     }
-    screen_char_t *line = (screen_char_t *)_lines[row].bytes;
+    screen_char_t *line = (screen_char_t *)_lines[row].mutableBytes;
     NSIndexSet *selectedIndexes = _selectedIndexes[row];
     NSData *findMatches = _matches[@(row)];
     iTermTextColorKey keys[2];
@@ -1198,7 +1206,7 @@ ambiguousIsDoubleWidth:(BOOL)ambiguousIsDoubleWidth
         result[partNumber] = [characterSource bitmapForPart:part];
     }];
     if (emoji) {
-        *emoji = characterSource.emoji;
+        *emoji = characterSource.isEmoji;
     }
     return result;
 }
@@ -1337,7 +1345,7 @@ ambiguousIsDoubleWidth:(BOOL)ambiguousIsDoubleWidth
                                                  lineSource:^screen_char_t *(int y) {
                                                      const int i = y + _numberOfScrollbackLines - _visibleRange.start.y;
                                                      if (i >= 0 && i < _lines.count) {
-                                                         return (screen_char_t *)_lines[i].bytes;
+                                                         return (screen_char_t *)_lines[i].mutableBytes;
                                                      } else {
                                                          return nil;
                                                      }
