@@ -91,6 +91,7 @@ DEFINE_FLOAT(tabFlashAnimationDuration, 0.25, @"Tabs: Animation duration for fad
 DEFINE_BOOL(allowDragOfTabIntoNewWindow, YES, @"Tabs: Allow a tab to be dragged and dropped outside any existing tab bar to create a new window.");
 DEFINE_INT(minimumTabDragDistance, 10, @"Tabs: How far must the mouse move before a tab drag is initiated?\nYou must restart iTerm2 after changing this setting for it to take effect.");
 DEFINE_BOOL(tabTitlesUseSmartTruncation, YES, @"Tabs: Use “smart truncation” for tab titles.\nIf a tab‘s title is too long to fit, ellipsize the start of the title if more tabs have unique suffixes than prefixes in a given window.");
+DEFINE_BOOL(middleClickClosesTab, YES, @"Tabs: Should middle-click on a tab in the tab bar close the tab?");
 
 #pragma mark Mouse
 DEFINE_STRING(alternateMouseScrollStringForUp, @"",
@@ -135,8 +136,8 @@ DEFINE_FLOAT(underlineCursorOffset, 0, @"Terminal: Vertical offset for underline
 DEFINE_BOOL(preventEscapeSequenceFromClearingHistory, NO, @"Terminal: Prevent CSI 3 J from clearing scrollback history?\nThis is also known as thethe terminfo E3 capability.");
 DEFINE_FLOAT(verticalBarCursorWidth, 1, @"Terminal: Width of vertical bar cursor.");
 DEFINE_BOOL(acceptOSC7, YES, @"Terminal: Accept OSC 7 to set username, hostname, and path.");
-DEFINE_BOOL(detectPasswordInput, YES, @"Experimental Features: Show key at cursor at password prompt?");
-
+DEFINE_BOOL(detectPasswordInput, YES, @"Terminal: Show key at cursor at password prompt?");
+DEFINE_BOOL(tabsWrapAround, NO, @"Terminal: Tabs wrap around to the next line.\nThis is useful for preserving tabs for later copying to the pasteboard. It breaks backward compatibility and may cause layout problems with programs that don’t expect this behavior.");
 #pragma mark Hotkey
 DEFINE_FLOAT(hotkeyTermAnimationDuration, 0.25, @"Hotkey: Duration in seconds of the hotkey window animation.\nWarning: reducing this value may cause problems if you have multiple displays.");
 DEFINE_BOOL(dockIconTogglesWindow, NO, @"Hotkey: If the only window is a hotkey window, then clicking the dock icon shows or hides it.");
@@ -167,6 +168,7 @@ DEFINE_STRING(viewManPageCommand, @"man %@ || sleep 3", @"General: Command to vi
 DEFINE_BOOL(hideStuckTooltips, YES, @"General: Hide stuck tooltips.\nWhen you hide iTerm2 using a hotkey while a tooltip is fading out it gets stuck because of an OS bug. Work around it with a nasty hack by enabling this feature.")
 DEFINE_BOOL(openFileOverridesSendText, YES, @"General: Should opening a script with iTerm2 disable the default profile's “Send Text at Start” setting?\nIf you use “open iTerm2 file.command” or drag a script onto iTerm2's icon and this setting is enabled then the script will be executed in lieu of the profile's “Send Text at Start” setting. If this setting is off then both will be executed.");
 DEFINE_BOOL(statusBarIcon, YES, @"General: Add status bar icon when excluded from dock?\nWhen you turn on “Exclude from Dock and Cmd-Tab Application Switcher” a status bar icon is added to the menu bar so you can switch the setting back off. Disable this to remove the status bar icon. Doing so makes it very hard to get to Preferences. You must restart iTerm2 after changing this setting.");
+DEFINE_BOOL(wrapFocus, YES, @"General: Should the directional focus hotkeys wrap");
 
 #pragma mark - Drawing
 DEFINE_BOOL(zippyTextDrawing, YES, @"Drawing: Use zippy text drawing algorithm?\nThis draws non-ASCII text more quickly but with lower fidelity. This setting is ignored if ligatures are enabled in Prefs > Profiles > Text.");
@@ -254,7 +256,7 @@ DEFINE_FLOAT(quickPasteDelayBetweenCalls, 0.01530456, @"Pasteboard: Delay in sec
 DEFINE_INT(slowPasteBytesPerCall, 16, @"Pasteboard: Number of bytes to paste in each chunk when pasting slowly.");
 DEFINE_FLOAT(slowPasteDelayBetweenCalls, 0.125, @"Pasteboard: Delay in seconds between chunks when pasting slowly");
 DEFINE_BOOL(copyWithStylesByDefault, NO, @"Pasteboard: Copy to pasteboard on selection includes color and font style.");
-DEFINE_INT(pasteHistoryMaxOptions, 20, @"Pasteboard: Number of entires to save in Paste History.\n.");
+DEFINE_INT(pasteHistoryMaxOptions, 20, @"Pasteboard: Number of entries to save in Paste History.\n.");
 DEFINE_BOOL(disallowCopyEmptyString, NO, @"Pasteboard: Disallow copying empty string to pasteboard.\nIf enabled, selecting an empty string (or all whitespace if trimming is enabled) will not erase the contents of the pasteboard.");
 DEFINE_BOOL(typingClearsSelection, YES, @"Pasteboard: Pressing a key will remove the selection.");
 DEFINE_SETTABLE_BOOL(promptForPasteWhenNotAtPrompt, PromptForPasteWhenNotAtPrompt, NO, @"Pasteboard: Warn before pasting when not at shell prompt?");
@@ -292,7 +294,12 @@ DEFINE_BOOL(supportREPCode, NO, @"Experimental Features: Enable support for REP 
 #endif
 
 DEFINE_BOOL(showBlockBoundaries, NO, @"Debugging: Show line buffer block boundaries (issue 6207)");
-DEFINE_BOOL(useMetal, NO, @"Experimental Features: Use Metal GPU-based renderer.\nThis should provide higher performance but it does not support transparent windows or ligatures and may have other missing features.");
+#if BETA
+#define ADVANCED_SETTINGS_MODEL_USE_METAL YES
+#else
+#define ADVANCED_SETTINGS_MODEL_USE_METAL NO
+#endif
+DEFINE_BOOL(useMetal, ADVANCED_SETTINGS_MODEL_USE_METAL, @"Experimental Features: Use Metal GPU-based renderer.\nThis should provide higher performance but it does not support transparent windows or ligatures and may have other missing features.");
 DEFINE_BOOL(showMetalFPSmeter, NO, @"Experimental Features: Show FPS meter\nRequires Metal renderer");
 
 @end

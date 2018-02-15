@@ -145,7 +145,7 @@ static const double kInterBellQuietPeriod = 0.1;
     BOOL _wraparoundMode;
     BOOL _ansi;
     BOOL _insert;
-    
+
     BOOL _shellIntegrationInstalled;
 
     NSDictionary *inlineFileInfo_;  // Keys are kInlineFileXXX
@@ -645,7 +645,7 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
                               withDefaultChar:[currentGrid_ defaultChar]
                             maxLinesToRestore:[linebuffer_ numLinesWithWidth:currentGrid_.size.width]];
     DLog(@"After restoring screen from line buffer:\n%@", [self compactLineDumpWithHistoryAndContinuationMarksAndLineNumbers]);
-    
+
     // If we're in the alternate screen, restore its contents from the temporary
     // linebuffer.
     if (wasShowingAltScreen) {
@@ -2413,6 +2413,27 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
     return self.width - 1;
 }
 
+- (void)convertHardNewlineToSoftOnGridLine:(int)line {
+    screen_char_t* aLine = [currentGrid_ screenCharsAtLineNumber:line];
+    if (aLine[currentGrid_.size.width].code == EOL_HARD) {
+        aLine[currentGrid_.size.width].code = EOL_SOFT;
+    }
+}
+
+- (void)softWrapCursorToNextLineScrollingIfNeeded {
+    if (currentGrid_.cursorY == currentGrid_.bottomMargin) {
+        if (currentGrid_.rightMargin + 1 == currentGrid_.size.width) {
+            [self convertHardNewlineToSoftOnGridLine:currentGrid_.cursorY];
+        }
+        [self incrementOverflowBy:[currentGrid_ scrollUpIntoLineBuffer:linebuffer_
+                                                   unlimitedScrollback:unlimitedScrollback_
+                                               useScrollbackWithRegion:_appendToScrollbackWithStatusBar
+                                                             softBreak:YES]];
+    }
+    currentGrid_.cursorX = currentGrid_.leftMargin;
+    currentGrid_.cursorY++;
+}
+
 - (void)terminalAppendTabAtCursor {
     int rightMargin;
     if (currentGrid_.useScrollRegionCols) {
@@ -2431,8 +2452,13 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
 
     int nextTabStop = MIN(rightMargin, [self tabStopAfterColumn:currentGrid_.cursorX]);
     if (nextTabStop <= currentGrid_.cursorX) {
-        // This would only happen if the cursor were at or past the right margin.
-        return;
+        // This happens when the cursor can't advance any farther.
+        if ([iTermAdvancedSettingsModel tabsWrapAround]) {
+            nextTabStop = [self tabStopAfterColumn:currentGrid_.leftMargin];
+            [self softWrapCursorToNextLineScrollingIfNeeded];
+        } else {
+            return;
+        }
     }
     screen_char_t* aLine = [currentGrid_ screenCharsAtLineNumber:currentGrid_.cursorY];
     BOOL allNulls = YES;
@@ -3965,7 +3991,7 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
         }
         shell = params[@"shell"];
     }
-    
+
     NSDictionary<NSString *, NSNumber *> *lastVersionByShell =
         @{ @"tcsh": @2,
            @"bash": @5,
@@ -4146,7 +4172,7 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
         return;
     }
     NSInteger key = [keyNumber integerValue];
-    
+
     [delegate_ screenSetColor:color forKey:key];
 }
 

@@ -98,7 +98,6 @@
     CGSize _cellSizeWithoutSpacing;
     int _rows;
     int _columns;
-    BOOL _sizeChanged;
     CGFloat _scale;
 #if ENABLE_PRIVATE_QUEUE
     dispatch_queue_t _queue;
@@ -200,7 +199,6 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
             ELog(@"Warning: scale is 0");
         }
         DLog(@"Cell size is now %@x%@, grid size is now %@x%@", @(cellSize.width), @(cellSize.height), @(gridSize.width), @(gridSize.height));
-        _sizeChanged = YES;
         _cellSize = cellSize;
         _cellSizeWithoutSpacing = cellSizeWithoutSpacing;
         _rows = MAX(1, gridSize.height);
@@ -212,12 +210,8 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
 #pragma mark - MTKViewDelegate
 
 - (void)mtkView:(nonnull MTKView *)view drawableSizeWillChange:(CGSize)size {
-    [self dispatchAsyncToPrivateQueue: ^{
-        // Save the size of the drawable as we'll pass these
-        //   values to our vertex shader when we draw
-        _viewportSize.x = size.width;
-        _viewportSize.y = size.height;
-    }];
+    _viewportSize.x = size.width;
+    _viewportSize.y = size.height;
 }
 
 // Called whenever the view needs to render a frame
@@ -368,6 +362,13 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
 
         frameData.rows = [NSMutableArray array];
         frameData.gridSize = frameData.perFrameState.gridSize;
+
+        CGSize (^rescale)(CGSize) = ^CGSize(CGSize size) {
+            return CGSizeMake(size.width * _scale, size.height * _scale);
+        };
+        frameData.cellSize = rescale(frameData.perFrameState.cellSize);
+        frameData.cellSizeWithoutSpacing = rescale(frameData.perFrameState.cellSizeWithoutSpacing);
+
         frameData.scale = _scale;
     }];
     return frameData;
@@ -488,7 +489,7 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
 - (void)createTransientStatesWithFrameData:(iTermMetalFrameData *)frameData
                                       view:(nonnull MTKView *)view
                              commandBuffer:(id<MTLCommandBuffer>)commandBuffer {
-    iTermRenderConfiguration *configuration = [[iTermRenderConfiguration alloc] initWithViewportSize:_viewportSize scale:frameData.scale];
+    iTermCellRenderConfiguration *cellConfiguration = frameData.cellConfiguration;
 
     [commandBuffer enqueue];
     commandBuffer.label = @"Draw Terminal";
@@ -498,7 +499,7 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
         }
         [frameData measureTimeForStat:renderer.createTransientStateStat ofBlock:^{
             __kindof iTermMetalRendererTransientState * _Nonnull tState =
-            [renderer createTransientStateForConfiguration:configuration
+            [renderer createTransientStateForConfiguration:cellConfiguration
                                              commandBuffer:commandBuffer];
             if (tState) {
                 [frameData setTransientState:tState forRenderer:renderer];
@@ -507,14 +508,6 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
             }
         }];
     };
-    const VT100GridSize gridSize = frameData.gridSize;
-    iTermCellRenderConfiguration *cellConfiguration = [[iTermCellRenderConfiguration alloc] initWithViewportSize:_viewportSize
-                                                                                                           scale:frameData.scale
-                                                                                                        cellSize:_cellSize
-                                                                                          cellSizeWithoutSpacing:_cellSizeWithoutSpacing
-                                                                                                        gridSize:gridSize
-                                                                                           usingIntermediatePass:(frameData.intermediateRenderPassDescriptor != nil)];
-    frameData.cellConfiguration = cellConfiguration;
 
     for (id<iTermMetalCellRenderer> renderer in self.cellRenderers) {
         if (renderer.rendererDisabled) {
@@ -856,7 +849,7 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
     textState.asciiUnderlineDescriptor = asciiUnderlineDescriptor;
     textState.nonAsciiUnderlineDescriptor = nonAsciiUnderlineDescriptor;
     textState.defaultBackgroundColor = frameData.perFrameState.defaultBackgroundColor;
-    
+
     CGSize cellSize = textState.cellConfiguration.cellSize;
     iTermBackgroundColorRendererTransientState *backgroundState = [frameData transientStateForRenderer:_backgroundColorRenderer];
 
@@ -942,7 +935,7 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
                             repeatingRows:count];
         }];
     }
-    
+
     // Tell the text state that it's done getting row data.
     if (!_textRenderer.rendererDisabled) {
         [textState willDraw];

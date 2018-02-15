@@ -201,7 +201,7 @@ static int RawNumLines(LineBuffer* buffer, int width) {
         int total_lines = nl;
         while (total_lines > max_lines) {
             int extra_lines = total_lines - max_lines;
-            
+
             int block_lines = [block getNumLinesWithWrapWidth: width];
 #if ITERM_DEBUG
             NSAssert(block_lines > 0, @"Empty leading block");
@@ -400,7 +400,7 @@ static int RawNumLines(LineBuffer* buffer, int width) {
     for (i = 0; i < [blocks count]; ++i) {
         LineBlock* block = [blocks objectAtIndex:i];
         NSAssert(block, @"Null block");
-        
+
         // getNumLinesWithWrapWidth caches its result for the last-used width so
         // this is usually faster than calling getWrappedLineWithWrapWidth since
         // most calls to the latter will just decrement line and return NULL.
@@ -409,7 +409,7 @@ static int RawNumLines(LineBuffer* buffer, int width) {
             line -= block_lines;
             continue;
         }
-        
+
         return [block timestampForLineNumber:line width:width];
     }
     return 0;
@@ -801,9 +801,11 @@ static int RawNumLines(LineBuffer* buffer, int width) {
     int used = [block rawSpaceUsed];
     NSMutableDictionary* intermediate = [NSMutableDictionary dictionaryWithCapacity:[resultRanges count] * 2];
     int prev = -1;
+    NSMutableString *logs = [NSMutableString string];
     for (NSNumber* positionNum in positionsArray) {
         int position = [positionNum intValue];
         if (position == prev) {
+            [logs appendFormat:@"Skip position %@ which equals previous position. ", positionNum];
             continue;
         }
         prev = position;
@@ -835,6 +837,8 @@ static int RawNumLines(LineBuffer* buffer, int width) {
             } else {
                 assert(false);
             }
+        } else {
+            [logs appendFormat:@"Failed to find block for position %@. ", positionNum];
         }
     }
 
@@ -853,7 +857,13 @@ static int RawNumLines(LineBuffer* buffer, int width) {
             xyrange->yEnd = endPoint.y;
             [result addObject:xyrange];
         } else {
-            assert(false);
+            ITCriticalError(NO,
+                            @"Failed to get intermediate for result range %@. start=%@ end=%@. resultRanges=%@. Logs: %@",
+                            rr,
+                            start,
+                            end,
+                            resultRanges,
+                            logs);
             [result addObject:[NSNull null]];
         }
     }

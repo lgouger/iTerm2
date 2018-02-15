@@ -194,6 +194,7 @@
 + (BOOL)lowFiCombiningMarks;
 + (CGFloat)verticalBarCursorWidth;
 + (BOOL)statusBarIcon;
++ (BOOL)wrapFocus;
 + (BOOL)sensitiveScrollWheel;
 + (BOOL)disableCustomBoxDrawing;
 + (BOOL)useExperimentalFontMetrics;
@@ -201,5 +202,7 @@
 + (BOOL)showBlockBoundaries;
 + (BOOL)useMetal;
 + (BOOL)showMetalFPSmeter;
++ (BOOL)tabsWrapAround;
++ (BOOL)middleClickClosesTab;
 
 @end

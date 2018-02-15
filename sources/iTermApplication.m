@@ -7,7 +7,7 @@
  **
  **  Project: iTerm
  **
- **  Description: overrides sendEvent: so that key mappings with command mask  
+ **  Description: overrides sendEvent: so that key mappings with command mask
  **               are handled properly.
  **
  **  This program is free software; you can redistribute it and/or modify
@@ -44,6 +44,8 @@
 #import "PTYTab.h"
 #import "PTYTextView.h"
 #import "PTYWindow.h"
+
+unsigned short iTermBogusVirtualKeyCode = 0xffff;
 
 @interface iTermApplication()
 @property(nonatomic, retain) NSStatusItem *statusBarItem;
@@ -98,6 +100,9 @@
 
 - (BOOL)routeEventToShortcutInputView:(NSEvent *)event {
     NSResponder *firstResponder = [[NSApp keyWindow] firstResponder];
+    if (event.keyCode == iTermBogusVirtualKeyCode) {
+        return YES;
+    }
     if ([firstResponder isKindOfClass:[iTermShortcutInputView class]]) {
         iTermShortcutInputView *shortcutView = (iTermShortcutInputView *)firstResponder;
         if (shortcutView) {

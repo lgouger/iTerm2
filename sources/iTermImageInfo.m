@@ -92,10 +92,10 @@ NSString *const iTermImageDidLoad = @"iTermImageDidLoad";
         }
         return;
     }
-    
+
     [_dictionary release];
     _dictionary = nil;
-    
+
     DLog(@"Queueing load of %@", self.uniqueIdentifier);
     void (^block)(void) = ^{
         // This is a slow operation that blocks for a long time.
@@ -238,8 +238,12 @@ NSString *const iTermImageDidLoad = @"iTermImageDidLoad";
     return [self.animatedImage frameForTimestamp:timestamp];
 }
 
+- (BOOL)ready {
+    return (self.image || self.animatedImage);
+
+}
 - (NSImage *)imageWithCellSize:(CGSize)cellSize timestamp:(NSTimeInterval)timestamp {
-    if (!self.image && !self.animatedImage) {
+    if (!self.ready) {
         return nil;
     }
     if (!_embeddedImages) {

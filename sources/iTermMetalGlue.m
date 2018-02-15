@@ -145,6 +145,9 @@ static NSColor *ColorForVector(vector_float4 v) {
 }
 
 @property (nonatomic, readonly) BOOL isAnimating;
+@property (nonatomic, readonly) CGSize cellSize;
+@property (nonatomic, readonly) CGSize cellSizeWithoutSpacing;
+@property (nonatomic, readonly) CGFloat scale;
 
 - (instancetype)initWithTextView:(PTYTextView *)textView
                           screen:(VT100Screen *)screen
@@ -231,7 +234,19 @@ static NSColor *ColorForVector(vector_float4 v) {
 }
 
 - (void)metalDriverDidDrawFrame:(id<iTermMetalDriverDataSourcePerFrameState>)perFrameState {
+    // Don't invoke the callback if geometry has changed.
     iTermMetalPerFrameState *state = (iTermMetalPerFrameState *)perFrameState;
+    if (!VT100GridSizeEquals(state.gridSize, VT100GridSizeMake(_textView.dataSource.width,
+                                                               _textView.dataSource.height))) {
+        return;
+    }
+    if (!CGSizeEqualToSize(state.cellSize,
+                           CGSizeMake(_textView.charWidth, _textView.lineHeight))) {
+        return;
+    }
+    if (state.scale != _textView.window.backingScaleFactor) {
+        return;
+    }
     [self.delegate metalGlueDidDrawFrameAndNeedsRedraw:state.isAnimating];
 }
 
@@ -294,6 +309,9 @@ static NSColor *ColorForVector(vector_float4 v) {
                               screen:(VT100Screen *)screen {
     _gridSize = VT100GridSizeMake(textView.dataSource.width,
                                   textView.dataSource.height);
+    _cellSize = drawingHelper.cellSize;
+    _cellSizeWithoutSpacing = drawingHelper.cellSizeWithoutSpacing;
+    _scale = textView.window.backingScaleFactor;
     _documentVisibleRect = textView.enclosingScrollView.documentVisibleRect;
 
     _visibleRange = [drawingHelper coordRangeForRect:_documentVisibleRect];
@@ -921,6 +939,7 @@ ambiguousIsDoubleWidth:(BOOL)ambiguousIsDoubleWidth
                 previousImageCode = line[x].code;
                 iTermMetalImageRun *run = [[iTermMetalImageRun alloc] init];
                 previousImageCoord = GetPositionOfImageInChar(line[x]);
+                run.code = line[x].code;
                 run.startingCoordInImage = previousImageCoord;
                 run.startingCoordOnScreen = VT100GridCoordMake(x, row);
                 run.length = 1;

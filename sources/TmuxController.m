@@ -52,7 +52,7 @@ static NSString *kListWindowsFormat = @"\"#{session_name}\t#{window_id}\t"
 - (NSString *)tmuxNewWindowCommandInSession:(NSString *)session
                          recyclingSupported:(BOOL)recyclingSupported {
     NSArray *args = @[ @"new-window", @"-PF '#{window_id}'" ];
-    
+
     if (session) {
         NSString *targetSessionArg = [NSString stringWithFormat:@"\"%@:+\"", [session stringByEscapingQuotes]];
         NSArray *insertionArguments = @[ @"-a",
@@ -223,9 +223,10 @@ static NSString *kListWindowsFormat = @"\"#{session_name}\t#{window_id}\t"
                        size:(NSSize)size
                      layout:(NSString *)layout
                  affinities:(NSSet *)affinities
-                windowFlags:(NSString *)windowFlags {
-    DLog(@"openWindowWithIndex:%d name:%@ affinities:%@ flags:%@",
-         windowIndex, name, affinities, windowFlags);
+                windowFlags:(NSString *)windowFlags
+                    initial:(BOOL)initial {
+    DLog(@"openWindowWithIndex:%d name:%@ affinities:%@ flags:%@ initial:%@",
+         windowIndex, name, affinities, windowFlags, @(initial));
     NSNumber *n = [NSNumber numberWithInt:windowIndex];
     if ([pendingWindowOpens_ containsObject:n]) {
         return;
@@ -254,6 +255,7 @@ static NSString *kListWindowsFormat = @"\"#{session_name}\t#{window_id}\t"
     windowOpener.manuallyOpened = _manualOpenRequested;
     windowOpener.tabColors = _tabColors;
     windowOpener.profile = self.profile;
+    windowOpener.initial = initial;
     _manualOpenRequested = NO;
     if (![windowOpener openWindows:YES]) {
         [pendingWindowOpens_ removeObject:n];
@@ -408,7 +410,8 @@ static NSString *kListWindowsFormat = @"\"#{session_name}\t#{window_id}\t"
                                              [[doc valueInRecord:record forField:@"window_height"] intValue])
                            layout:[doc valueInRecord:record forField:@"window_layout"]
                        affinities:[self savedAffinitiesForWindow:wid]
-                      windowFlags:[doc valueInRecord:record forField:@"window_flags"]];
+                      windowFlags:[doc valueInRecord:record forField:@"window_flags"]
+                          initial:YES];
     }
     if (windowsToOpen.count == 0) {
         DLog(@"Did not open any windows so turn on accept notifications in tmux gateway");
@@ -621,7 +624,7 @@ static NSString *kListWindowsFormat = @"\"#{session_name}\t#{window_id}\t"
     if (NSEqualSizes(size, lastSize_)) {
         return NO;
     }
-    
+
     DLog(@"Looks like the window resize is legit. Change client size to %@", NSStringFromSize(size));
     [self setClientSize:size];
     return YES;
@@ -1681,7 +1684,8 @@ static NSString *kListWindowsFormat = @"\"#{session_name}\t#{window_id}\t"
                                                  [[doc valueInRecord:record forField:@"window_height"] intValue])
                                layout:[doc valueInRecord:record forField:@"window_layout"]
                            affinities:affinities
-                          windowFlags:[doc valueInRecord:record forField:@"window_flags"]];
+                          windowFlags:[doc valueInRecord:record forField:@"window_flags"]
+                              initial:NO];
         }
     }
 }
