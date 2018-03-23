@@ -15,7 +15,10 @@ typedef enum iTermTextureIndex {
     iTermTextureIndexPrimary = 0,
 
     // A texture containing the background we're drawing over.
-    iTermTextureIndexBackground = 1
+    iTermTextureIndexBackground = 1,
+
+    // Texture with subpixel model data for blending.
+    iTermTextureIndexSubpixelModels = 2,
 } iTermTextureIndex;
 
 typedef enum {
@@ -72,7 +75,7 @@ typedef struct {
     // Offset from vertex in pixels.
     vector_float2 offset;
 
-    // Offset of source texture
+    // Offset of source texture in pixels.
     vector_float2 textureOffset;
 } iTermMarkPIU;
 
@@ -101,6 +104,7 @@ typedef struct {
     float underlineOffset;  // Distance from bottom of cell to underline in pixels
     float underlineThickness;  // Thickness of underline in pixels
     float scale;  // 2 for retina, 1 for non retina
+    bool disableExactColorModels;  // Use interpolated color models if set
 } iTermTextureDimensions;
 
 #endif

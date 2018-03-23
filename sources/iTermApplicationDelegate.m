@@ -341,7 +341,7 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
     } else if ([menuItem action] == @selector(makeDefaultTerminal:)) {
         return ![[iTermLaunchServices sharedInstance] iTermIsDefaultTerminal];
     } else if ([menuItem action] == @selector(checkForIncompatibleSoftware:)) {
-        return [iTermAdvancedSettingsModel logDrawingPerformance];
+        return YES;
     } else if (menuItem == maximizePane) {
         if ([[[iTermController sharedInstance] currentTerminal] inInstantReplay]) {
             // Things get too complex if you allow this. It crashes.
@@ -919,9 +919,11 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
             NSPoint pointInWindow = [window convertRectFromScreen:mouseRect].origin;
             if ([window isTerminalWindow]) {
                 NSView *view = [window.contentView hitTest:pointInWindow];
-                [window makeKeyAndOrderFront:nil];
-                if ([view isKindOfClass:[PTYTextView class]]) {
-                    [window makeFirstResponder:view];
+                if (view) {
+                    [window makeKeyAndOrderFront:nil];
+                    if ([view isKindOfClass:[PTYTextView class]]) {
+                        [window makeFirstResponder:view];
+                    }
                 }
                 break;
             }

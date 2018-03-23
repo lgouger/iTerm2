@@ -7,6 +7,7 @@
 #import "PTYWindow.h"
 
 @class iTermPopupWindowController;
+@class iTermRestorableSession;
 @class PSMTabBarControl;
 @class PTYSession;
 @class PTYTab;
@@ -174,6 +175,8 @@ typedef NS_ENUM(NSInteger, BroadcastMode) {
 
 - (void)currentSessionWordAtCursorDidBecome:(NSString *)word;
 
+- (void)storeWindowStateInRestorableSession:(iTermRestorableSession *)restorableSession;
+
 #pragma mark - Tabs
 
 // Close a tab and resize/close the window if needed.
@@ -275,6 +278,8 @@ typedef NS_ENUM(NSInteger, BroadcastMode) {
 - (void)toggleUseTransparency:(id)sender;
 
 - (void)openPasswordManagerToAccountName:(NSString *)name inSession:(PTYSession *)session;
+
+- (void)tabDidClearScrollbackBufferInSession:(PTYSession *)session;
 
 #pragma mark - Instant replay
 

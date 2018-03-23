@@ -161,7 +161,7 @@ typedef struct iTermTextColorContext {
 - (instancetype)init {
     self = [super init];
     if (self) {
-        iTermPreciseTimerSetEnabled([iTermAdvancedSettingsModel logDrawingPerformance]);
+        iTermPreciseTimerSetEnabled(YES);
         iTermPreciseTimerStatsInit(&_stats[TIMER_TOTAL_DRAW_RECT], "Total drawRect");
         iTermPreciseTimerStatsInit(&_stats[TIMER_CONSTRUCT_BACKGROUND_RUNS], "Construct BG runs");
         iTermPreciseTimerStatsInit(&_stats[TIMER_DRAW_BACKGROUND], "Draw BG");
@@ -209,7 +209,7 @@ typedef struct iTermTextColorContext {
                          rectsPtr:(const NSRect *)rectArray
                         rectCount:(NSInteger)rectCount {
     DLog(@"begin drawRect:%@ in view %@", [NSValue valueWithRect:rect], _delegate);
-    iTermPreciseTimerSetEnabled([iTermAdvancedSettingsModel logDrawingPerformance]);
+    iTermPreciseTimerSetEnabled(YES);
 
     if (_debug) {
         [[NSColor redColor] set];
@@ -696,26 +696,67 @@ typedef struct iTermTextColorContext {
     NSRectFillUsingOperation(rect, NSCompositeSourceOver);
 }
 
++ (NSRect)frameForMarkContainedInRect:(NSRect)container
+                             cellSize:(CGSize)cellSize
+               cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
+                                scale:(CGFloat)scale {
+    const CGFloat verticalSpacing = MAX(0, scale * round((cellSize.height / scale - cellSizeWithoutSpacing.height / scale) / 2.0));
+    CGRect rect = NSMakeRect(container.origin.x,
+                             container.origin.y + verticalSpacing,
+                             [iTermAdvancedSettingsModel terminalMargin] * scale,
+                             cellSizeWithoutSpacing.height);
+    const CGFloat kMaxHeight = 15 * scale;
+    const CGFloat kMinMargin = 3 * scale;
+    const CGFloat kMargin = MAX(kMinMargin, (cellSizeWithoutSpacing.height - kMaxHeight) / 2.0);
+
+    const CGFloat overage = rect.size.width - rect.size.height + 2 * kMargin;
+    if (overage > 0) {
+        rect.origin.x += overage * .7;
+        rect.size.width -= overage;
+    }
+
+    rect.origin.y += kMargin;
+    rect.size.height -= kMargin;
+
+    // Bump the bottom up by as much as 3 points.
+    rect.size.height -= MAX(3 * scale, (cellSizeWithoutSpacing.height - 15 * scale) / 2.0);
+
+    return rect;
+}
+
++ (NSColor *)successMarkColor {
+    return [NSColor colorWithSRGBRed:0.53846
+                               green:0.757301
+                                blue:1
+                               alpha:1];
+}
+
++ (NSColor *)errorMarkColor {
+    return [NSColor colorWithSRGBRed:0.987265
+                               green:0.447845
+                                blue:0.426244
+                               alpha:1];
+}
+
++ (NSColor *)otherMarkColor {
+    return [NSColor colorWithSRGBRed:0.856645
+                               green:0.847289
+                                blue:0.425771
+                               alpha:1];
+}
+
 - (void)drawMarkIfNeededOnLine:(int)line leftMarginRect:(NSRect)leftMargin {
     VT100ScreenMark *mark = [self.delegate drawingHelperMarkOnLine:line];
     if (mark.isVisible && self.drawMarkIndicators) {
-        const CGFloat verticalSpacing = MAX(0, round((_cellSize.height - _cellSizeWithoutSpacing.height) / 2.0));
-        CGRect rect = NSMakeRect(leftMargin.origin.x,
-                                 leftMargin.origin.y + verticalSpacing,
-                                 [iTermAdvancedSettingsModel terminalMargin],
-                                 _cellSizeWithoutSpacing.height);
-        const CGFloat kMaxHeight = 15;
-        const CGFloat kMinMargin = 3;
-        const CGFloat kMargin = MAX(kMinMargin, (_cellSizeWithoutSpacing.height - kMaxHeight) / 2.0);
+        NSRect rect = [iTermTextDrawingHelper frameForMarkContainedInRect:leftMargin
+                                                                 cellSize:_cellSize
+                                                   cellSizeWithoutSpacing:_cellSizeWithoutSpacing
+                                                                    scale:1];
+        const CGFloat minX = round(NSMinX(rect));
+        NSPoint top = NSMakePoint(minX, NSMinY(rect));
+        NSPoint right = NSMakePoint(minX + NSWidth(rect), NSMidY(rect) - 0.25);
+        NSPoint bottom = NSMakePoint(minX, NSMaxY(rect) - 0.5);
 
-        const CGFloat overage = rect.size.width - rect.size.height + 2 * kMargin;
-        if (overage > 0) {
-            rect.origin.x += overage * .7;
-            rect.size.width -= overage;
-        }
-        NSPoint top = NSMakePoint(NSMinX(rect), rect.origin.y + kMargin);
-        NSPoint right = NSMakePoint(NSMaxX(rect), NSMidY(rect));
-        NSPoint bottom = NSMakePoint(NSMinX(rect), NSMaxY(rect) - kMargin);
 
         [[NSColor blackColor] set];
         NSBezierPath *path = [NSBezierPath bezierPath];
@@ -726,14 +767,14 @@ typedef struct iTermTextColorContext {
 
         if (mark.code == 0) {
             // Success
-            [[NSColor colorWithCalibratedRed:120.0 / 255.0 green:178.0 / 255.0 blue:255.0 / 255.0 alpha:1] set];
+            [[iTermTextDrawingHelper successMarkColor] set];
         } else if ([iTermAdvancedSettingsModel showYellowMarkForJobStoppedBySignal] &&
                    mark.code >= 128 && mark.code <= 128 + 32) {
             // Stopped by a signal (or an error, but we can't tell which)
-            [[NSColor colorWithCalibratedRed:210.0 / 255.0 green:210.0 / 255.0 blue:90.0 / 255.0 alpha:1] set];
+            [[iTermTextDrawingHelper otherMarkColor] set];
         } else {
             // Failure
-            [[NSColor colorWithCalibratedRed:248.0 / 255.0 green:90.0 / 255.0 blue:90.0 / 255.0 alpha:1] set];
+            [[iTermTextDrawingHelper errorMarkColor] set];
         }
 
         [path moveToPoint:top];
@@ -2079,6 +2120,7 @@ static BOOL iTermTextDrawingHelperShouldAntiAlias(screen_char_t *c,
             break;
 
         case NSUnderlineStyleDouble: {
+            origin.y -= lineWidth;
             [path moveToPoint:origin];
             [path lineToPoint:NSMakePoint(origin.x + runWidth, origin.y)];
             [path setLineWidth:lineWidth];

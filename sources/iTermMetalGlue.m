@@ -46,6 +46,7 @@ typedef struct {
     unsigned int bold : 1;
     unsigned int faint : 1;
     vector_float4 background;
+    ColorMode mode : 2;
 } iTermTextColorKey;
 
 typedef struct {
@@ -251,9 +252,10 @@ static NSColor *ColorForVector(vector_float4 v) {
 }
 
 - (void)metalDriverDidProduceDebugInfo:(nonnull NSData *)archive {
-    [archive writeToFile:@"/tmp/iTerm2-frame-capture.zip" atomically:NO];
+    NSString *filename = @"/tmp/iTerm2-frame-capture.zip";
+    [archive writeToFile:filename atomically:NO];
+    [[NSWorkspace sharedWorkspace] activateFileViewerSelectingURLs:@[ [NSURL fileURLWithPath:filename] ]];
 }
-
 
 @end
 
@@ -799,7 +801,8 @@ ambiguousIsDoubleWidth:(BOOL)ambiguousIsDoubleWidth
                       row:(int)row
                     width:(int)width
            drawableGlyphs:(int *)drawableGlyphsPtr
-                     date:(out NSDate **)datePtr {
+                     date:(out NSDate **)datePtr
+                   sketch:(out NSUInteger *)sketchPtr {
     NSCharacterSet *boxCharacterSet = [iTermBoxDrawingBezierCurveFactory boxDrawingCharactersWithBezierPaths];
     if (_timestampsEnabled) {
         *datePtr = _dates[row];
@@ -816,6 +819,11 @@ ambiguousIsDoubleWidth:(BOOL)ambiguousIsDoubleWidth
     int previousImageCode = -1;
     VT100GridCoord previousImageCoord;
     NSIndexSet *annotatedIndexes = _rowToAnnotationRanges[@(row)];
+    NSUInteger sketch = *sketchPtr;
+
+    // Prime numbers chosen more or less arbitrarily.
+    const vector_float4 bmul = simd_make_float4(7, 11, 13, 1) * 255;
+    const vector_float4 fmul = simd_make_float4(17, 19, 23, 1) * 255;
 
     *markStylePtr = [_markStyles[row] intValue];
     int lastDrawableGlyph = -1;
@@ -882,6 +890,7 @@ ambiguousIsDoubleWidth:(BOOL)ambiguousIsDoubleWidth
         currentColorKey->isMatch = findMatch;
         currentColorKey->inUnderlinedRange = inUnderlinedRange;
         currentColorKey->selected = selected;
+        currentColorKey->mode = line[x].foregroundColorMode;
         currentColorKey->foregroundColor = line[x].foregroundColor;
         currentColorKey->fgGreen = line[x].fgGreen;
         currentColorKey->fgBlue = line[x].fgBlue;
@@ -893,6 +902,7 @@ ambiguousIsDoubleWidth:(BOOL)ambiguousIsDoubleWidth
             currentColorKey->inUnderlinedRange == previousColorKey->inUnderlinedRange &&
             currentColorKey->selected == previousColorKey->selected &&
             currentColorKey->foregroundColor == previousColorKey->foregroundColor &&
+            currentColorKey->mode == previousColorKey->mode &&
             currentColorKey->fgGreen == previousColorKey->fgGreen &&
             currentColorKey->fgBlue == previousColorKey->fgBlue &&
             currentColorKey->bold == previousColorKey->bold &&
@@ -964,7 +974,16 @@ ambiguousIsDoubleWidth:(BOOL)ambiguousIsDoubleWidth
         } else {
             glyphKeys[x].drawable = NO;
         }
+
+        // This is my attempt at a fast sketch that estimates the number of unique combinations of
+        // foreground and background color.
+        const vector_float4 sum = attributes[x].backgroundColor * bmul + attributes[x].foregroundColor * fmul;
+        const unsigned int bit = ((unsigned int)(sum.x + sum.y + sum.z)) & 63;
+        sketch |= (1ULL << bit);
     }
+
+    *sketchPtr = sketch;
+
     *rleCount = rles;
     *drawableGlyphsPtr = lastDrawableGlyph + 1;
 
@@ -1234,6 +1253,45 @@ ambiguousIsDoubleWidth:(BOOL)ambiguousIsDoubleWidth
                                     nonASCII:(out iTermMetalUnderlineDescriptor *)nonAscii {
     *ascii = _asciiUnderlineDescriptor;
     *nonAscii = _nonAsciiUnderlineDescriptor;
+}
+
+// Use 24-bit color to set the text and background color of a cell.
+- (void)setTextColor:(vector_float4)textColor
+     backgroundColor:(vector_float4)backgroundColor
+             atCoord:(VT100GridCoord)coord
+               lines:(screen_char_t *)lines
+            gridSize:(VT100GridSize)gridSize {
+    if (coord.x < 0 || coord.y < 0 || coord.x >= gridSize.width || coord.y >= gridSize.height) {
+        return;
+    }
+    screen_char_t *c = &lines[coord.x + coord.y * (gridSize.width + 1)];
+    c->foregroundColorMode = ColorMode24bit;
+    c->foregroundColor = textColor.x * 255;
+    c->fgGreen = textColor.y * 255;
+    c->fgBlue = textColor.z * 255;
+
+    c->backgroundColorMode = ColorMode24bit;
+    c->backgroundColor = backgroundColor.x * 255;
+    c->bgGreen = backgroundColor.y * 255;
+    c->bgBlue = backgroundColor.z * 255;
+}
+
+- (void)setDebugString:(NSString *)debugString {
+    screen_char_t *line = _lines[0].mutableBytes;
+    for (int i = 0, o = MAX(0, _gridSize.width - (int)debugString.length);
+         i < debugString.length && o < _gridSize.width;
+         i++, o++) {
+        [self setTextColor:simd_make_float4(1, 0, 1, 1)
+           backgroundColor:simd_make_float4(0.1, 0.1, 0.1, 1)
+                   atCoord:VT100GridCoordMake(o, 0)
+                     lines:line
+                  gridSize:_gridSize];
+        line[o].code = [debugString characterAtIndex:i];
+    }
+}
+
+- (iTermData *)lineForRow:(int)y {
+    return _lines[y];
 }
 
 #pragma mark - Color

@@ -102,6 +102,14 @@ NS_INLINE vector_int3 GetColorModelIndexForPIU(iTermTextRendererTransientState *
     }
 }
 
+- (void)setDisableIndividualColorModels:(BOOL)disableIndividualColorModels {
+    _disableIndividualColorModels = disableIndividualColorModels;
+    if (disableIndividualColorModels) {
+        _colorModels = nil;
+        _colorModelIndexes = nil;
+    }
+}
+
 + (NSString *)formatTextPIU:(iTermTextPIU)a {
     return [NSString stringWithFormat:
             @"offset=(%@, %@) "
@@ -217,7 +225,17 @@ NS_INLINE vector_int3 GetColorModelIndexForPIU(iTermTextRendererTransientState *
         [s writeToURL:[folder URLByAppendingPathComponent:@"non-ascii-pius.txt"] atomically:NO encoding:NSUTF8StringEncoding error:nil];
     }
 
-    NSString *s = [NSString stringWithFormat:@"backgroundTexture=%@\nasciiUnderlineDescriptor=%@\nnonAsciiUnderlineDescriptor=%@\ndefaultBackgroundColor=(%@, %@, %@, %@)",
+    if (_colorModelIndexes) {
+        for (auto i : *_colorModelIndexes) {
+            const iTermColorComponentPair p = i.first;
+            [[iTermSubpixelModelBuilder sharedInstance] writeDebugDataToFolder:folder.path
+                                                                foregoundColor:p.first / 255.0
+                                                               backgroundColor:p.second / 255.0];
+        }
+    }
+
+    NSString *s = [NSString stringWithFormat:@"disableIndividualColorModels=%@\nbackgroundTexture=%@\nasciiUnderlineDescriptor=%@\nnonAsciiUnderlineDescriptor=%@\ndefaultBackgroundColor=(%@, %@, %@, %@)",
+                   @(_disableIndividualColorModels),
                    _backgroundTexture,
                    iTermMetalUnderlineDescriptorDescription(&_asciiUnderlineDescriptor),
                    iTermMetalUnderlineDescriptorDescription(&_nonAsciiUnderlineDescriptor),
@@ -516,7 +534,8 @@ static inline BOOL GlyphKeyCanTakeASCIIFastPath(const iTermMetalGlyphKey &glyphK
     vector_float2 asciiCellSize = 1.0 / _asciiTextureGroup.atlasSize;
     const float cellHeight = self.cellConfiguration.cellSize.height;
     const float cellWidth = self.cellConfiguration.cellSize.width;
-    const float yOffset = (self.cellConfiguration.gridSize.height - row - 1) * cellHeight;
+    const float verticalShift = round((cellHeight - self.cellConfiguration.cellSizeWithoutSpacing.height) / (2 * self.configuration.scale)) * self.configuration.scale;
+    const float yOffset = (self.cellConfiguration.gridSize.height - row - 1) * cellHeight + verticalShift;
 
     std::map<int, int> lastRelations;
     BOOL havePrevious = NO;

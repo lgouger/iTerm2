@@ -56,7 +56,7 @@ static NSDate* lastResizeDate_;
 @end
 
 
-@interface SessionView () <iTermAnnouncementDelegate>
+@interface SessionView () <iTermAnnouncementDelegate, PTYScrollerDelegate>
 @property(nonatomic, retain) PTYScrollView *scrollview;
 @end
 
@@ -130,6 +130,7 @@ static NSDate* lastResizeDate_;
                                                                       aRect.size.width,
                                                                       aRect.size.height)
                                        hasVerticalScroller:NO];
+        self.verticalScroller.ptyScrollerDelegate = self;
         [_scrollview setAutoresizingMask:(NSViewWidthSizable | NSViewHeightSizable)];
 
         if (@available(macOS 10.11, *)) {
@@ -149,6 +150,9 @@ static NSDate* lastResizeDate_;
 
 - (void)dealloc {
     _inDealloc = YES;
+    if (self.verticalScroller.ptyScrollerDelegate == self) {
+        self.verticalScroller.ptyScrollerDelegate = nil;
+    }
     [_scrollview release];
     [_title removeFromSuperview];
     [self unregisterDraggedTypes];
@@ -199,10 +203,10 @@ static NSDate* lastResizeDate_;
 
     // Configure and hide the metal view. It will be shown by PTYSession after it has rendered its
     // first frame. Until then it's just a solid gray rectangle.
-    _metalView.paused = NO;
+    _metalView.paused = YES;
+    _metalView.enableSetNeedsDisplay = NO;
     _metalView.hidden = NO;
     _metalView.alphaValue = 0;
-    _metalView.enableSetNeedsDisplay = YES;
 
     // Start the metal driver going. It will receive delegate calls from MTKView that kick off
     // frame rendering.
@@ -210,6 +214,10 @@ static NSDate* lastResizeDate_;
     _driver.dataSource = dataSource;
     [_driver mtkView:_metalView drawableSizeWillChange:_metalView.drawableSize];
     _metalView.delegate = _driver;
+}
+
+- (void)drawFrameSynchronously {
+    [_driver drawSynchronouslyInView:_metalView];
 }
 
 - (void)removeMetalView NS_AVAILABLE_MAC(10_11) {
@@ -581,6 +589,10 @@ static NSDate* lastResizeDate_;
     return half;
 }
 
+- (BOOL)hasHoverURL {
+    return _hoverURLView != nil;
+}
+
 - (void)setHoverURL:(NSString *)url {
     if (_hoverURLView == nil) {
         if (url == nil) {
@@ -600,11 +612,14 @@ static NSDate* lastResizeDate_;
         [_hoverURLView addSubview:_hoverURLTextField];
         _hoverURLView.frame = _hoverURLTextField.bounds;
         [self addSubview:_hoverURLView];
+        [_delegate sessionViewDidChangeHoverURLVisible:YES];
     } else if (url == nil) {
         [_hoverURLView removeFromSuperview];
         _hoverURLView = nil;
         _hoverURLTextField = nil;
+        [_delegate sessionViewDidChangeHoverURLVisible:NO];
     } else {
+        // _hoveurlView != nil && url != nil
         [_hoverURLTextField setStringValue:url];
     }
 
@@ -613,6 +628,10 @@ static NSDate* lastResizeDate_;
 
 - (void)viewDidMoveToWindow {
     [_delegate sessionViewDidChangeWindow];
+}
+
+- (PTYScroller *)verticalScroller {
+    return [PTYScroller castFrom:self.scrollview.verticalScroller];
 }
 
 #pragma mark NSDraggingSource protocol
@@ -921,6 +940,12 @@ static NSDate* lastResizeDate_;
                        afterDelay:[[NSAnimationContext currentContext] duration]];
         }
     }
+}
+
+#pragma mark - PTYScrollerDelegate
+
+- (void)userScrollDidChange:(BOOL)userScroll {
+    [self.delegate sessionViewUserScrollDidChange:userScroll];
 }
 
 @end

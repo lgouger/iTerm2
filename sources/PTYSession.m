@@ -18,7 +18,7 @@
 #import "iTermCommandHistoryCommandUseMO+Addtions.h"
 #import "iTermController.h"
 #import "iTermCopyModeState.h"
-#import "iTermGrowlDelegate.h"
+#import "iTermNotificationController.h"
 #import "iTermHistogram.h"
 #import "iTermHotKeyController.h"
 #import "iTermInitialDirectory.h"
@@ -746,10 +746,10 @@ ITERM_WEAKLY_REFERENCEABLE
         if (dir < 0) {
             [[_delegate realParentWindow] replaySession:self];
             PTYSession* irSession = [[_delegate realParentWindow] currentSession];
-             if (irSession != self) {
-                 // Failed to enter replay mode (perhaps nothing to replay?)
+            if (irSession != self) {
+                // Failed to enter replay mode (perhaps nothing to replay?)
                 [irSession irAdvance:dir];
-             }
+            }
             return;
         } else {
             NSBeep();
@@ -1025,7 +1025,7 @@ ITERM_WEAKLY_REFERENCEABLE
     [[aSession screen] setUnlimitedScrollback:[[theBookmark objectForKey:KEY_UNLIMITED_SCROLLBACK] boolValue]];
     [[aSession screen] setMaxScrollbackLines:[[theBookmark objectForKey:KEY_SCROLLBACK_LINES] intValue]];
 
-     // set our preferences
+    // set our preferences
     [aSession setProfile:theBookmark];
 
     [aSession setScreenSize:[sessionView frame] parent:[delegate realParentWindow]];
@@ -1740,7 +1740,7 @@ ITERM_WEAKLY_REFERENCEABLE
                               shouldAppend:NO];
     }
     @synchronized(self) {
-      _registered = YES;
+        _registered = YES;
     }
     [_shell launchWithPath:program
                  arguments:arguments
@@ -1948,9 +1948,9 @@ ITERM_WEAKLY_REFERENCEABLE
     // If _registered, -stop will cause -taskWasDeregistered to be called on a background thread,
     // which will release this object. Otherwise we autorelease now.
     @synchronized(self) {
-      if (!_registered) {
-          [self autorelease];
-      }
+        if (!_registered) {
+            [self autorelease];
+        }
     }
     [_shell stop];
     [_textview setDataSource:nil];
@@ -2310,7 +2310,7 @@ ITERM_WEAKLY_REFERENCEABLE
 - (void)taskWasDeregistered {
     DLog(@"taskWasDeregistered");
     @synchronized(self) {
-      _registered = NO;
+        _registered = NO;
     }
     // This is called on the background thread. After this is called, we won't get any more calls
     // on the background thread and it is safe for us to be dealloc'ed. This pairs with the retain
@@ -2527,7 +2527,7 @@ ITERM_WEAKLY_REFERENCEABLE
 
 - (void)checkTriggersOnPartialLine:(BOOL)partial
                         stringLine:(iTermStringLine *)stringLine
-                                  lineNumber:(long long)startAbsLineNumber {
+                        lineNumber:(long long)startAbsLineNumber {
     // If the trigger causes the session to get released, don't crash.
     [[self retain] autorelease];
 
@@ -2643,7 +2643,7 @@ ITERM_WEAKLY_REFERENCEABLE
     [_shell killServerIfRunning];
     if ([self shouldPostGrowlNotification] &&
         [iTermProfilePreferences boolForKey:KEY_SEND_SESSION_ENDED_ALERT inProfile:self.profile]) {
-        [[iTermGrowlDelegate sharedInstance] growlNotify:@"Session Ended"
+        [[iTermNotificationController sharedInstance] notify:@"Session Ended"
                                          withDescription:[NSString stringWithFormat:@"Session \"%@\" in tab #%d just terminated.",
                                                           [self name],
                                                           [_delegate tabNumber]]
@@ -2834,8 +2834,8 @@ ITERM_WEAKLY_REFERENCEABLE
         model = [ProfileModel sharedInstance];
     }
     [model setObject:[NSNumber numberWithBool:NO]
-                                       forKey:KEY_ASK_ABOUT_OUTDATED_KEYMAPS
-                                   inBookmark:_profile];
+              forKey:KEY_ASK_ABOUT_OUTDATED_KEYMAPS
+          inBookmark:_profile];
     [[NSUserDefaults standardUserDefaults] setObject:[NSNumber numberWithBool:NO]
                                               forKey:[NSString stringWithFormat:kAskAboutOutdatedKeyMappingKeyFormat,
                                                       [_profile objectForKey:KEY_GUID]]];
@@ -3091,7 +3091,7 @@ ITERM_WEAKLY_REFERENCEABLE
 
     // Try to open it as a URL.
     NSURL *url =
-          [NSURL URLWithUserSuppliedString:[selection stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]];
+        [NSURL URLWithUserSuppliedString:[selection stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]];
     if (url) {
         [[NSWorkspace sharedWorkspace] openURL:url];
         return;
@@ -3108,7 +3108,7 @@ ITERM_WEAKLY_REFERENCEABLE
             if ([_textview keyIsARepeat] == NO &&
                 [self shouldPostGrowlNotification] &&
                 [iTermProfilePreferences boolForKey:KEY_SEND_BELL_ALERT inProfile:self.profile]) {
-                [[iTermGrowlDelegate sharedInstance] growlNotify:@"Bell"
+                [[iTermNotificationController sharedInstance] notify:@"Bell"
                                                  withDescription:[NSString stringWithFormat:@"Session %@ #%d just rang a bell!",
                                                                   [self name],
                                                                   [_delegate tabNumber]]
@@ -3249,7 +3249,7 @@ ITERM_WEAKLY_REFERENCEABLE
     // only reference to the divorced profile, but that is too big a project to take on right now.
     if (_isDivorced) {
         NSDictionary *sessionsProfile =
-                [[ProfileModel sessionsInstance] bookmarkWithGuid:_profile[KEY_GUID]];
+            [[ProfileModel sessionsInstance] bookmarkWithGuid:_profile[KEY_GUID]];
         if (!sessionsProfile && _profile) {
             [[ProfileModel sessionsInstance] addBookmark:_profile];
         }
@@ -3350,7 +3350,7 @@ ITERM_WEAKLY_REFERENCEABLE
         if ([profileKey isKindOfClass:[NSString class]]) {
             theColor = [[iTermProfilePreferences objectForKey:profileKey
                                                     inProfile:aDict] colorValue];
-            }
+        }
 
         [_colorMap setColor:theColor forKey:[colorKey intValue]];
     }
@@ -3453,7 +3453,7 @@ ITERM_WEAKLY_REFERENCEABLE
     [self setXtermMouseReporting:[iTermProfilePreferences boolForKey:KEY_XTERM_MOUSE_REPORTING
                                                            inProfile:aDict]];
     [self setXtermMouseReportingAllowMouseWheel:[iTermProfilePreferences boolForKey:KEY_XTERM_MOUSE_REPORTING_ALLOW_MOUSE_WHEEL
-                                                           inProfile:aDict]];
+                                                                          inProfile:aDict]];
     [self setUnicodeVersion:[iTermProfilePreferences integerForKey:KEY_UNICODE_VERSION
                                                          inProfile:aDict]];
     [_terminal setDisableSmcupRmcup:[iTermProfilePreferences boolForKey:KEY_DISABLE_SMCUP_RMCUP
@@ -4303,7 +4303,7 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (void)setFont:(NSFont*)font
-     nonAsciiFont:(NSFont*)nonAsciiFont
+    nonAsciiFont:(NSFont*)nonAsciiFont
     horizontalSpacing:(float)horizontalSpacing
     verticalSpacing:(float)verticalSpacing {
     DLog(@"setFont:%@ nonAsciiFont:%@", font, nonAsciiFont);
@@ -4325,9 +4325,9 @@ ITERM_WEAKLY_REFERENCEABLE
     }
     DLog(@"Line height was %f", (float)[_textview lineHeight]);
     [_textview setFont:font
-         nonAsciiFont:nonAsciiFont
-        horizontalSpacing:horizontalSpacing
-        verticalSpacing:verticalSpacing];
+          nonAsciiFont:nonAsciiFont
+     horizontalSpacing:horizontalSpacing
+       verticalSpacing:verticalSpacing];
     DLog(@"Line height is now %f", (float)[_textview lineHeight]);
     [_delegate sessionDidChangeFontSize:self];
     DLog(@"After:\n%@", [window.contentView iterm_recursiveDescription]);
@@ -4558,8 +4558,8 @@ ITERM_WEAKLY_REFERENCEABLE
         ![existingOriginalGuid isEqualToString:_originalProfile[KEY_GUID]]) {
         // The bookmark doesn't already have a valid original GUID.
         bookmark = [[ProfileModel sessionsInstance] setObject:guid
-                                                        forKey:KEY_ORIGINAL_GUID
-                                                    inBookmark:bookmark];
+                                                       forKey:KEY_ORIGINAL_GUID
+                                                   inBookmark:bookmark];
     }
 
     // Allocate a new guid for this bookmark.
@@ -4669,7 +4669,7 @@ ITERM_WEAKLY_REFERENCEABLE
 
 - (void)findString:(NSString *)aString
   forwardDirection:(BOOL)direction
-      mode:(iTermFindMode)mode
+              mode:(iTermFindMode)mode
         withOffset:(int)offset {
     [_textview findString:aString
          forwardDirection:direction
@@ -4743,12 +4743,6 @@ ITERM_WEAKLY_REFERENCEABLE
 
 - (void)metalGlueDidDrawFrameAndNeedsRedraw:(BOOL)redrawAsap NS_AVAILABLE_MAC(10_11) {
     if (_view.useMetal) {
-        // If the text view had been visible, hide it. Hiding it before the
-        // first frame is drawn causes a flash of gray.
-        DLog(@"metalGlueDidDrawFrame");
-        _wrapper.useMetal = YES;
-        _textview.suppressDrawing = YES;
-        _view.metalView.alphaValue = 1;
         if (redrawAsap) {
             [_textview setNeedsDisplay:YES];
         }
@@ -4756,29 +4750,47 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (BOOL)metalAllowed {
-    static dispatch_once_t onceToken;
-    static BOOL machineSupportsMetal;
     if (@available(macOS 10.11, *)) {
+        if (!self.canProduceMetalFramecap) {
+            return NO;
+        }
+        return (![iTermAdvancedSettingsModel disableMetalWhenIdle] ||
+                _cadenceController.isActive ||
+                _view.verticalScroller.userScroll ||
+                self.overrideGlobalDisableMetalWhenIdleSetting ||
+                _view.driver.captureDebugInfoForNextFrame);
+    } else {
+        return NO;
+    }
+}
+
+- (BOOL)canProduceMetalFramecap {
+    if (@available(macOS 10.11, *)) {
+        static dispatch_once_t onceToken;
+        static BOOL machineSupportsMetal;
         dispatch_once(&onceToken, ^{
             NSArray<id<MTLDevice>> *devices = MTLCopyAllDevices();
             machineSupportsMetal = devices.count > 0;
             [devices release];
         });
+        // Metal's not allowed when other views are composited over the metal view because that just
+        // doesn't seem to work, even if you use presentsWithTransaction (even if it did work, it
+        // requires presenting the drawable on the main thread which defeats the purpose of the metal
+        // renderer).
+        //
+        // Perhaps some day transparency and ligatures will be supported.
+        return ([iTermAdvancedSettingsModel useMetal] &&
+                machineSupportsMetal &&
+                _textview.transparencyAlpha == 1 &&
+                ![self ligaturesEnabledInEitherFont] &&
+                ![PTYNoteViewController anyNoteVisible] &&
+                !_view.findViewController.isVisible &&
+                !_pasteHelper.pasteViewIsVisible &&
+                _view.currentAnnouncement == nil &&
+                !_view.hasHoverURL);
+    } else {
+        return NO;
     }
-    // Metal's not allowed when other views are composited over the metal view because that just
-    // doesn't seem to work, even if you use presentsWithTransaction (even if it did work, it
-    // requires presenting the drawable on the main thread which defeats the purpose of the metal
-    // renderer).
-    //
-    // Perhaps some day transparency and ligatures will be supported.
-    return ([iTermAdvancedSettingsModel useMetal] &&
-            machineSupportsMetal &&
-            _textview.transparencyAlpha == 1 &&
-            ![self ligaturesEnabledInEitherFont] &&
-            ![PTYNoteViewController anyNoteVisible] &&
-            !_view.findViewController.isVisible &&
-            !_pasteHelper.pasteViewIsVisible &&
-            _view.currentAnnouncement == nil);
 }
 
 - (BOOL)ligaturesEnabledInEitherFont {
@@ -4810,7 +4822,33 @@ ITERM_WEAKLY_REFERENCEABLE
         }
         [_textview setNeedsDisplay:YES];
         [_cadenceController changeCadenceIfNeeded];
+
+        if (useMetal) {
+            // First draw asynchronously since it takes a long time (200 ms on my old mbp) to spin
+            // up a new metal driver. This frame will never be seen since PTYTextView is still visible.
+            DLog(@"Begin async draw for %@", self);
+            [_view.driver drawAsynchronouslyInView:_view.metalView completion:^{
+                if (_useMetal) {
+                    // Now that everything's hot we can draw a frame synchronously without the UI hiccupping.
+                    DLog(@"Begin synchronous draw for %@", self);
+                    [_view drawFrameSynchronously];
+                    [self showMetalAndStopDrawingTextView];
+                    _view.metalView.enableSetNeedsDisplay = YES;
+                }
+            }];
+        } else {
+            _view.metalView.enableSetNeedsDisplay = NO;
+        }
     }
+}
+
+- (void)showMetalAndStopDrawingTextView NS_AVAILABLE_MAC(10_11) {
+    // If the text view had been visible, hide it. Hiding it before the
+    // first frame is drawn causes a flash of gray.
+    DLog(@"metalGlueDidDrawFrame");
+    _wrapper.useMetal = YES;
+    _textview.suppressDrawing = YES;
+    _view.metalView.alphaValue = 1;
 }
 
 - (void)setUseMetal:(BOOL)useMetal dataSource:(id<iTermMetalDriverDataSource>)dataSource NS_AVAILABLE_MAC(10_11) {
@@ -4981,8 +5019,8 @@ ITERM_WEAKLY_REFERENCEABLE
     // That means the find window is open, we're not already doing a tail find,
     // and a search was performed in the find window (vs select+cmd-e+cmd-f).
     return !_tailFindTimer &&
-           ![[[_view findViewController] view] isHidden] &&
-           [_textview findContext].substring != nil;
+            ![[[_view findViewController] view] isHidden] &&
+            [_textview findContext].substring != nil;
 }
 
 - (void)hideSession {
@@ -5829,7 +5867,7 @@ ITERM_WEAKLY_REFERENCEABLE
             [self searchNext];
             break;
 
-         case KEY_FIND_AGAIN_UP:
+        case KEY_FIND_AGAIN_UP:
             [self searchPrevious];
             break;
 
@@ -6695,7 +6733,7 @@ ITERM_WEAKLY_REFERENCEABLE
                     [self writeLatin1EncodedData:[_terminal.output mousePress:button
                                                                 withModifiers:modifiers
                                                                            at:coord]
-                             broadcastAllowed:NO];
+                                broadcastAllowed:NO];
                     return YES;
 
                 case MOUSE_REPORTING_NONE:
@@ -6719,7 +6757,7 @@ ITERM_WEAKLY_REFERENCEABLE
                         [self writeLatin1EncodedData:[_terminal.output mouseRelease:button
                                                                       withModifiers:modifiers
                                                                                  at:coord]
-                                 broadcastAllowed:NO];
+                                    broadcastAllowed:NO];
                         return YES;
 
                     case MOUSE_REPORTING_NONE:
@@ -6737,7 +6775,7 @@ ITERM_WEAKLY_REFERENCEABLE
                 [self writeLatin1EncodedData:[_terminal.output mouseMotion:MOUSE_BUTTON_NONE
                                                              withModifiers:modifiers
                                                                         at:coord]
-                         broadcastAllowed:NO];
+                            broadcastAllowed:NO];
                 return YES;
             }
             break;
@@ -6755,7 +6793,7 @@ ITERM_WEAKLY_REFERENCEABLE
                         [self writeLatin1EncodedData:[_terminal.output mouseMotion:button
                                                                      withModifiers:modifiers
                                                                                 at:coord]
-                                 broadcastAllowed:NO];
+                                    broadcastAllowed:NO];
                         // Fall through
                     case MOUSE_REPORTING_NORMAL:
                         // Don't do selection when mouse reporting during a drag, even if the drag
@@ -6775,19 +6813,27 @@ ITERM_WEAKLY_REFERENCEABLE
                 case MOUSE_REPORTING_BUTTON_MOTION:
                 case MOUSE_REPORTING_ALL_MOTION:
                     if (deltaY != 0) {
-                        if ([iTermAdvancedSettingsModel doubleReportScrollWheel]) {
+                        int steps;
+                        if ([iTermAdvancedSettingsModel proportionalScrollWheelReporting]) {
+                            // Cap number of reported scroll events at 32 to prevent runaway redraws.
+                            // This is a mostly theoretical concern and the number can grow if it
+                            // doesn't seem to be a problem.
+                            steps = MIN(32, fabs(deltaY));
+                        } else {
+                            steps = 1;
+                        }
+                        if (steps == 1 && [iTermAdvancedSettingsModel doubleReportScrollWheel]) {
                             // This works around what I believe is a bug in tmux or a bug in
                             // how users use tmux. See the thread on tmux-users with subject
                             // "Mouse wheel events and server_client_assume_paste--the perfect storm of bugs?".
+                            steps = 2;
+                        }
+                        for (int i = 0; i < steps; i++) {
                             [self writeLatin1EncodedData:[_terminal.output mousePress:button
                                                                         withModifiers:modifiers
                                                                                    at:coord]
-                                     broadcastAllowed:NO];
+                                        broadcastAllowed:NO];
                         }
-                        [self writeLatin1EncodedData:[_terminal.output mousePress:button
-                                                                    withModifiers:modifiers
-                                                                               at:coord]
-                                 broadcastAllowed:NO];
                     }
                     // If deltaY is 0 we still return YES because the
                     // scrollview moves anyway (likely because our caller is
@@ -7529,6 +7575,10 @@ ITERM_WEAKLY_REFERENCEABLE
     return NSMakeSize([_textview charWidth], [_textview lineHeight]);
 }
 
+- (void)screenDidClearScrollbackBuffer:(VT100Screen *)screen {
+    [_delegate sessionDidClearScrollbackBuffer:self];
+}
+
 - (void)screenClearHighlights {
     [_textview clearHighlights:NO];
 }
@@ -7573,7 +7623,7 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (BOOL)highlightCursorLine {
-  return _textview.highlightCursorLine;
+    return _textview.highlightCursorLine;
 }
 
 - (BOOL)screenHasView {
@@ -7602,7 +7652,7 @@ ITERM_WEAKLY_REFERENCEABLE
         [_delegate sessionSelectContainingTab];
     }
     if (okToActivateApp) {
-      DLog(@"Activate the app");
+        DLog(@"Activate the app");
         [[NSApplication sharedApplication] activateIgnoringOtherApps:YES];
     }
 
@@ -7627,7 +7677,7 @@ ITERM_WEAKLY_REFERENCEABLE
     if (self.alertOnNextMark) {
         NSString *action = [iTermApplication.sharedApplication delegate].markAlertAction;
         if ([action isEqualToString:kMarkAlertActionPostNotification]) {
-            [[iTermGrowlDelegate sharedInstance] growlNotify:@"Mark Set"
+            [[iTermNotificationController sharedInstance] notify:@"Mark Set"
                                              withDescription:[NSString stringWithFormat:@"Session %@ #%d had a mark set.",
                                                               [self name],
                                                               [_delegate tabNumber]]
@@ -8187,10 +8237,10 @@ ITERM_WEAKLY_REFERENCEABLE
     NSString *title =
         @"Looks like mouse reporting was left on when an ssh session ended unexpectedly or an app misbehaved. Turn it off?";
     iTermAnnouncementViewController *announcement =
-        [iTermAnnouncementViewController announcementWithTitle:title
-                                                         style:kiTermAnnouncementViewStyleQuestion
-                                                   withActions:@[ @"Yes", @"Always", @"Never" ]
-                                                    completion:^(int selection) {
+    [iTermAnnouncementViewController announcementWithTitle:title
+                                                     style:kiTermAnnouncementViewStyleQuestion
+                                               withActions:@[ @"Yes", @"Always", @"Never" ]
+                                                completion:^(int selection) {
             switch (selection) {
                 case -2:  // Dismiss programmatically
                     break;
@@ -8220,10 +8270,10 @@ ITERM_WEAKLY_REFERENCEABLE
     NSString *title =
         @"Looks like focus reporting was left on when an ssh session ended unexpectedly or an app misbehaved. Turn it off?";
     iTermAnnouncementViewController *announcement =
-        [iTermAnnouncementViewController announcementWithTitle:title
-                                                         style:kiTermAnnouncementViewStyleQuestion
-                                                   withActions:@[ @"Yes", @"Always", @"Never" ]
-                                                    completion:^(int selection) {
+    [iTermAnnouncementViewController announcementWithTitle:title
+                                                     style:kiTermAnnouncementViewStyleQuestion
+                                               withActions:@[ @"Yes", @"Always", @"Never" ]
+                                                completion:^(int selection) {
             switch (selection) {
                 case -2:  // Dismiss programmatically
                     break;
@@ -8253,10 +8303,10 @@ ITERM_WEAKLY_REFERENCEABLE
     NSString *title =
         @"Looks like paste bracketing was left on when an ssh session ended unexpectedly or an app misbehaved. Turn it off?";
     iTermAnnouncementViewController *announcement =
-        [iTermAnnouncementViewController announcementWithTitle:title
-                                                         style:kiTermAnnouncementViewStyleQuestion
-                                                   withActions:@[ @"Yes", @"Always", @"Never" ]
-                                                    completion:^(int selection) {
+    [iTermAnnouncementViewController announcementWithTitle:title
+                                                     style:kiTermAnnouncementViewStyleQuestion
+                                               withActions:@[ @"Yes", @"Always", @"Never" ]
+                                                completion:^(int selection) {
             switch (selection) {
                 case -2:  // Dismiss programmatically
                     break;
@@ -8377,7 +8427,7 @@ ITERM_WEAKLY_REFERENCEABLE
     NSString *trimmedCommand =
         [command stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
     return [[iTermShellHistoryController sharedInstance] commandHistoryEntriesWithPrefix:trimmedCommand
-                                                                     onHost:host];
+                                                                                  onHost:host];
 }
 
 - (void)screenCommandDidChangeWithRange:(VT100GridCoordRange)range {
@@ -8406,7 +8456,7 @@ ITERM_WEAKLY_REFERENCEABLE
         DLog(@"Update command to %@, have=%d, range.start.x=%d", command, (int)haveCommand, range.start.x);
         if (haveCommand) {
             [[_delegate realParentWindow] updateAutoCommandHistoryForPrefix:command
-                                                                   inSession:self
+                                                                  inSession:self
                                                                 popIfNeeded:NO];
         }
     }
@@ -8419,7 +8469,7 @@ ITERM_WEAKLY_REFERENCEABLE
          command, VT100GridCoordRangeDescription(range));
     if (command) {
         NSString *trimmedCommand =
-            [command stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+        [command stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
         if (trimmedCommand.length) {
             VT100ScreenMark *mark = [_screen markOnLine:_lastPromptLine - [_screen totalScrollbackOverflow]];
             DLog(@"FinalTerm:  Make the mark on lastPromptLine %lld (%@) a command mark for command %@",
@@ -8429,9 +8479,9 @@ ITERM_WEAKLY_REFERENCEABLE
             mark.outputStart = VT100GridAbsCoordMake(_screen.currentGrid.cursor.x,
                                                      _screen.currentGrid.cursor.y + _screen.numberOfScrollbackLines + _screen.totalScrollbackOverflow);
             [[iTermShellHistoryController sharedInstance] addCommand:trimmedCommand
-                                                 onHost:[_screen remoteHostOnLine:range.end.y]
-                                            inDirectory:[_screen workingDirectoryOnLine:range.end.y]
-                                               withMark:mark];
+                                                              onHost:[_screen remoteHostOnLine:range.end.y]
+                                                         inDirectory:[_screen workingDirectoryOnLine:range.end.y]
+                                                            withMark:mark];
             [_commands addObject:trimmedCommand];
             [self trimCommandsIfNeeded];
         }
@@ -9223,6 +9273,14 @@ ITERM_WEAKLY_REFERENCEABLE
     }
 }
 
+- (void)sessionViewUserScrollDidChange:(BOOL)userScroll {
+    [self.delegate sessionUpdateMetalAllowed];
+}
+
+- (void)sessionViewDidChangeHoverURLVisible:(BOOL)visible {
+    [self.delegate sessionUpdateMetalAllowed];
+}
+
 #pragma mark - iTermCoprocessDelegate
 
 - (void)coprocess:(Coprocess *)coprocess didTerminateWithErrorOutput:(NSString *)errors {
@@ -9261,6 +9319,12 @@ ITERM_WEAKLY_REFERENCEABLE
     state.slowFrameRate = _slowFrameRate;
     state.liveResizing = _inLiveResize;
     return state;
+}
+
+- (void)cadenceControllerActiveStateDidChange:(BOOL)active {
+    if (@available(macOS 10.11, *)) {
+        [self.delegate sessionUpdateMetalAllowed];
+    }
 }
 
 #pragma mark - API

@@ -24,6 +24,7 @@
 - (instancetype)initWithTextureWidth:(uint32_t)width
                        textureHeight:(uint32_t)height
                          arrayLength:(NSUInteger)length
+                                bgra:(BOOL)bgra
                               device:(id <MTLDevice>)device {
     self = [super init];
     if (self) {
@@ -37,7 +38,7 @@
         MTLTextureDescriptor *textureDescriptor = [[MTLTextureDescriptor alloc] init];
 
         textureDescriptor.textureType = MTLTextureType2D;
-        textureDescriptor.pixelFormat = MTLPixelFormatBGRA8Unorm;
+        textureDescriptor.pixelFormat = bgra ? MTLPixelFormatBGRA8Unorm : MTLPixelFormatRGBA8Unorm;
         textureDescriptor.width = atlasSize.width;
         textureDescriptor.height = atlasSize.height;
         textureDescriptor.arrayLength = 1;
@@ -48,6 +49,7 @@
         _texture.label = @"iTermTextureArray";
         [iTermTexture setBytesPerRow:_atlasSize.width * 4
                          rawDataSize:_atlasSize.width * _atlasSize.height * 4
+                     samplesPerPixel:4
                           forTexture:_texture];
     }
 

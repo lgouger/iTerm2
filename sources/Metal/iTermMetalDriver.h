@@ -65,6 +65,7 @@ NS_CLASS_AVAILABLE(10_11, NA)
 @property (nonatomic, readonly) NSColor *timestampsTextColor;
 @property (nonatomic, readonly) long long firstVisibleAbsoluteLineNumber;
 
+// Initialize sketchPtr to 0. The number of set bits estimates the unique number of color combinations.
 - (void)metalGetGlyphKeys:(iTermMetalGlyphKey *)glyphKeys
                attributes:(iTermMetalGlyphAttributes *)attributes
                 imageRuns:(NSMutableArray<iTermMetalImageRun *> *)imageRuns
@@ -74,7 +75,8 @@ NS_CLASS_AVAILABLE(10_11, NA)
                       row:(int)row
                     width:(int)width
            drawableGlyphs:(int *)drawableGlyphsPtr
-                     date:(out NSDate * _Nonnull * _Nonnull)date;
+                     date:(out NSDate * _Nonnull * _Nonnull)date
+                     sketch:(out NSUInteger *)sketchPtr;
 
 - (nullable iTermMetalCursorInfo *)metalDriverCursorInfo;
 
@@ -97,6 +99,10 @@ NS_CLASS_AVAILABLE(10_11, NA)
 - (void)enumerateIndicatorsInFrame:(NSRect)frame block:(void (^)(iTermIndicatorDescriptor *))block;
 
 - (void)metalEnumerateHighlightedRows:(void (^)(vector_float3 color, NSTimeInterval age, int row))block;
+
+- (void)setDebugString:(NSString *)debugString;
+
+- (iTermData *)lineForRow:(int)y;
 
 @end
 
@@ -128,6 +134,15 @@ NS_CLASS_AVAILABLE(10_11, NA)
 cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
            gridSize:(VT100GridSize)gridSize
               scale:(CGFloat)scale;
+
+// Draw and return after the GPU's completion callback is run.
+// enableSetNeedsDisplay should be NO.
+- (void)drawSynchronouslyInView:(MTKView *)view;
+
+// Draw and return immediately, calling completion block after GPU's completion
+// block is called.
+// enableSetNeedsDisplay should be NO.
+- (void)drawAsynchronouslyInView:(MTKView *)view completion:(void (^)(void))completion;
 
 @end
 

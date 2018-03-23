@@ -46,7 +46,7 @@ extern NSString *const PTYSessionRevivedNotification;
 @class iTermColorMap;
 @class iTermCommandHistoryCommandUseMO;
 @class iTermController;
-@class iTermGrowlDelegate;
+@class iTermNotificationController;
 @class iTermPromptOnCloseReason;
 @class iTermQuickLookController;
 @class SessionView;
@@ -196,6 +196,9 @@ typedef enum {
 
 // Whether metal is allowed has changed
 - (void)sessionUpdateMetalAllowed;
+
+// Scrollback buffer cleared.
+- (void)sessionDidClearScrollbackBuffer:(PTYSession *)session;
 
 @end
 
@@ -456,6 +459,8 @@ typedef enum {
 @property(nonatomic, readonly) BOOL passwordInput;
 
 @property(nonatomic) BOOL isSingleUseSession;
+@property(nonatomic) BOOL overrideGlobalDisableMetalWhenIdleSetting;
+@property(nonatomic, readonly) BOOL canProduceMetalFramecap;
 
 #pragma mark - methods
 

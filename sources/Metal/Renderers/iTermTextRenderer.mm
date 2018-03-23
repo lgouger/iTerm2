@@ -14,6 +14,7 @@ extern "C" {
 #import "iTermMetalBufferPool.h"
 #import "iTermMetalDebugInfo.h"
 #import "iTermPIUArray.h"
+#import "iTermTexture.h"
 #import "iTermTexturePageCollection.h"
 #import "iTermSubpixelModelBuilder.h"
 #import "iTermTextRendererTransientState.h"
@@ -62,7 +63,7 @@ static const int iTermTextRendererMaximumNumberOfTexturePages = 4096;
 
 @implementation iTermTextRenderer {
     iTermMetalCellRenderer *_cellRenderer;
-    id<MTLBuffer> _models;
+    id<MTLTexture> _models;
     iTermASCIITextureGroup *_asciiTextureGroup;
 
     iTermTexturePageCollectionSharedPointer *_texturePageCollectionSharedPointer;
@@ -76,22 +77,82 @@ static const int iTermTextRendererMaximumNumberOfTexturePages = 4096;
     iTermMetalMixedSizeBufferPool *_subpixelModelPool;
 }
 
+/*
+ * Input is organized as
+ *  Index   Text  Bg   Sample
+ *      0     0   0        0
+ *                       ...
+ *                       255
+ *    256         1        0
+ *                       ...
+ *                       255
+ *  256*2         2        0
+ *              ...
+ * 256*17        17        0
+ *                       ...
+ *                       255
+ * 256*18      1   0       0
+ *               ...
+ *
+ * Output is organized as a 2d texture that lets us use the GPU's bilinear
+ * interpolation. It's about 33% faster overall on my iMac.
+ *
+ *                sample=0 sample=1 ...
+ *                text ->  text->
+ *  background    0...255  0...255
+ *  |        0    XXXXXXX  XXXXXXX     XXXXXXX
+ *  V      ...    XXXXXXX  XXXXXXX ... XXXXXXX
+ *          17    XXXXXXX  XXXXXXX     XXXXXXX
+ *
+ * Width = 256 * 18
+ * Height = 18
+ * Bytes per sample = 1
+ */
++ (NSData *)transformedData:(NSData *)input {
+    const unsigned char *inputBytes = reinterpret_cast<const unsigned char *>(input.bytes);
+    unsigned char (^load)(int, int, int) = ^unsigned char(int text, int background, int bwSample) {
+        const size_t i = 256 * (18 * text + background) + bwSample;
+        return inputBytes[i];
+    };
+
+    NSMutableData *output = [NSMutableData uninitializedDataWithLength:18 * 18 * 256];
+    unsigned char *outputBytes = reinterpret_cast<unsigned char *>(output.mutableBytes);
+    void (^store)(int, int, int, unsigned char) = ^void(int text, int background, int bwSample, unsigned char value) {
+        const size_t i = 18 * (bwSample + 256 * background) + text;
+        outputBytes[i] = value;
+    };
+    for (int t = 0; t < 18; t ++) {
+        for (int b = 0; b < 18; b ++) {
+            for (int s = 0; s < 256; s++) {
+                store(t, b, s, load(t, b, s));
+            }
+        }
+    }
+    return output;
+}
+
++ (void)enumerateGridOfSubpixelModels:(void (^)(float, float, iTermSubpixelModel *))block {
+    // The fragment function assumes we use the value 17 here. It's
+    // convenient that 17 evenly divides 255 (17 * 15 = 255).
+    float stride = 255.0/17.0;
+    for (float textColor = 0; textColor < 256; textColor += stride) {
+        for (float backgroundColor = 0; backgroundColor < 256; backgroundColor += stride) {
+            iTermSubpixelModel *model = [[iTermSubpixelModelBuilder sharedInstance] modelForForegoundColor:MIN(MAX(0, textColor / 255.0), 1)
+                                                                                           backgroundColor:MIN(MAX(0, backgroundColor / 255.0), 1)];
+            block(textColor, backgroundColor, model);
+        }
+    }
+}
+
 + (NSData *)subpixelModelData {
     static NSData *subpixelModelData;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         NSMutableData *data = [NSMutableData data];
-        // The fragment function assumes we use the value 17 here. It's
-        // convenient that 17 evenly divides 255 (17 * 15 = 255).
-        float stride = 255.0/17.0;
-        for (float textColor = 0; textColor < 256; textColor += stride) {
-            for (float backgroundColor = 0; backgroundColor < 256; backgroundColor += stride) {
-                iTermSubpixelModel *model = [[iTermSubpixelModelBuilder sharedInstance] modelForForegoundColor:MIN(MAX(0, textColor / 255.0), 1)
-                                                                                               backgroundColor:MIN(MAX(0, backgroundColor / 255.0), 1)];
-                [data appendData:model.table];
-            }
-        }
-        subpixelModelData = data;
+        [self enumerateGridOfSubpixelModels:^(float textColor, float backgroundColor, iTermSubpixelModel *model) {
+            [data appendData:model.table];
+        }];
+        subpixelModelData = [self transformedData:data];
     });
     return subpixelModelData;
 }
@@ -110,18 +171,11 @@ static const int iTermTextRendererMaximumNumberOfTexturePages = 4096;
         return [_subpixelModelPool requestBufferFromContext:tState.poolContext
                                                        size:tState.colorModels.length
                                                       bytes:tState.colorModels.bytes];
+    } else {
+        return [_subpixelModelPool requestBufferFromContext:tState.poolContext
+                                                       size:1
+                                                      bytes:""];
     }
-
-    // Use a generic color model for blending. No need to use a buffer pool here because this is only
-    // created once.
-    if (_models == nil) {
-        NSData *subpixelModelData = [iTermTextRenderer subpixelModelData];
-        _models = [_cellRenderer.device newBufferWithBytes:subpixelModelData.bytes
-                                                    length:subpixelModelData.length
-                                                   options:MTLResourceStorageModeManaged];
-        _models.label = @"Subpixel models";
-    }
-    return _models;
 }
 
 - (instancetype)initWithDevice:(id<MTLDevice>)device {
@@ -154,6 +208,24 @@ static const int iTermTextRendererMaximumNumberOfTexturePages = 4096;
         _subpixelModelPool = [[iTermMetalMixedSizeBufferPool alloc] initWithDevice:device
                                                                           capacity:512
                                                                               name:@"subpixel PIU"];
+
+        NSData *subpixelModelData = [iTermTextRenderer subpixelModelData];
+
+        MTLTextureDescriptor *textureDescriptor =
+          [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatR8Unorm
+                                                             width:18 * 256
+                                                            height:18
+                                                         mipmapped:NO];
+        _models = [_cellRenderer.device newTextureWithDescriptor:textureDescriptor];
+        _models.label = @"Subpixel Models";
+        [_models replaceRegion:MTLRegionMake2D(0, 0, 18 * 256, 18)
+                   mipmapLevel:0
+                     withBytes:subpixelModelData.bytes
+                   bytesPerRow:18 * 256];
+        [iTermTexture setBytesPerRow:18*256
+                         rawDataSize:18 * 256 * 18
+                     samplesPerPixel:1
+                          forTexture:_models];
     }
     return self;
 }
@@ -294,8 +366,9 @@ static const int iTermTextRendererMaximumNumberOfTexturePages = 4096;
             piuBuffer = [self piuBufferForPIUs:pius tState:tState instances:instances];
         }];
 
-        NSDictionary *textures = @{ @(iTermTextureIndexPrimary): texture };
-        if (tState.cellConfiguration.usingIntermediatePass) {
+        NSDictionary *textures = @{ @(iTermTextureIndexPrimary): texture,
+                                    @(iTermTextureIndexSubpixelModels): _models };
+        if (tState.cellConfiguration.usingIntermediatePass || tState.disableIndividualColorModels) {
             textures = [textures dictionaryBySettingObject:tState.backgroundTexture forKey:@(iTermTextureIndexBackground)];
         }
 
@@ -307,7 +380,8 @@ static const int iTermTextRendererMaximumNumberOfTexturePages = 4096;
                 .cellSize = simd_make_float2(cellSize.x, cellSize.y),
                 .underlineOffset = cellSize.y - (underlineDescriptor.offset * scale),
                 .underlineThickness = underlineDescriptor.thickness * scale,
-                .scale = scale
+                .scale = scale,
+                .disableExactColorModels = static_cast<bool>(tState.disableIndividualColorModels)
             };
 
             // These tend to get reused so avoid changing the buffer if it is the same as the last one.
@@ -351,6 +425,25 @@ static const int iTermTextRendererMaximumNumberOfTexturePages = 4096;
     if (![replacement isEqual:_asciiTextureGroup]) {
         _asciiTextureGroup = replacement;
     }
+}
+
+- (void)writeDebugInfoToFolder:(NSURL *)folder {
+    NSMutableData *data = [NSMutableData data];
+    [self.class enumerateGridOfSubpixelModels:^(float textColor, float backgroundColor, iTermSubpixelModel *model) {
+        NSString *name = [NSString stringWithFormat:@"SubpixelModelGridBwGlyph.t_%02x.b_%02x.dat",
+                          (int)textColor, (int)backgroundColor];
+        NSURL *url = [folder URLByAppendingPathComponent:name];
+        [model.table writeToURL:url atomically:NO];
+
+        [data appendData:model.table];
+    }];
+    NSString *name = @"SubpixelModelGridComposite_Untransformed.dat";
+    NSURL *url = [folder URLByAppendingPathComponent:name];
+    [data writeToURL:url atomically:NO];
+
+    name = @"SubpixelModelGridComposite_Transformed.dat";
+    url = [folder URLByAppendingPathComponent:name];
+    [[self.class transformedData:data] writeToURL:url atomically:NO];
 }
 
 #pragma mark - iTermMetalDebugInfoFormatter
