@@ -195,7 +195,7 @@ static NSDate* lastResizeDate_;
     // Allocate a new metal view
     _metalView = [[MTKView alloc] initWithFrame:_scrollview.contentView.frame
                                          device:MTLCreateSystemDefaultDevice()];
-
+    _metalView.layer.opaque = YES;
     // Tell the clip view about it so it can ask the metalview to draw itself on scroll.
     _metalClipView.metalView = _metalView;
 
@@ -210,14 +210,14 @@ static NSDate* lastResizeDate_;
 
     // Start the metal driver going. It will receive delegate calls from MTKView that kick off
     // frame rendering.
-    _driver = [[iTermMetalDriver alloc] initWithMetalKitView:_metalView];
+    _driver = [[iTermMetalDriver alloc] initWithDevice:_metalView.device];
     _driver.dataSource = dataSource;
     [_driver mtkView:_metalView drawableSizeWillChange:_metalView.drawableSize];
     _metalView.delegate = _driver;
 }
 
-- (void)drawFrameSynchronously {
-    [_driver drawSynchronouslyInView:_metalView];
+- (BOOL)drawFrameSynchronously {
+    return [_driver drawSynchronouslyInView:_metalView];
 }
 
 - (void)removeMetalView NS_AVAILABLE_MAC(10_11) {
@@ -302,10 +302,18 @@ static NSDate* lastResizeDate_;
 
 - (void)updateMetalViewFrame {
     // The metal view looks awful while resizing because it insists on scaling
-    // its contents.. Just switch off the metal renderer until it catches up.
+    // its contents. Just switch off the metal renderer until it catches up.
+    [_delegate sessionViewNeedsMetalFrameUpdate];
+}
+
+- (void)reallyUpdateMetalViewFrame {
     [_delegate sessionViewHideMetalViewUntilNextFrame];
-    _metalView.frame = _scrollview.contentView.frame;
+    _metalView.frame = [self frameByInsettingTopAndBottomForMetal:_scrollview.frame];
     [_driver mtkView:_metalView drawableSizeWillChange:_metalView.drawableSize];
+}
+
+- (NSRect)frameByInsettingTopAndBottomForMetal:(NSRect)frame {
+    return NSInsetRect(frame, 0, [iTermAdvancedSettingsModel terminalVMargin]);
 }
 
 - (void)setDelegate:(id<iTermSessionViewDelegate>)delegate {
@@ -541,8 +549,14 @@ static NSDate* lastResizeDate_;
     // than the session view.
     // TODO(metal): This will be a performance issue. Use another view with a layer and background color.
     [super drawRect:dirtyRect];
-    PTYScrollView *scrollView = [self scrollview];
-    NSRect svFrame = [scrollView frame];
+    if (_useMetal && _metalView.alphaValue == 1) {
+        [self drawAroundFrame:_metalView.frame dirtyRect:dirtyRect];
+    } else {
+        [self drawAroundFrame:self.scrollview.frame dirtyRect:dirtyRect];
+    }
+}
+
+- (void)drawAroundFrame:(NSRect)svFrame dirtyRect:(NSRect)dirtyRect {
     if (svFrame.size.width < self.frame.size.width) {
         double widthDiff = self.frame.size.width - svFrame.size.width;
         [self drawBackgroundInRect:NSMakeRect(self.frame.size.width - widthDiff,

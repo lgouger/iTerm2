@@ -1,5 +1,6 @@
 #import "iTermBackgroundImageRenderer.h"
 
+#import "iTermAdvancedSettingsModel.h"
 #import "iTermShaderTypes.h"
 
 NS_ASSUME_NONNULL_BEGIN
@@ -7,6 +8,7 @@ NS_ASSUME_NONNULL_BEGIN
 @interface iTermBackgroundImageRendererTransientState ()
 @property (nonatomic, strong) id<MTLTexture> texture;
 @property (nonatomic) BOOL tiled;
+@property (nonatomic) NSSize imageSize;
 @end
 
 @implementation iTermBackgroundImageRendererTransientState
@@ -61,11 +63,12 @@ NS_ASSUME_NONNULL_BEGIN
     _tiled = tiled;
 }
 
-- (void)drawWithRenderEncoder:(nonnull id<MTLRenderCommandEncoder>)renderEncoder
-               transientState:(nonnull __kindof iTermMetalRendererTransientState *)transientState {
+- (void)drawWithFrameData:(nonnull iTermMetalFrameData *)frameData
+           transientState:(nonnull __kindof iTermMetalRendererTransientState *)transientState {
     iTermBackgroundImageRendererTransientState *tState = transientState;
+    [self loadVertexBuffer:tState];
     [_metalRenderer drawWithTransientState:tState
-                             renderEncoder:renderEncoder
+                             renderEncoder:frameData.renderEncoder
                           numberOfVertices:6
                               numberOfPIUs:0
                              vertexBuffers:@{ @(iTermVertexInputIndexVertices): tState.vertexBuffer }
@@ -90,9 +93,13 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)initializeTransientState:(iTermBackgroundImageRendererTransientState *)tState {
     tState.texture = _texture;
     tState.tiled = _tiled;
+    tState.imageSize = _image.size;
+}
 
-    const CGSize nativeTextureSize = NSMakeSize(_image.size.width * tState.configuration.scale,
-                                                _image.size.height * tState.configuration.scale);
+- (void)loadVertexBuffer:(iTermBackgroundImageRendererTransientState *)tState {
+    const CGFloat scale = tState.configuration.scale;
+    const CGSize nativeTextureSize = NSMakeSize(tState.imageSize.width * scale,
+                                                tState.imageSize.height * scale);
     const CGSize size = CGSizeMake(tState.configuration.viewportSize.x,
                                    tState.configuration.viewportSize.y);
     CGSize textureSize;
@@ -102,19 +109,20 @@ NS_ASSUME_NONNULL_BEGIN
     } else {
         textureSize = CGSizeMake(1, 1);
     }
-    const iTermVertex vertices[] = {
-        // Pixel Positions             Texture Coordinates
-        { { size.width,           0 }, { textureSize.width,                  0 } },
-        { {          0,           0 }, {                 0,                  0 } },
-        { {          0, size.height }, {                 0, textureSize.height } },
-
-        { { size.width,           0 }, { textureSize.width,                  0 } },
-        { {          0, size.height }, {                 0, textureSize.height } },
-        { { size.width, size.height }, { textureSize.width, textureSize.height } },
-    };
-    tState.vertexBuffer = [_metalRenderer.verticesPool requestBufferFromContext:tState.poolContext
-                                                                      withBytes:vertices
-                                                                 checkIfChanged:YES];
+    NSEdgeInsets insets = tState.edgeInsets;
+    const CGFloat vmargin = [iTermAdvancedSettingsModel terminalVMargin] * scale;
+    const CGFloat topMargin = insets.bottom + vmargin;
+    const CGFloat bottomMargin = insets.top + vmargin;
+    const CGFloat rightMargin = insets.right;
+    tState.vertexBuffer = [_metalRenderer newQuadWithFrame:CGRectMake(0,
+                                                                      -topMargin,
+                                                                      size.width + rightMargin,
+                                                                      size.height + topMargin + bottomMargin)
+                                              textureFrame:CGRectMake(0,
+                                                                      0,
+                                                                      textureSize.width,
+                                                                      textureSize.height)
+                                               poolContext:tState.poolContext];
 }
 
 @end

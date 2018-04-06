@@ -95,8 +95,8 @@ namespace iTerm2 {
 - (void)initializeTransientState:(iTermHighlightRowRendererTransientState *)tState {
 }
 
-- (void)drawWithRenderEncoder:(id<MTLRenderCommandEncoder>)renderEncoder
-               transientState:(__kindof iTermMetalCellRendererTransientState *)transientState {
+- (void)drawWithFrameData:(iTermMetalFrameData *)frameData
+           transientState:(__kindof iTermMetalCellRendererTransientState *)transientState {
     iTermHighlightRowRendererTransientState *tState = transientState;
     const VT100GridSize gridSize = tState.cellConfiguration.gridSize;
     const CGSize cellSize = tState.cellConfiguration.cellSize;
@@ -104,22 +104,22 @@ namespace iTerm2 {
     const CGFloat right = tState.margins.right;
 
     [tState enumerateDraws:^(vector_float4 color, int row) {
-        id<MTLBuffer> vertexBuffer = [_cellRenderer newQuadWithFrame:CGRectMake(0,
-                                                                                (gridSize.height - row - 1) * cellSize.height,
-                                                                                cellSize.width * gridSize.width + left + right,
-                                                                                cellSize.height)
-                                                        textureFrame:CGRectMake(0, 0, 0, 0)
-                                                         poolContext:tState.poolContext];
-        id<MTLBuffer> colorBuffer = [_colorPool requestBufferFromContext:tState.poolContext
-                                                               withBytes:&color
-                                                          checkIfChanged:YES];
-        [_cellRenderer drawWithTransientState:tState
-                                renderEncoder:renderEncoder
-                             numberOfVertices:6
-                                 numberOfPIUs:0
-                                vertexBuffers:@{ @(iTermVertexInputIndexVertices): vertexBuffer }
-                              fragmentBuffers:@{ @(iTermFragmentBufferIndexMarginColor): colorBuffer }
-                                     textures:@{}];
+        id<MTLBuffer> vertexBuffer = [self->_cellRenderer newQuadWithFrame:CGRectMake(0,
+                                                                                      (gridSize.height - row - 1) * cellSize.height,
+                                                                                      cellSize.width * gridSize.width + left + right,
+                                                                                      cellSize.height)
+                                                              textureFrame:CGRectMake(0, 0, 0, 0)
+                                                               poolContext:tState.poolContext];
+        id<MTLBuffer> colorBuffer = [self->_colorPool requestBufferFromContext:tState.poolContext
+                                                                     withBytes:&color
+                                                                checkIfChanged:YES];
+        [self->_cellRenderer drawWithTransientState:tState
+                                      renderEncoder:frameData.renderEncoder
+                                   numberOfVertices:6
+                                       numberOfPIUs:0
+                                      vertexBuffers:@{ @(iTermVertexInputIndexVertices): vertexBuffer }
+                                    fragmentBuffers:@{ @(iTermFragmentBufferIndexMarginColor): colorBuffer }
+                                           textures:@{}];
     }];
 }
 

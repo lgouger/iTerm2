@@ -138,6 +138,9 @@ static NSColor *ColorForVector(vector_float4 v) {
     BOOL _timestampsEnabled;
     long long _firstVisibleAbsoluteLineNumber;
     long long _lastVisibleAbsoluteLineNumber;
+    BOOL _cutOutRightCorner;
+    BOOL _cutOutLeftCorner;
+    NSEdgeInsets _edgeInsets;
 
     // Row on screen to characters with annotation underline on that row.
     NSDictionary<NSNumber *, NSIndexSet *> *_rowToAnnotationRanges;
@@ -211,25 +214,25 @@ static NSColor *ColorForVector(vector_float4 v) {
              missingImages:(NSSet<NSString *> *)missingImages
             animatedLines:(NSSet<NSNumber *> *)animatedLines {
     dispatch_async(dispatch_get_main_queue(), ^{
-        [_missingImages unionSet:missingImages];
-        [_missingImages minusSet:foundImages];
+        [self->_missingImages unionSet:missingImages];
+        [self->_missingImages minusSet:foundImages];
         if (animatedLines.count) {
-            _textView.drawingHelper.animated = YES;
+            self->_textView.drawingHelper.animated = YES;
         }
-        int width = _textView.dataSource.width;
-        long long offset = _textView.dataSource.totalScrollbackOverflow;
+        int width = self->_textView.dataSource.width;
+        long long offset = self->_textView.dataSource.totalScrollbackOverflow;
         for (NSNumber *absoluteLine in animatedLines) {
             long long abs = absoluteLine.longLongValue;
             if (abs >= offset) {
                 int row = abs - offset;
-                [_textView.dataSource setRangeOfCharsAnimated:NSMakeRange(0, width) onLine:row];
+                [self->_textView.dataSource setRangeOfCharsAnimated:NSMakeRange(0, width) onLine:row];
             }
         }
-        NSMutableSet<NSString *> *newlyLoaded = [_missingImages mutableCopy];
-        [newlyLoaded intersectSet:_loadedImages];
+        NSMutableSet<NSString *> *newlyLoaded = [self->_missingImages mutableCopy];
+        [newlyLoaded intersectSet:self->_loadedImages];
         if (newlyLoaded.count) {
-            [_textView setNeedsDisplay:YES];
-            [_missingImages minusSet:_loadedImages];
+            [self->_textView setNeedsDisplay:YES];
+            [self->_missingImages minusSet:self->_loadedImages];
         }
     });
 }
@@ -300,6 +303,7 @@ static NSColor *ColorForVector(vector_float4 v) {
         [self loadIndicatorsFromTextView:textView];
         [self loadHighlightedRowsFromTextView:textView];
         [self loadAnnotationRangesFromTextView:textView];
+        [self loadCornerCutoutsFromTextView:textView];
 
         [textView.dataSource setUseSavedGridIfAvailable:NO];
     }
@@ -496,6 +500,12 @@ static NSColor *ColorForVector(vector_float4 v) {
     _backgroundImageBlending = textView.blend;
     _backgroundImageTiled = textView.delegate.backgroundImageTiled;
     _backgroundImage = [textView.delegate textViewBackgroundImage];
+
+    _edgeInsets = textView.delegate.textViewEdgeInsets;
+    _edgeInsets.top *= _scale;
+    _edgeInsets.bottom *= _scale;
+    _edgeInsets.left *= _scale;
+    _edgeInsets.right *= _scale;
 }
 
 - (void)loadUnderlineDescriptorsWithDrawingHelper:(iTermTextDrawingHelper *)drawingHelper {
@@ -549,6 +559,32 @@ static NSColor *ColorForVector(vector_float4 v) {
     [_markStyles addObject:@(markStyle)];
 }
 
+- (BOOL)cutOutLeftCorner {
+    return _cutOutLeftCorner;
+}
+
+- (BOOL)cutOutRightCorner {
+    return _cutOutRightCorner;
+}
+
+- (NSEdgeInsets)edgeInsets {
+    return _edgeInsets;
+}
+
+- (void)loadCornerCutoutsFromTextView:(PTYTextView *)textView {
+    NSRect textViewFrameInWindowCoords = [textView convertRect:textView.bounds toView:nil];
+    const NSWindowStyleMask styleMask = textView.window.styleMask;
+    const BOOL titled = (styleMask & NSWindowStyleMaskTitled);
+    const BOOL fullScreen = (textView.window.styleMask & NSWindowStyleMaskFullScreen);
+    const BOOL windowHasRoundedCorners = titled && !fullScreen;
+    const BOOL abutsLeft = (fabs(NSMinX(textViewFrameInWindowCoords)) < 1);
+    const BOOL abutsRight = (fabs(NSMaxX(textViewFrameInWindowCoords) - textView.window.frame.size.width) < 1);
+    const BOOL abutsBottom = (fabs(NSMinY(textViewFrameInWindowCoords) < 1));
+    
+    _cutOutLeftCorner = windowHasRoundedCorners && abutsLeft && abutsBottom;
+    _cutOutRightCorner = windowHasRoundedCorners && abutsRight && abutsBottom;
+}
+
 // Populate _rowToAnnotationRanges.
 - (void)loadAnnotationRangesFromTextView:(PTYTextView *)textView {
     NSRange rangeOfRows = NSMakeRange(_visibleRange.start.y, _visibleRange.end.y - _visibleRange.start.y + 1);
@@ -561,7 +597,7 @@ static NSColor *ColorForVector(vector_float4 v) {
                 VT100GridRange gridRange = [obj gridRangeValue];
                 [indexes addIndexesInRange:NSMakeRange(gridRange.location, gridRange.length)];
             }];
-            dict[@(second.intValue - _visibleRange.start.y)] = indexes;
+            dict[@(second.intValue - self->_visibleRange.start.y)] = indexes;
         }
         return dict;
     }];
@@ -569,15 +605,16 @@ static NSColor *ColorForVector(vector_float4 v) {
 
 - (void)loadIndicatorsFromTextView:(PTYTextView *)textView {
     _indicators = [NSMutableArray array];
-    NSRect frame = NSMakeRect(0, 0, textView.visibleRect.size.width, textView.visibleRect.size.height);
+    const CGFloat vmargin = [iTermAdvancedSettingsModel terminalVMargin];
+    NSRect frame = NSMakeRect(0, vmargin, textView.visibleRect.size.width, textView.visibleRect.size.height);
     [textView.indicatorsHelper enumerateTopRightIndicatorsInFrame:frame block:^(NSString *identifier, NSImage *image, NSRect rect) {
         rect.origin.y = frame.size.height - NSMaxY(rect);
         iTermIndicatorDescriptor *indicator = [[iTermIndicatorDescriptor alloc] init];
         indicator.identifier = identifier;
         indicator.image = image;
         indicator.frame = rect;
-        indicator.alpha = 0.5;
-        [_indicators addObject:indicator];
+        indicator.alpha = 0.75;
+        [self->_indicators addObject:indicator];
     }];
     [textView.indicatorsHelper enumerateCenterIndicatorsInFrame:frame block:^(NSString *identifier, NSImage *image, NSRect rect, CGFloat alpha) {
         rect.origin.y = frame.size.height - NSMaxY(rect);
@@ -586,7 +623,7 @@ static NSColor *ColorForVector(vector_float4 v) {
         indicator.image = image;
         indicator.frame = rect;
         indicator.alpha = alpha;
-        [_indicators addObject:indicator];
+        [self->_indicators addObject:indicator];
     }];
     [textView.indicatorsHelper didDraw];
     NSColor *color = [[textView indicatorFullScreenFlashColor] colorUsingColorSpace:[NSColorSpace sRGBColorSpace]];
@@ -820,6 +857,7 @@ ambiguousIsDoubleWidth:(BOOL)ambiguousIsDoubleWidth
     VT100GridCoord previousImageCoord;
     NSIndexSet *annotatedIndexes = _rowToAnnotationRanges[@(row)];
     NSUInteger sketch = *sketchPtr;
+    vector_float4 lastUnprocessedBackgroundColor = simd_make_float4(0, 0, 0, 0);
 
     // Prime numbers chosen more or less arbitrarily.
     const vector_float4 bmul = simd_make_float4(7, 11, 13, 1) * 255;
@@ -848,6 +886,7 @@ ambiguousIsDoubleWidth:(BOOL)ambiguousIsDoubleWidth
         };
 
         vector_float4 backgroundColor;
+        vector_float4 unprocessedBackgroundColor;
         if (x > 0 &&
             backgroundKey.bgColor == lastBackgroundKey.bgColor &&
             backgroundKey.bgGreen == lastBackgroundKey.bgGreen &&
@@ -860,10 +899,12 @@ ambiguousIsDoubleWidth:(BOOL)ambiguousIsDoubleWidth
             const int previousRLE = rles - 1;
             backgroundColor = backgroundRLE[previousRLE].color;
             backgroundRLE[previousRLE].count++;
+            unprocessedBackgroundColor = lastUnprocessedBackgroundColor;
         } else {
-            vector_float4 unprocessed = [self unprocessedColorForBackgroundColorKey:&backgroundKey];
+            unprocessedBackgroundColor = [self unprocessedColorForBackgroundColorKey:&backgroundKey];
+            lastUnprocessedBackgroundColor = unprocessedBackgroundColor;
             // The unprocessed color is needed for minimum contrast computation for text color.
-            backgroundRLE[rles].color = [_colorMap fastProcessedBackgroundColorForBackgroundColor:unprocessed];
+            backgroundRLE[rles].color = [_colorMap fastProcessedBackgroundColorForBackgroundColor:unprocessedBackgroundColor];
             backgroundRLE[rles].origin = x;
             backgroundRLE[rles].count = 1;
             if (_backgroundImage) {
@@ -912,7 +953,7 @@ ambiguousIsDoubleWidth:(BOOL)ambiguousIsDoubleWidth
         } else {
             vector_float4 textColor = [self textColorForCharacter:&line[x]
                                                              line:row
-                                                  backgroundColor:backgroundColor
+                                                  backgroundColor:unprocessedBackgroundColor
                                                          selected:selected
                                                         findMatch:findMatch
                                                 inUnderlinedRange:inUnderlinedRange && !annotated
@@ -1298,7 +1339,7 @@ ambiguousIsDoubleWidth:(BOOL)ambiguousIsDoubleWidth
 
 - (vector_float4)textColorForCharacter:(screen_char_t *)c
                                   line:(int)line
-                       backgroundColor:(vector_float4)backgroundColor
+                       backgroundColor:(vector_float4)unprocessedBackgroundColor
                               selected:(BOOL)selected
                              findMatch:(BOOL)findMatch
                      inUnderlinedRange:(BOOL)inUnderlinedRange
@@ -1366,7 +1407,7 @@ ambiguousIsDoubleWidth:(BOOL)ambiguousIsDoubleWidth
     vector_float4 result;
     if (needsProcessing) {
         result = VectorForColor([_colorMap processedTextColorForTextColor:ColorForVector(rawColor)
-                                                      overBackgroundColor:ColorForVector(backgroundColor)]);
+                                                      overBackgroundColor:ColorForVector(unprocessedBackgroundColor)]);
     } else {
         result = rawColor;
     }
@@ -1420,9 +1461,9 @@ ambiguousIsDoubleWidth:(BOOL)ambiguousIsDoubleWidth
     return [iTermSmartCursorColor neighborsForCursorAtCoord:_cursorInfo.coord
                                                    gridSize:_gridSize
                                                  lineSource:^screen_char_t *(int y) {
-                                                     const int i = y + _numberOfScrollbackLines - _visibleRange.start.y;
-                                                     if (i >= 0 && i < _lines.count) {
-                                                         return (screen_char_t *)_lines[i].mutableBytes;
+                                                     const int i = y + self->_numberOfScrollbackLines - self->_visibleRange.start.y;
+                                                     if (i >= 0 && i < self->_lines.count) {
+                                                         return (screen_char_t *)self->_lines[i].mutableBytes;
                                                      } else {
                                                          return nil;
                                                      }

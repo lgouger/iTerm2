@@ -1371,6 +1371,10 @@
 		A6556EAA1FCB42E0000CC89C /* iTermCharacterSource.m in Sources */ = {isa = PBXBuildFile; fileRef = A6556EA81FCB42E0000CC89C /* iTermCharacterSource.m */; };
 		A6556EAD1FD37ED6000CC89C /* iTermASCIITexture.h in Headers */ = {isa = PBXBuildFile; fileRef = A6556EAB1FD37ED6000CC89C /* iTermASCIITexture.h */; };
 		A6556EAE1FD37ED6000CC89C /* iTermASCIITexture.m in Sources */ = {isa = PBXBuildFile; fileRef = A6556EAC1FD37ED6000CC89C /* iTermASCIITexture.m */; };
+		A655E6952066C78700DC21B9 /* iTermScrollAccumulator.h in Headers */ = {isa = PBXBuildFile; fileRef = A655E6932066C78700DC21B9 /* iTermScrollAccumulator.h */; };
+		A655E6962066C78700DC21B9 /* iTermScrollAccumulator.m in Sources */ = {isa = PBXBuildFile; fileRef = A655E6942066C78700DC21B9 /* iTermScrollAccumulator.m */; };
+		A655E699207153CB00DC21B9 /* NSSavePanel+iTerm.h in Headers */ = {isa = PBXBuildFile; fileRef = A655E697207153CB00DC21B9 /* NSSavePanel+iTerm.h */; };
+		A655E69A207153CB00DC21B9 /* NSSavePanel+iTerm.m in Sources */ = {isa = PBXBuildFile; fileRef = A655E698207153CB00DC21B9 /* NSSavePanel+iTerm.m */; };
 		A656AE4C1DBBE1CE00CE8448 /* libaprutil-1.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = A656AE4B1DBBE1CE00CE8448 /* libaprutil-1.tbd */; };
 		A656E9951F99C5FB00158128 /* iTermSubpixelModelBuilder.h in Headers */ = {isa = PBXBuildFile; fileRef = A656E9931F99C5FB00158128 /* iTermSubpixelModelBuilder.h */; };
 		A656E9961F99C60300158128 /* iTermSubpixelModelBuilder.mm in Sources */ = {isa = PBXBuildFile; fileRef = A656E9921F99C5FB00158128 /* iTermSubpixelModelBuilder.mm */; };
@@ -3476,6 +3480,7 @@
 		A63F40A7183F3CED003A6A6D /* LineBufferHelpers.h */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.c.h; path = LineBufferHelpers.h; sourceTree = "<group>"; tabWidth = 4; };
 		A63F40A8183F3CED003A6A6D /* LineBufferHelpers.m */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.c.objc; path = LineBufferHelpers.m; sourceTree = "<group>"; tabWidth = 4; };
 		A64203171DCF7DEE0074DC6C /* api.proto */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 2; lastKnownFileType = text; name = api.proto; path = proto/api.proto; sourceTree = SOURCE_ROOT; };
+		A6460F40206F3ED1004CF71F /* iTermMetalConfig.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = iTermMetalConfig.h; path = Metal/Infrastructure/iTermMetalConfig.h; sourceTree = "<group>"; };
 		A6461D871E1B654D00FEDCD6 /* iTermShellPromptTrigger.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = iTermShellPromptTrigger.h; sourceTree = "<group>"; };
 		A6461D881E1B654D00FEDCD6 /* iTermShellPromptTrigger.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = iTermShellPromptTrigger.m; sourceTree = "<group>"; };
 		A647E39718C3504100450FA1 /* VT100Token.h */ = {isa = PBXFileReference; indentWidth = 4; lastKnownFileType = sourcecode.c.h; path = VT100Token.h; sourceTree = "<group>"; tabWidth = 4; };
@@ -3497,6 +3502,10 @@
 		A6556EA81FCB42E0000CC89C /* iTermCharacterSource.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = iTermCharacterSource.m; path = Metal/Support/iTermCharacterSource.m; sourceTree = "<group>"; };
 		A6556EAB1FD37ED6000CC89C /* iTermASCIITexture.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = iTermASCIITexture.h; path = Metal/Infrastructure/iTermASCIITexture.h; sourceTree = "<group>"; };
 		A6556EAC1FD37ED6000CC89C /* iTermASCIITexture.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = iTermASCIITexture.m; path = Metal/Infrastructure/iTermASCIITexture.m; sourceTree = "<group>"; };
+		A655E6932066C78700DC21B9 /* iTermScrollAccumulator.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = iTermScrollAccumulator.h; sourceTree = "<group>"; };
+		A655E6942066C78700DC21B9 /* iTermScrollAccumulator.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = iTermScrollAccumulator.m; sourceTree = "<group>"; };
+		A655E697207153CB00DC21B9 /* NSSavePanel+iTerm.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "NSSavePanel+iTerm.h"; sourceTree = "<group>"; };
+		A655E698207153CB00DC21B9 /* NSSavePanel+iTerm.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = "NSSavePanel+iTerm.m"; sourceTree = "<group>"; };
 		A656AE4B1DBBE1CE00CE8448 /* libaprutil-1.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = "libaprutil-1.tbd"; path = "usr/lib/libaprutil-1.tbd"; sourceTree = SDKROOT; };
 		A656E9671F8C994200158128 /* iTermMetalGlyphKey.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = iTermMetalGlyphKey.h; sourceTree = "<group>"; };
 		A656E9921F99C5FB00158128 /* iTermSubpixelModelBuilder.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; name = iTermSubpixelModelBuilder.mm; path = Metal/Infrastructure/iTermSubpixelModelBuilder.mm; sourceTree = "<group>"; };
@@ -5700,6 +5709,7 @@
 				A6588828201F06ED006F48DB /* iTermTexture.m */,
 				A6232E74202832A900EC0F98 /* iTermData.h */,
 				A6232E75202832A900EC0F98 /* iTermData.m */,
+				A6460F40206F3ED1004CF71F /* iTermMetalConfig.h */,
 			);
 			name = Infrastructure;
 			sourceTree = "<group>";
@@ -6135,6 +6145,10 @@
 				A6DBC0442005DC2B00F1466D /* iTermTuple.m */,
 				5337A313203E065300024BEA /* iTermPowerManager.h */,
 				5337A314203E065300024BEA /* iTermPowerManager.m */,
+				A655E6932066C78700DC21B9 /* iTermScrollAccumulator.h */,
+				A655E6942066C78700DC21B9 /* iTermScrollAccumulator.m */,
+				A655E697207153CB00DC21B9 /* NSSavePanel+iTerm.h */,
+				A655E698207153CB00DC21B9 /* NSSavePanel+iTerm.m */,
 			);
 			name = Helpers;
 			sourceTree = "<group>";
@@ -7247,6 +7261,7 @@
 				A667190A1DCE36C3000CE608 /* iTermRootTerminalView.h in Headers */,
 				A667190B1DCE36C3000CE608 /* iTermCarbonHotKeyController.h in Headers */,
 				A667190C1DCE36C3000CE608 /* iTermWeakReference.h in Headers */,
+				A655E6952066C78700DC21B9 /* iTermScrollAccumulator.h in Headers */,
 				A65EC0331F3181E700AC0A6B /* NSTimer+iTerm.h in Headers */,
 				A667190D1DCE36C3000CE608 /* iTermHostRecordMO+CoreDataProperties.h in Headers */,
 				A62A1F711E6E724B00363EE9 /* iTermMenuOpener.h in Headers */,
@@ -7308,6 +7323,7 @@
 				A66719341DCE36C3000CE608 /* iTermQuickLookController.h in Headers */,
 				A66719351DCE36C3000CE608 /* iTermClearView.h in Headers */,
 				A66719361DCE36C3000CE608 /* iTermHostRecordMO.h in Headers */,
+				A655E699207153CB00DC21B9 /* NSSavePanel+iTerm.h in Headers */,
 				A66719371DCE36C3000CE608 /* iTermToolbeltSplitView.h in Headers */,
 				A6AC5D221E9036D70097C0A7 /* iTermURLMark.h in Headers */,
 				A66719381DCE36C3000CE608 /* iTermDirectoryTreeNode.h in Headers */,
@@ -7654,7 +7670,7 @@
 		0464AB0C006CD2EC7F000001 /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
-				LastUpgradeCheck = 0900;
+				LastUpgradeCheck = 0930;
 				TargetAttributes = {
 					1D6ED85219AEA20D005A7799 = {
 						DevelopmentTeam = H7V7XYVQ7D;
@@ -8919,6 +8935,7 @@
 				53AFFC8E1DD2A04100E6CEC6 /* iTermLSOF.m in Sources */,
 				A6C1FD571FC2B210006B9A69 /* iTermMargin.metal in Sources */,
 				A66719671DCE3772000CE608 /* iTermWebSocketFrameBuilder.m in Sources */,
+				A655E6962066C78700DC21B9 /* iTermScrollAccumulator.m in Sources */,
 				A614F2631FE47D8600EEE919 /* iTermCharacterBitmap.m in Sources */,
 				A68400A71FF82424008D3EE2 /* iTermIndicatorRenderer.m in Sources */,
 				A68400B51FF8644F008D3EE2 /* iTermFulScreenFlash.metal in Sources */,
@@ -8927,6 +8944,7 @@
 				A6232E77202832A900EC0F98 /* iTermData.m in Sources */,
 				A66719651DCE3772000CE608 /* iTermHTTPConnection.m in Sources */,
 				A67960CE1F81FCB6008A42BC /* iTermTextureArray.m in Sources */,
+				A655E69A207153CB00DC21B9 /* NSSavePanel+iTerm.m in Sources */,
 				A67960D31F81FCBB008A42BC /* iTermBroadcastStripesRenderer.m in Sources */,
 				A668E8A31E7EFEA5005F8758 /* iTermURLStore.m in Sources */,
 				A6E5D2101FA3C57900EDD002 /* iTermMetalFrameData.m in Sources */,
@@ -9514,11 +9532,13 @@
 				CLANG_WARN_BOOL_CONVERSION = YES;
 				CLANG_WARN_COMMA = YES;
 				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
 				CLANG_WARN_EMPTY_BODY = YES;
 				CLANG_WARN_ENUM_CONVERSION = YES;
 				CLANG_WARN_INFINITE_RECURSION = YES;
 				CLANG_WARN_INT_CONVERSION = YES;
 				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
 				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
 				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
 				CLANG_WARN_STRICT_PROTOTYPES = YES;
@@ -9548,6 +9568,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CLANG_ENABLE_OBJC_WEAK = YES;
 				CLANG_WARN_INT_CONVERSION = YES;
 				CODE_SIGN_IDENTITY = "Mac Developer";
 				CODE_SIGN_STYLE = Automatic;
@@ -9618,6 +9639,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CLANG_ENABLE_OBJC_WEAK = YES;
 				CODE_SIGN_IDENTITY = "Mac Developer";
 				COMBINE_HIDPI_IMAGES = YES;
 				COPY_PHASE_STRIP = NO;
@@ -9687,6 +9709,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CLANG_ENABLE_OBJC_WEAK = YES;
 				CODE_SIGN_IDENTITY = "Mac Developer";
 				COMBINE_HIDPI_IMAGES = YES;
 				COPY_PHASE_STRIP = YES;
@@ -9752,6 +9775,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CLANG_ENABLE_OBJC_WEAK = YES;
 				CODE_SIGN_IDENTITY = "Mac Developer";
 				COMBINE_HIDPI_IMAGES = YES;
 				COPY_PHASE_STRIP = YES;
@@ -9820,6 +9844,7 @@
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++0x";
 				CLANG_CXX_LIBRARY = "libc++";
 				CLANG_ENABLE_OBJC_ARC = NO;
+				CLANG_ENABLE_OBJC_WEAK = YES;
 				CLANG_WARN_BOOL_CONVERSION = YES;
 				CLANG_WARN_CONSTANT_CONVERSION = YES;
 				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
@@ -9894,6 +9919,7 @@
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++0x";
 				CLANG_CXX_LIBRARY = "libc++";
 				CLANG_ENABLE_OBJC_ARC = NO;
+				CLANG_ENABLE_OBJC_WEAK = YES;
 				CLANG_WARN_BOOL_CONVERSION = YES;
 				CLANG_WARN_CONSTANT_CONVERSION = YES;
 				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
@@ -9963,6 +9989,7 @@
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++0x";
 				CLANG_CXX_LIBRARY = "libc++";
 				CLANG_ENABLE_OBJC_ARC = NO;
+				CLANG_ENABLE_OBJC_WEAK = YES;
 				CLANG_WARN_BOOL_CONVERSION = YES;
 				CLANG_WARN_CONSTANT_CONVERSION = YES;
 				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
@@ -10154,11 +10181,13 @@
 				CLANG_WARN_BOOL_CONVERSION = YES;
 				CLANG_WARN_COMMA = YES;
 				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
 				CLANG_WARN_EMPTY_BODY = YES;
 				CLANG_WARN_ENUM_CONVERSION = YES;
 				CLANG_WARN_INFINITE_RECURSION = YES;
 				CLANG_WARN_INT_CONVERSION = YES;
 				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
 				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
 				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
 				CLANG_WARN_STRICT_PROTOTYPES = YES;
@@ -10188,6 +10217,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CLANG_ENABLE_OBJC_WEAK = YES;
 				CLANG_WARN_INT_CONVERSION = YES;
 				CODE_SIGN_IDENTITY = "Mac Developer";
 				CODE_SIGN_STYLE = Automatic;
@@ -10261,6 +10291,7 @@
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++0x";
 				CLANG_CXX_LIBRARY = "libc++";
 				CLANG_ENABLE_OBJC_ARC = NO;
+				CLANG_ENABLE_OBJC_WEAK = YES;
 				CLANG_WARN_BOOL_CONVERSION = YES;
 				CLANG_WARN_CONSTANT_CONVERSION = YES;
 				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
@@ -10363,6 +10394,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CLANG_ENABLE_OBJC_WEAK = YES;
 				CODE_SIGN_IDENTITY = "Mac Developer";
 				COMBINE_HIDPI_IMAGES = YES;
 				COPY_PHASE_STRIP = YES;
@@ -10431,6 +10463,7 @@
 				CLANG_CXX_LIBRARY = "libc++";
 				CLANG_ENABLE_MODULES = YES;
 				CLANG_ENABLE_OBJC_ARC = NO;
+				CLANG_ENABLE_OBJC_WEAK = YES;
 				CLANG_WARN_BOOL_CONVERSION = YES;
 				CLANG_WARN_CONSTANT_CONVERSION = YES;
 				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
@@ -10484,6 +10517,7 @@
 				CLANG_CXX_LIBRARY = "libc++";
 				CLANG_ENABLE_MODULES = YES;
 				CLANG_ENABLE_OBJC_ARC = NO;
+				CLANG_ENABLE_OBJC_WEAK = YES;
 				CLANG_WARN_BOOL_CONVERSION = YES;
 				CLANG_WARN_CONSTANT_CONVERSION = YES;
 				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
@@ -10894,6 +10928,7 @@
 				CLANG_CXX_LIBRARY = "libc++";
 				CLANG_ENABLE_MODULES = YES;
 				CLANG_ENABLE_OBJC_ARC = NO;
+				CLANG_ENABLE_OBJC_WEAK = YES;
 				CLANG_WARN_BOOL_CONVERSION = YES;
 				CLANG_WARN_CONSTANT_CONVERSION = YES;
 				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
@@ -10954,6 +10989,7 @@
 				CLANG_CXX_LIBRARY = "libc++";
 				CLANG_ENABLE_MODULES = YES;
 				CLANG_ENABLE_OBJC_ARC = NO;
+				CLANG_ENABLE_OBJC_WEAK = YES;
 				CLANG_WARN_BOOL_CONVERSION = YES;
 				CLANG_WARN_CONSTANT_CONVERSION = YES;
 				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
@@ -11005,6 +11041,7 @@
 				CLANG_CXX_LIBRARY = "libc++";
 				CLANG_ENABLE_MODULES = YES;
 				CLANG_ENABLE_OBJC_ARC = NO;
+				CLANG_ENABLE_OBJC_WEAK = YES;
 				CLANG_WARN_BOOL_CONVERSION = YES;
 				CLANG_WARN_CONSTANT_CONVERSION = YES;
 				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
@@ -11057,6 +11094,7 @@
 				CLANG_CXX_LIBRARY = "libc++";
 				CLANG_ENABLE_MODULES = YES;
 				CLANG_ENABLE_OBJC_ARC = NO;
+				CLANG_ENABLE_OBJC_WEAK = YES;
 				CLANG_WARN_BOOL_CONVERSION = YES;
 				CLANG_WARN_CONSTANT_CONVERSION = YES;
 				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
@@ -11117,6 +11155,7 @@
 				CLANG_CXX_LIBRARY = "libc++";
 				CLANG_ENABLE_MODULES = YES;
 				CLANG_ENABLE_OBJC_ARC = NO;
+				CLANG_ENABLE_OBJC_WEAK = YES;
 				CLANG_WARN_BOOL_CONVERSION = YES;
 				CLANG_WARN_CONSTANT_CONVERSION = YES;
 				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
@@ -11169,6 +11208,7 @@
 				CLANG_CXX_LIBRARY = "libc++";
 				CLANG_ENABLE_MODULES = YES;
 				CLANG_ENABLE_OBJC_ARC = NO;
+				CLANG_ENABLE_OBJC_WEAK = YES;
 				CLANG_WARN_BOOL_CONVERSION = YES;
 				CLANG_WARN_CONSTANT_CONVERSION = YES;
 				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
@@ -11216,6 +11256,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CLANG_ENABLE_OBJC_WEAK = YES;
 				CLANG_WARN_INT_CONVERSION = YES;
 				CODE_SIGN_IDENTITY = "Mac Developer";
 				CODE_SIGN_STYLE = Automatic;
@@ -11292,6 +11333,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CLANG_ENABLE_OBJC_WEAK = YES;
 				CLANG_WARN_INT_CONVERSION = YES;
 				CODE_SIGN_IDENTITY = "Mac Developer";
 				CODE_SIGN_STYLE = Automatic;
@@ -11367,11 +11409,13 @@
 				CLANG_WARN_BOOL_CONVERSION = YES;
 				CLANG_WARN_COMMA = YES;
 				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
 				CLANG_WARN_EMPTY_BODY = YES;
 				CLANG_WARN_ENUM_CONVERSION = YES;
 				CLANG_WARN_INFINITE_RECURSION = YES;
 				CLANG_WARN_INT_CONVERSION = YES;
 				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
 				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
 				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
 				CLANG_WARN_STRICT_PROTOTYPES = YES;
@@ -11415,11 +11459,13 @@
 				CLANG_WARN_BOOL_CONVERSION = YES;
 				CLANG_WARN_COMMA = YES;
 				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
 				CLANG_WARN_EMPTY_BODY = YES;
 				CLANG_WARN_ENUM_CONVERSION = YES;
 				CLANG_WARN_INFINITE_RECURSION = YES;
 				CLANG_WARN_INT_CONVERSION = YES;
 				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
 				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
 				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
 				CLANG_WARN_STRICT_PROTOTYPES = YES;

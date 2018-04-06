@@ -29,7 +29,7 @@
     iTermMarkPIU *pius = (iTermMarkPIU *)data.mutableBytes;
     __block size_t i = 0;
     [_marks enumerateKeysAndObjectsUsingBlock:^(NSNumber * _Nonnull rowNumber, NSNumber * _Nonnull styleNumber, BOOL * _Nonnull stop) {
-        MTLOrigin origin = [_marksArrayTexture offsetForIndex:styleNumber.integerValue];
+        MTLOrigin origin = [self->_marksArrayTexture offsetForIndex:styleNumber.integerValue];
         pius[i] = (iTermMarkPIU) {
             .offset = {
                 0,
@@ -109,19 +109,21 @@
     if (!CGSizeEqualToSize(markRect.size, _markSize)) {
         // Mark size has changed
         _markSize = markRect.size;
-        _marksArrayTexture = [[iTermTextureArray alloc] initWithTextureWidth:_markSize.width
-                                                               textureHeight:_markSize.height
-                                                                 arrayLength:3
-                                                                        bgra:NO
-                                                                      device:_cellRenderer.device];
+        if (_markSize.width > 0 && _markSize.height > 0) {
+            _marksArrayTexture = [[iTermTextureArray alloc] initWithTextureWidth:_markSize.width
+                                                                   textureHeight:_markSize.height
+                                                                     arrayLength:3
+                                                                            bgra:NO
+                                                                          device:_cellRenderer.device];
 
-        NSColor *successColor = [iTermTextDrawingHelper successMarkColor];
-        NSColor *otherColor = [iTermTextDrawingHelper otherMarkColor];
-        NSColor *failureColor = [iTermTextDrawingHelper errorMarkColor];
+            NSColor *successColor = [iTermTextDrawingHelper successMarkColor];
+            NSColor *otherColor = [iTermTextDrawingHelper otherMarkColor];
+            NSColor *failureColor = [iTermTextDrawingHelper errorMarkColor];
 
-        [_marksArrayTexture addSliceWithImage:[self newImageWithMarkOfColor:successColor size:_markSize]];
-        [_marksArrayTexture addSliceWithImage:[self newImageWithMarkOfColor:failureColor size:_markSize]];
-        [_marksArrayTexture addSliceWithImage:[self newImageWithMarkOfColor:otherColor size:_markSize]];
+            [_marksArrayTexture addSliceWithImage:[self newImageWithMarkOfColor:successColor size:_markSize]];
+            [_marksArrayTexture addSliceWithImage:[self newImageWithMarkOfColor:failureColor size:_markSize]];
+            [_marksArrayTexture addSliceWithImage:[self newImageWithMarkOfColor:otherColor size:_markSize]];
+        }
     }
 
     tState.markOffset = markRect.origin;
@@ -130,10 +132,13 @@
     tState.vertexBuffer = [_cellRenderer newQuadOfSize:_markSize poolContext:tState.poolContext];
 }
 
-- (void)drawWithRenderEncoder:(id<MTLRenderCommandEncoder>)renderEncoder
-               transientState:(__kindof iTermMetalCellRendererTransientState *)transientState {
+- (void)drawWithFrameData:(iTermMetalFrameData *)frameData
+           transientState:(__kindof iTermMetalCellRendererTransientState *)transientState {
     iTermMarkRendererTransientState *tState = transientState;
     if (tState.marks.count == 0) {
+        return;
+    }
+    if (tState.marksArrayTexture == nil) {
         return;
     }
 
@@ -166,7 +171,7 @@
     memcpy(tState.pius.contents, data.bytes, data.length);
 
     [_cellRenderer drawWithTransientState:tState
-                            renderEncoder:renderEncoder
+                            renderEncoder:frameData.renderEncoder
                          numberOfVertices:6
                              numberOfPIUs:tState.marks.count
                             vertexBuffers:@{ @(iTermVertexInputIndexVertices): tState.vertexBuffer,

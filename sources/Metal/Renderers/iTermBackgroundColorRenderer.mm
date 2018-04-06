@@ -91,23 +91,23 @@
 }
 
 
-- (void)drawWithRenderEncoder:(id<MTLRenderCommandEncoder>)renderEncoder
-               transientState:(nonnull __kindof iTermMetalRendererTransientState *)transientState {
+- (void)drawWithFrameData:(iTermMetalFrameData *)frameData
+           transientState:(nonnull __kindof iTermMetalRendererTransientState *)transientState {
     iTermBackgroundColorRendererTransientState *tState = transientState;
     [tState enumerateSegments:^(const iTermBackgroundColorPIU *pius, size_t numberOfInstances) {
-        id<MTLBuffer> piuBuffer = [_piuPool requestBufferFromContext:tState.poolContext
-                                                                size:numberOfInstances * sizeof(*pius)
-                                                               bytes:pius];
+        id<MTLBuffer> piuBuffer = [self->_piuPool requestBufferFromContext:tState.poolContext
+                                                                      size:numberOfInstances * sizeof(*pius)
+                                                                     bytes:pius];
         piuBuffer.label = @"PIUs";
-        [_cellRenderer drawWithTransientState:tState
-                                renderEncoder:renderEncoder
-                             numberOfVertices:6
-                                 numberOfPIUs:numberOfInstances
-                                vertexBuffers:@{ @(iTermVertexInputIndexVertices): tState.vertexBuffer,
-                                                 @(iTermVertexInputIndexPerInstanceUniforms): piuBuffer,
-                                                 @(iTermVertexInputIndexOffset): tState.offsetBuffer }
-                              fragmentBuffers:@{}
-                                     textures:@{} ];
+        [self->_cellRenderer drawWithTransientState:tState
+                                      renderEncoder:frameData.renderEncoder
+                                   numberOfVertices:6
+                                       numberOfPIUs:numberOfInstances
+                                      vertexBuffers:@{ @(iTermVertexInputIndexVertices): tState.vertexBuffer,
+                                                       @(iTermVertexInputIndexPerInstanceUniforms): piuBuffer,
+                                                       @(iTermVertexInputIndexOffset): tState.offsetBuffer }
+                                    fragmentBuffers:@{}
+                                           textures:@{} ];
     }];
 }
 

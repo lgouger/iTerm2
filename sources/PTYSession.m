@@ -474,6 +474,9 @@ static const NSUInteger kMaxHosts = 100;
     iTermMetalGlue *_metalGlue NS_AVAILABLE_MAC(10_11);
 
     int _updateCount;
+    BOOL _metalFrameChangePending;
+    int _nextMetalDisabledToken;
+    NSMutableSet *_metalDisabledTokens;
 }
 
 + (void)registerSessionInArrangement:(NSDictionary *)arrangement {
@@ -555,7 +558,7 @@ static const NSUInteger kMaxHosts = 100;
         _promptSubscriptions = [[NSMutableDictionary alloc] init];
         _locationChangeSubscriptions = [[NSMutableDictionary alloc] init];
         _customEscapeSequenceNotifications = [[NSMutableDictionary alloc] init];
-
+        _metalDisabledTokens = [[NSMutableSet alloc] init];
         _statusChangedAbsLine = -1;
         if (@available(macOS 10.11, *)) {
             _metalGlue = [[iTermMetalGlue alloc] init];
@@ -701,6 +704,7 @@ ITERM_WEAKLY_REFERENCEABLE
     [_customEscapeSequenceNotifications release];
 
     [_copyModeState release];
+    [_metalDisabledTokens release];
 
     [[NSNotificationCenter defaultCenter] removeObserver:self];
 
@@ -1621,6 +1625,9 @@ ITERM_WEAKLY_REFERENCEABLE
             return [iTermPromptOnCloseReason noReason];
 
         case PROMPT_EX_JOBS: {
+            if (self.isTmuxClient) {
+                return [iTermPromptOnCloseReason tmuxClientsAlwaysPromptBecaseJobsAreNotExposed];
+            }
             NSMutableArray<NSString *> *blockingJobs = [NSMutableArray array];
             NSArray *jobsThatDontRequirePrompting = [_profile objectForKey:KEY_JOBS];
             for (NSString *childName in [self childJobNames]) {
@@ -4780,6 +4787,7 @@ ITERM_WEAKLY_REFERENCEABLE
         //
         // Perhaps some day transparency and ligatures will be supported.
         return ([iTermAdvancedSettingsModel useMetal] &&
+                [iTermAdvancedSettingsModel terminalVMargin] >= 5 &&  // Smaller margins break rounded window corners
                 machineSupportsMetal &&
                 _textview.transparencyAlpha == 1 &&
                 ![self ligaturesEnabledInEitherFont] &&
@@ -4819,33 +4827,63 @@ ITERM_WEAKLY_REFERENCEABLE
             // wrapper.useMetal becomes YES after the first frame is done drawing
         } else {
             _wrapper.useMetal = NO;
+            [_metalDisabledTokens removeAllObjects];
         }
         [_textview setNeedsDisplay:YES];
         [_cadenceController changeCadenceIfNeeded];
 
         if (useMetal) {
-            // First draw asynchronously since it takes a long time (200 ms on my old mbp) to spin
-            // up a new metal driver. This frame will never be seen since PTYTextView is still visible.
-            DLog(@"Begin async draw for %@", self);
-            [_view.driver drawAsynchronouslyInView:_view.metalView completion:^{
-                if (_useMetal) {
-                    // Now that everything's hot we can draw a frame synchronously without the UI hiccupping.
-                    DLog(@"Begin synchronous draw for %@", self);
-                    [_view drawFrameSynchronously];
-                    [self showMetalAndStopDrawingTextView];
-                    _view.metalView.enableSetNeedsDisplay = YES;
-                }
-            }];
+            [self renderTwoMetalFramesAndShowMetalView];
         } else {
             _view.metalView.enableSetNeedsDisplay = NO;
         }
     }
 }
 
+- (void)renderTwoMetalFramesAndShowMetalView NS_AVAILABLE_MAC(10_11) {
+    if (_useMetal) {
+        // First draw asynchronously since it takes a long time (200 ms on my old mbp) to spin
+        // up a new metal driver. This frame will never be seen since PTYTextView is still visible.
+        DLog(@"Begin async draw for %@", self);
+        [_view.driver drawAsynchronouslyInView:_view.metalView completion:^(BOOL ok) {
+            if (!_useMetal) {
+                return;
+            }
+
+            if (!ok) {
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [self renderTwoMetalFramesAndShowMetalView];
+                });
+                return;
+            }
+
+            // Now that everything's hot we can draw a frame synchronously without the UI hiccupping.
+            [self drawMetalFrameSychronouslyAndShowMetalView];
+        }];
+    }
+}
+
+- (void)drawMetalFrameSychronouslyAndShowMetalView NS_AVAILABLE_MAC(10_11) {
+    DLog(@"Begin synchronous draw for %@", self);
+    [_view setNeedsDisplay:YES];
+    BOOL ok = [_view drawFrameSynchronously];
+    DLog(@"Finished synchronous draw with ok=%@ for %@", @(ok), self);
+    if (!ok) {
+        DLog(@"Failed to draw metal frame synchronously. Try again later.");
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self drawMetalFrameSychronouslyAndShowMetalView];
+        });
+        return;
+    }
+
+    [self showMetalAndStopDrawingTextView];
+    _view.metalView.enableSetNeedsDisplay = YES;
+}
+
 - (void)showMetalAndStopDrawingTextView NS_AVAILABLE_MAC(10_11) {
     // If the text view had been visible, hide it. Hiding it before the
     // first frame is drawn causes a flash of gray.
-    DLog(@"metalGlueDidDrawFrame");
+    DLog(@"showMetalAndStopDrawingTextView");
     _wrapper.useMetal = YES;
     _textview.suppressDrawing = YES;
     _view.metalView.alphaValue = 1;
@@ -6476,8 +6514,9 @@ ITERM_WEAKLY_REFERENCEABLE
         } else {
             image = _backgroundImage;
         }
-        double dx = image.size.width / _view.frame.size.width;
-        double dy = image.size.height / _view.frame.size.height;
+        const NSRect contentRect = _view.contentRect;
+        double dx = image.size.width / contentRect.size.width;
+        double dy = image.size.height / contentRect.size.height;
 
         NSRect sourceRect = NSMakeRect(localRect.origin.x * dx,
                                        localRect.origin.y * dy,
@@ -7069,6 +7108,19 @@ ITERM_WEAKLY_REFERENCEABLE
     }
 }
 
+- (NSEdgeInsets)textViewEdgeInsets {
+    NSEdgeInsets insets;
+    const NSRect innerFrame = _view.scrollview.frame;
+    const NSSize containerSize = _view.contentRect.size;
+
+    insets.bottom = NSMinY(innerFrame);
+    insets.top = containerSize.height - NSMaxY(innerFrame);
+    insets.left = NSMinX(innerFrame);
+    insets.right = containerSize.width - NSMaxX(innerFrame);
+
+    return insets;
+}
+
 - (void)bury {
     [_textview setDataSource:nil];
     [_textview setDelegate:nil];
@@ -7389,7 +7441,7 @@ ITERM_WEAKLY_REFERENCEABLE
     if (type == CURSOR_DEFAULT) {
         type = [iTermProfilePreferences intForKey:KEY_CURSOR_TYPE inProfile:_profile];
     }
-    [[self textview] setCursorType:type];
+    [self setSessionSpecificProfileValues:@{ KEY_CURSOR_TYPE : @(type) }];
 }
 
 - (void)screenSetCursorBlinking:(BOOL)blink {
@@ -7633,6 +7685,7 @@ ITERM_WEAKLY_REFERENCEABLE
 - (void)reveal {
     DLog(@"Reveal session %@", self);
     if ([[[iTermBuriedSessions sharedInstance] buriedSessions] containsObject:self]) {
+        DLog(@"disinter");
         [[iTermBuriedSessions sharedInstance] restoreSession:self];
     }
     NSWindowController<iTermWindowController> *terminal = [_delegate realParentWindow];
@@ -9267,9 +9320,90 @@ ITERM_WEAKLY_REFERENCEABLE
         if (!_useMetal) {
             return;
         }
-        _wrapper.useMetal = NO;
-        _textview.suppressDrawing = NO;
-        _view.metalView.alphaValue = 0;
+        id token = [self temporarilyDisableMetal];
+        [self drawFrameAndRemoveTemporarilyDisablementOfMetalForToken:token];
+    }
+}
+
+- (id)temporarilyDisableMetal NS_AVAILABLE_MAC(10_11) {
+    assert(_useMetal);
+    _wrapper.useMetal = NO;
+    _textview.suppressDrawing = NO;
+    _view.metalView.alphaValue = 0;
+    id token = @(_nextMetalDisabledToken++);
+    [_metalDisabledTokens addObject:token];
+    return token;
+}
+
+- (void)drawFrameAndRemoveTemporarilyDisablementOfMetalForToken:(id)token NS_AVAILABLE_MAC(10_11) {
+    if (!_useMetal) {
+        DLog(@"drawFrameAndRemoveTemporarilyDisablementOfMetal returning earily because useMetal is off");
+        return;
+    }
+    if ([_metalDisabledTokens containsObject:token]) {
+        DLog(@"Found token %@", token);
+        if (_metalDisabledTokens.count > 1) {
+            [_metalDisabledTokens removeObject:token];
+            DLog(@"There are still other tokens remaining: %@", _metalDisabledTokens);
+            return;
+        }
+    } else {
+        DLog(@"Bogus token %@", token);
+        return;
+    }
+
+    DLog(@"drawFrameAndRemoveTemporarilyDisablementOfMetal beginning async draw");
+    [_view.driver drawAsynchronouslyInView:_view.metalView completion:^(BOOL ok) {
+        DLog(@"drawFrameAndRemoveTemporarilyDisablementOfMetal drawAsynchronouslyInView finished wtih ok=%@", @(ok));
+        if (![_metalDisabledTokens containsObject:token]) {
+            DLog(@"Token %@ is gone, not proceeding.", token);
+            return;
+        }
+        if (!_useMetal) {
+            DLog(@"Returning because useMetal is off");
+            return;
+        }
+        if (!ok) {
+            DLog(@"Schedule drawFrameAndRemoveTemporarilyDisablementOfMetal to run after a spin of the mainloop");
+            if (!_delegate) {
+                [self setUseMetal:NO];
+                return;
+            }
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (![_metalDisabledTokens containsObject:token]) {
+                    DLog(@"[after a spin of the runloop] Token %@ is gone, not proceeding.", token);
+                    return;
+                }
+                [self drawFrameAndRemoveTemporarilyDisablementOfMetalForToken:token];
+            });
+            return;
+        }
+
+        assert([_metalDisabledTokens containsObject:token]);
+        [_metalDisabledTokens removeObject:token];
+        DLog(@"Remove temporarily disablement. Tokens are now %@", _metalDisabledTokens);
+        if (_metalDisabledTokens.count == 0 && _useMetal) {
+            _wrapper.useMetal = YES;
+            _textview.suppressDrawing = YES;
+            _view.metalView.alphaValue = 1;
+        }
+    }];
+}
+
+- (void)sessionViewNeedsMetalFrameUpdate {
+    if (@available(macOS 10.11, *)) {
+        if (_metalFrameChangePending) {
+            return;
+        }
+
+        _metalFrameChangePending = YES;
+        id token = [self temporarilyDisableMetal];
+        [self.textview setNeedsDisplay:YES];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            _metalFrameChangePending = NO;
+            [_view reallyUpdateMetalViewFrame];
+            [self drawFrameAndRemoveTemporarilyDisablementOfMetalForToken:token];
+        });
     }
 }
 
