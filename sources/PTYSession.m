@@ -57,6 +57,7 @@
 #import "NSImage+iTerm.h"
 #import "NSPasteboard+iTerm.h"
 #import "NSStringITerm.h"
+#import "NSThread+iTerm.h"
 #import "NSURL+iTerm.h"
 #import "NSView+iTerm.h"
 #import "NSView+RecursiveDescription.h"
@@ -3250,16 +3251,31 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (void)sanityCheck {
-    // TODO(georgen): This is a workaround to a bug that causes frequent crashes but I haven't figured
-    // out how to reproduce it yet. Sometimes a divorced session's profile's GUID is not in sessionsInstance.
-    // The real fix to this is to get rid of sessionsInstance altogether and make PTYSession hold the
-    // only reference to the divorced profile, but that is too big a project to take on right now.
     if (_isDivorced) {
         NSDictionary *sessionsProfile =
             [[ProfileModel sessionsInstance] bookmarkWithGuid:_profile[KEY_GUID]];
-        if (!sessionsProfile && _profile) {
-            [[ProfileModel sessionsInstance] addBookmark:_profile];
+        NSArray *trimCallStack = [NSThread trimCallStackSymbols];
+        if (sessionsProfile || !_profile) {
+            [[ProfileModel debugHistory] addObject:[NSString stringWithFormat:@"%@: OK with guid %@, original guid %@ at\n%@",
+                                        self,
+                                        _profile[KEY_GUID],
+                                        _profile[KEY_ORIGINAL_GUID],
+                                        [trimCallStack componentsJoinedByString:@"\n"]]];
+        } else {
+            [[ProfileModel debugHistory] addObject:[NSString stringWithFormat:@"%@: NOT OK with guid %@, original guid %@ at\n%@",
+                                        self,
+                                        _profile[KEY_GUID],
+                                        _profile[KEY_ORIGINAL_GUID],
+                                        [trimCallStack componentsJoinedByString:@"\n"]]];
+            CrashLog(@"Sanity check failed:\n%@", [[ProfileModel debugHistory] componentsJoinedByString:@"\n"]);
+            const BOOL sane = NO;
+            ITBetaAssert(sane, @"Sanity check failed");
         }
+    } else {
+        [[ProfileModel debugHistory] addObject:[NSString stringWithFormat:@"%@: not divorced. guid is %@ at\%@",
+                                    self,
+                                    _profile[KEY_GUID],
+                                    [NSThread callStackSymbols]]];
     }
 }
 
@@ -4429,7 +4445,7 @@ ITERM_WEAKLY_REFERENCEABLE
 // is a horror and besides these are subviews of PTYTextView and I really don't
 // want to invest any more in this little-used feature.
 - (void)annotationVisibilityDidChange:(NSNotification *)notification {
-    if ([iTermAdvancedSettingsModel useMetal]) {
+    if ([iTermPreferences boolForKey:kPreferenceKeyUseMetal]) {
         [_delegate sessionUpdateMetalAllowed];
     }
 }
@@ -4547,10 +4563,8 @@ ITERM_WEAKLY_REFERENCEABLE
 {
     Profile* bookmark = [self profile];
     NSString* guid = [bookmark objectForKey:KEY_GUID];
-    if (_isDivorced && [[ProfileModel sessionsInstance] bookmarkWithGuid:guid]) {
-        // Once, I saw a case where an already-divorced bookmark's guid was missing from
-        // sessionsInstance. I don't know why, but if that's the case, just create it there
-        // again. :(
+    if (_isDivorced) {
+        assert([[ProfileModel sessionsInstance] bookmarkWithGuid:guid]);
         return guid;
     }
     _isDivorced = YES;
@@ -4786,8 +4800,8 @@ ITERM_WEAKLY_REFERENCEABLE
         // renderer).
         //
         // Perhaps some day transparency and ligatures will be supported.
-        return ([iTermAdvancedSettingsModel useMetal] &&
-                [iTermAdvancedSettingsModel terminalVMargin] >= 5 &&  // Smaller margins break rounded window corners
+        return ([iTermPreferences boolForKey:kPreferenceKeyUseMetal] &&
+                [iTermAdvancedSettingsModel terminalVMargin] >= 2 &&  // Smaller margins break rounded window corners
                 machineSupportsMetal &&
                 _textview.transparencyAlpha == 1 &&
                 ![self ligaturesEnabledInEitherFont] &&
@@ -8358,7 +8372,7 @@ ITERM_WEAKLY_REFERENCEABLE
     iTermAnnouncementViewController *announcement =
     [iTermAnnouncementViewController announcementWithTitle:title
                                                      style:kiTermAnnouncementViewStyleQuestion
-                                               withActions:@[ @"Yes", @"Always", @"Never" ]
+                                               withActions:@[ @"Yes", @"Always", @"Never", @"Help" ]
                                                 completion:^(int selection) {
             switch (selection) {
                 case -2:  // Dismiss programmatically
@@ -8380,6 +8394,11 @@ ITERM_WEAKLY_REFERENCEABLE
                 case 2: // Never
                     [[NSUserDefaults standardUserDefaults] setBool:NO
                                                             forKey:kTurnOffBracketedPasteOnHostChangeUserDefaultsKey];
+                    break;
+
+                case 3: // Help
+                    [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:@"https://iterm2.com/paste_bracketing"]];
+                    break;
             }
         }];
     [self queueAnnouncement:announcement identifier:kTurnOffBracketedPasteOnHostChangeAnnouncementIdentifier];
@@ -9672,6 +9691,41 @@ ITERM_WEAKLY_REFERENCEABLE
     }
 
     [self setSessionSpecificProfileValues:@{ key: value }];
+    response.status = ITMSetProfilePropertyResponse_Status_Ok;
+    return response;
+}
+
+- (ITMGetProfilePropertyResponse *)handleGetProfilePropertyForKeys:(NSArray<NSString *> *)keys {
+    ITMGetProfilePropertyResponse *response = [[[ITMGetProfilePropertyResponse alloc] init] autorelease];
+    if (!keys.count) {
+        return [self handleGetProfilePropertyForKeys:[iTermProfilePreferences allKeys]];
+    }
+
+    for (NSString *key in keys) {
+        id value = [iTermProfilePreferences objectForKey:key inProfile:self.profile];
+        if (value) {
+            NSError *error = nil;
+            NSData *json = nil;
+            if ([NSJSONSerialization isValidJSONObject:value]) {
+                json = [NSJSONSerialization dataWithJSONObject:value
+                                                       options:0
+                                                         error:&error];
+                if (error) {
+                    XLog(@"Failed to json encode value %@ for key %@: %@", value, key, error);
+                }
+            } else if ([value isKindOfClass:[NSString class]]) {
+                json = [[value jsonEncodedString] dataUsingEncoding:NSUTF8StringEncoding];
+            } else if ([value isKindOfClass:[NSNumber class]]) {
+                json = [[value stringValue] dataUsingEncoding:NSUTF8StringEncoding];
+            }
+            if (json) {
+                ITMGetProfilePropertyResponse_Property *property = [[[ITMGetProfilePropertyResponse_Property alloc] init] autorelease];
+                property.key = key;
+                property.jsonValue = [[[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding] autorelease];
+                [response.propertiesArray addObject:property];
+            }
+        }
+    }
     response.status = ITMSetProfilePropertyResponse_Status_Ok;
     return response;
 }

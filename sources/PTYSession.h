@@ -736,6 +736,8 @@ typedef enum {
 
 - (void)jumpToLocationWhereCurrentStatusChanged;
 - (void)updateMetalDriver;
+- (id)temporarilyDisableMetal NS_AVAILABLE_MAC(10_11);
+- (void)drawFrameAndRemoveTemporarilyDisablementOfMetalForToken:(id)token NS_AVAILABLE_MAC(10_11);
 
 #pragma mark - API
 
@@ -743,6 +745,7 @@ typedef enum {
 - (ITMGetPromptResponse *)handleGetPromptRequest:(ITMGetPromptRequest *)request;
 - (ITMNotificationResponse *)handleAPINotificationRequest:(ITMNotificationRequest *)request connection:(id)connection;
 - (ITMSetProfilePropertyResponse *)handleSetProfilePropertyForKey:(NSString *)key value:(id)value;
+- (ITMGetProfilePropertyResponse *)handleGetProfilePropertyForKeys:(NSArray<NSString *> *)keys;
 
 #pragma mark - Testing utilities
 

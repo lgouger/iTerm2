@@ -1785,7 +1785,8 @@ static const int kDragThreshold = 3;
         changed = [self setCursor:[NSCursor openHandCursor]];
     } else if (([event modifierFlags] & kRectangularSelectionModifierMask) == kRectangularSelectionModifiers) {
         changed = [self setCursor:[NSCursor crosshairCursor]];
-    } else if (([event modifierFlags] & (NSAlternateKeyMask | NSCommandKeyMask)) == NSCommandKeyMask) {
+    } else if (action &&
+               ([event modifierFlags] & (NSAlternateKeyMask | NSCommandKeyMask)) == NSCommandKeyMask) {
         changed = [self setCursor:[NSCursor pointingHandCursor]];
         if (action.hover && action.string.length) {
             hover = action.string;
@@ -1844,7 +1845,9 @@ static const int kDragThreshold = 3;
                                               y:y
                          respectingHardNewlines:![iTermAdvancedSettingsModel ignoreHardNewlinesInURLs]];
             if (action) {
-                _drawingHelper.underlinedRange = VT100GridAbsWindowedRangeFromRelative(action.range, [_dataSource totalScrollbackOverflow]);
+                if ([iTermAdvancedSettingsModel enableUnderlineSemanticHistoryOnCmdHover]) {
+                    _drawingHelper.underlinedRange = VT100GridAbsWindowedRangeFromRelative(action.range, [_dataSource totalScrollbackOverflow]);
+                }
 
                 if (action.actionType == kURLActionOpenURL) {
                     NSURL *url = [NSURL URLWithUserSuppliedString:action.string];

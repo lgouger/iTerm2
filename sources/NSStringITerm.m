@@ -1460,14 +1460,24 @@ static TECObjectRef CreateTECConverterForUTF8Variants(TextEncodingVariant varian
 
 - (NSSet *)doubleDollarVariables {
     NSMutableSet *set = [NSMutableSet set];
-    [self enumerateStringsMatchedByRegex:@"\\$\\$(.*?)\\$\\$"
-                                 options:RKLNoOptions
-                                 inRange:NSMakeRange(0, self.length)
-                                   error:nil
-                      enumerationOptions:RKLRegexEnumerationNoOptions
-                              usingBlock:^(NSInteger captureCount, NSString *const *capturedStrings, const NSRange *capturedRanges, volatile BOOL *const stop) {
-                                  [set addObject:[[capturedStrings[0] copy] autorelease]];
-                              }];
+    NSRange rangeToSearch = NSMakeRange(0, self.length);
+    NSInteger start = -1;
+    NSRange range;
+    while (rangeToSearch.length > 0) {
+        range = [self rangeOfString:@"$$" options:NSLiteralSearch range:rangeToSearch];
+        if (start < 0) {
+            start = range.location;
+        } else {
+            NSRange capture = NSMakeRange(start, NSMaxRange(range) - start);
+            NSString *string = [self substringWithRange:capture];
+            if (string.length > 4) {  // length of 4 implies $$$$, which should be interpreted as $$
+                [set addObject:string];
+            }
+            start = -1;
+        }
+        rangeToSearch = NSMakeRange(NSMaxRange(range), MAX(0, (NSInteger)self.length - (NSInteger)NSMaxRange(range)));
+    }
+
     return set;
 }
 
@@ -1835,6 +1845,18 @@ static TECObjectRef CreateTECConverterForUTF8Variants(TextEncodingVariant varian
         addRange(0x1F900, 0x1F9FF);  // Supplemental Symbols and Pictographs
     });
     return [emojiSet longCharacterIsMember:[self firstCharacter]];
+}
+
+- (NSString *)jsonEncodedString {
+    NSMutableString *s = [NSMutableString stringWithString:self];
+    [s replaceOccurrencesOfString:@"\"" withString:@"\\\"" options:NSCaseInsensitiveSearch range:NSMakeRange(0, [s length])];
+    [s replaceOccurrencesOfString:@"/" withString:@"\\/" options:NSCaseInsensitiveSearch range:NSMakeRange(0, [s length])];
+    [s replaceOccurrencesOfString:@"\n" withString:@"\\n" options:NSCaseInsensitiveSearch range:NSMakeRange(0, [s length])];
+    [s replaceOccurrencesOfString:@"\b" withString:@"\\b" options:NSCaseInsensitiveSearch range:NSMakeRange(0, [s length])];
+    [s replaceOccurrencesOfString:@"\f" withString:@"\\f" options:NSCaseInsensitiveSearch range:NSMakeRange(0, [s length])];
+    [s replaceOccurrencesOfString:@"\r" withString:@"\\r" options:NSCaseInsensitiveSearch range:NSMakeRange(0, [s length])];
+    [s replaceOccurrencesOfString:@"\t" withString:@"\\t" options:NSCaseInsensitiveSearch range:NSMakeRange(0, [s length])];
+    return [NSString stringWithFormat:@"\"%@\"", s];
 }
 
 @end

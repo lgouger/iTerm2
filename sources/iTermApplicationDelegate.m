@@ -75,6 +75,7 @@
 #import "NSArray+iTerm.h"
 #import "NSBundle+iTerm.h"
 #import "NSFileManager+iTerm.h"
+#import "NSObject+iTerm.h"
 #import "NSStringITerm.h"
 #import "NSWindow+iTerm.h"
 #import "NSView+RecursiveDescription.h"
@@ -388,6 +389,9 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
         return downloadsMenu_.submenu.itemArray.count > 2;
     } else if ([menuItem action] == @selector(clearAllUploads:)) {
         return uploadsMenu_.submenu.itemArray.count > 2;
+    } else if (menuItem.action == @selector(debugLogging:)) {
+        menuItem.state = gDebugLogging ? NSOnState : NSOffState;
+        return YES;
     } else {
         return YES;
     }
@@ -903,29 +907,36 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
         [self setSecureInput:YES];
     }
 
-    // If focus follows mouse is on, find the window under the cursor and make it key. If a PTYTextView
-    // is under the cursor make it first responder.
-    NSPoint mouseLocation = [NSEvent mouseLocation];
-    if (!NSEqualPoints(mouseLocation, _savedMouseLocation) &&
-        [iTermPreferences boolForKey:kPreferenceKeyFocusFollowsMouse]) {
+    if ([iTermPreferences boolForKey:kPreferenceKeyFocusFollowsMouse]) {
+        NSPoint mouseLocation = [NSEvent mouseLocation];
         NSRect mouseRect = {
             .origin = [NSEvent mouseLocation],
             .size = { 0, 0 }
         };
-        // Dispatch async because when you cmd-tab into iTerm2 the windows are briefly
-        // out of order. Looks like an OS bug to me. They fix themselves right away,
-        // and a dispatch async seems to give it enough time to right itself before
-        // we iterate front to back.
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [self selectWindowAtMouseRect:mouseRect];
-        });
+        if ([iTermAdvancedSettingsModel aggressiveFocusFollowsMouse]) {
+            DLog(@"Using aggressive FFM");
+            // If focus follows mouse is on, find the window under the cursor and make it key. If a PTYTextView
+            // is under the cursor make it first responder.
+            if (!NSEqualPoints(mouseLocation, _savedMouseLocation)) {
+                // Dispatch async because when you cmd-tab into iTerm2 the windows are briefly
+                // out of order. Looks like an OS bug to me. They fix themselves right away,
+                // and a dispatch async seems to give it enough time to right itself before
+                // we iterate front to back.
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [self selectWindowAtMouseRect:mouseRect];
+                });
+            }
+        } else {
+            DLog(@"Using non-aggressive FFM");
+            NSView *view = [self viewAtMouseRect:mouseRect];
+            [[PTYTextView castFrom:view] refuseFirstResponderAtCurrentMouseLocation];
+        }
     }
-
     [self hideStuckToolTips];
     iTermPreciseTimerClearLogs();
 }
 
-- (void)selectWindowAtMouseRect:(NSRect)mouseRect {
+- (NSView *)viewAtMouseRect:(NSRect)mouseRect {
     NSArray<NSWindow *> *frontToBackWindows = [[iTermApplication sharedApplication] orderedWindowsPlusVisibleHotkeyPanels];
     for (NSWindow *window in frontToBackWindows) {
         if (!window.isOnActiveSpace) {
@@ -939,16 +950,25 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
             DLog(@"Consider window %@", window.title);
             NSView *view = [window.contentView hitTest:pointInWindow];
             if (view) {
-                DLog(@"Will activate %@", window.title);
-                [window makeKeyAndOrderFront:nil];
-                if ([view isKindOfClass:[PTYTextView class]]) {
-                    [window makeFirstResponder:view];
-                }
-                return;
+                return view;
             } else {
                 DLog(@"%@ failed hit test", window.title);
             }
         }
+    }
+    return nil;
+}
+
+- (void)selectWindowAtMouseRect:(NSRect)mouseRect {
+    NSView *view = [self viewAtMouseRect:mouseRect];
+    NSWindow *window = view.window;
+    if (view) {
+        DLog(@"Will activate %@", window.title);
+        [window makeKeyAndOrderFront:nil];
+        if ([view isKindOfClass:[PTYTextView class]]) {
+            [window makeFirstResponder:view];
+        }
+        return;
     }
 }
 
@@ -962,6 +982,7 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
     // Start automatic debug logging if it's enabled.
     if ([iTermAdvancedSettingsModel startDebugLoggingAutomatically]) {
         TurnOnDebugLoggingSilently();
+        DLog(@"applicationWillFinishLaunching:");
     }
 
     [self buildScriptMenu:nil];
@@ -983,6 +1004,8 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
 
     // Users used to be opted into the beta by default. Make sure the user is cool with that.
     [self promptAboutRemainingInBetaIfNeeded];
+
+    [self complainIfNightlyBuildIsTooOld];
 
     // Set the Appcast URL and when it changes update it.
     [[iTermController sharedInstance] refreshSoftwareUpdateUserDefaults];
@@ -1297,6 +1320,23 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
 }
 
 #pragma mark - Startup Helpers
+
+- (void)complainIfNightlyBuildIsTooOld {
+    if (![NSBundle it_isNightlyBuild]) {
+        return;
+    }
+    NSTimeInterval age = -[[NSBundle it_buildDate] timeIntervalSinceNow];
+    if (age > 30 * 24 * 60 * 60) {
+        iTermWarningSelection selection =
+        [iTermWarning showWarningWithTitle:@"This nightly build is over 30 days old. Consider updating soon: you may be suffering from awful bugs in blissful ignorance."
+                                   actions:@[ @"I’ll Take My Chances", @"Update Now" ]
+                                identifier:@"NoSyncVeryOldNightlyBuildWarning"
+                               silenceable:kiTermWarningTypeSilencableForOneMonth];
+        if (selection == kiTermWarningSelection1) {
+            [[SUUpdater sharedUpdater] checkForUpdates:nil];
+        }
+    }
+}
 
 - (void)promptAboutRemainingInBetaIfNeeded {
     // For a long time—too long—users were opted into the beta program. There are too many of them
@@ -2559,6 +2599,19 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
     }
 
     handler([session handleSetProfilePropertyForKey:request.key value:value]);
+}
+
+- (void)apiServerGetProfileProperty:(ITMGetProfilePropertyRequest *)request
+                            handler:(void (^)(ITMGetProfilePropertyResponse *))handler {
+    PTYSession *session = [self sessionForAPIIdentifier:request.hasSession ? request.session : nil];
+    if (!session) {
+        ITMGetProfilePropertyResponse *response = [[[ITMGetProfilePropertyResponse alloc] init] autorelease];
+        response.status = ITMGetProfilePropertyResponse_Status_SessionNotFound;
+        handler(response);
+        return;
+    }
+
+    handler([session handleGetProfilePropertyForKeys:request.keysArray]);
 }
 
 - (void)apiServerListSessions:(ITMListSessionsRequest *)request

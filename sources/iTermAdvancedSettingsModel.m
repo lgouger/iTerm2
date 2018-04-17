@@ -6,6 +6,8 @@
 //
 //
 
+#import <Foundation/Foundation.h>
+
 #import "iTermAdvancedSettingsModel.h"
 #import "iTermAdvancedSettingsViewController.h"
 #import "NSStringITerm.h"
@@ -51,6 +53,15 @@ DEFINE_BOOL(name, theDefault, theDescription) \
     return [iTermAdvancedSettingsViewController intForIdentifier:theIdentifier \
                                                     defaultValue:theDefault \
                                                      description:theDescription]; \
+}
+
+#define DEFINE_BOUNDED_INT(name, theDefault, theDescription, minValue, maxValue) \
++ (int)name { \
+    NSString *theIdentifier = [@#name stringByCapitalizingFirstLetter]; \
+    int result = [iTermAdvancedSettingsViewController intForIdentifier:theIdentifier \
+                                                          defaultValue:theDefault \
+                                                           description:theDescription]; \
+    return MIN(maxValue, MAX(minValue, result)); \
 }
 
 #define DEFINE_FLOAT(name, theDefault, theDescription) \
@@ -114,7 +125,9 @@ DEFINE_BOOL(useSystemCursorWhenPossible, NO, @"Mouse: Use system cursor icons wh
 DEFINE_BOOL(alwaysAcceptFirstMouse, NO, @"Mouse: Always accept first mouse event on terminal windows.\nThis means clicks will work the same when iTerm2 is active as when it’s inactive.");
 DEFINE_BOOL(doubleReportScrollWheel, NO, @"Mouse: Double-report scroll wheel events to work around tmux scrolling bug.");
 DEFINE_BOOL(stealKeyFocus, NO, @"Mouse: When Focus Follows Mouse is enabled, steal key focus even when inactive.");
+DEFINE_BOOL(aggressiveFocusFollowsMouse, NO, @"Mouse: When Focus Follows Mouse is enabled, activate the window under the cursor when iTerm2 becomes active?");
 DEFINE_BOOL(cmdClickWhenInactiveInvokesSemanticHistory, NO, @"Mouse: ⌘-click in an active pane while iTerm2 isn't the active app invokes Semantic History.\nBy default, iTerm2 respects the OS standard that ⌘-click in an app that doesn't have keyboard focus behaves like a non-⌘ click that does not raise the window.");
+DEFINE_BOOL(enableUnderlineSemanticHistoryOnCmdHover, YES, @"Mouse: Underline Semantic History-selectable items under the cursor while holding ⌘?");
 DEFINE_BOOL(sensitiveScrollWheel, NO, @"Mouse: Scroll on any scroll wheel movement, no matter how small?");
 
 #pragma mark Terminal
@@ -130,7 +143,7 @@ DEFINE_STRING(findUrlsRegex,
               @"Terminal: Regular expression for “Find URLs” command.");
 DEFINE_FLOAT(echoProbeDuration, 0.5, @"Terminal: Amount of time to wait while testing if echo is on (seconds).\nThis is used by the password manager to ensure you're at a password prompt.");
 DEFINE_BOOL(disablePasswordManagerAnimations, NO, @"Terminal: Disable animations for showing/hiding password manager.");
-DEFINE_BOOL(optionIsMetaForSpecialChars, YES, @"Terminal: When you press an arrow key or other function key that transmits the modifiers, should Option be translated to Meta?\nIf this is set to No then it will be translated to Alt.");
+DEFINE_BOOL(optionIsMetaForSpecialChars, YES, @"Terminal: When you press an arrow key or other function key that transmits the modifiers, should ⌥ be translated to Meta?\nIf this is set to No then it will be translated to Alt.");
 DEFINE_BOOL(noSyncSilenceAnnoyingBellAutomatically, NO, @"Terminal: Automatically silence bell when it rings too much.");
 DEFINE_BOOL(restoreWindowContents, YES, @"Terminal: Restore window contents at startup.\nThis requires “System Prefs>General>Close windows when quitting an app” to be off.");
 DEFINE_INT(numberOfLinesForAccessibility, 1000, @"Terminal: Maximum number of lines of history to expose to Accessibility.\nAccessibility APIs can make iTerm2 slow. In order to limit the effect, you can restrict the number of lines in each session that are visible to accessibility. The last lines of each session will be made accessible.");
@@ -169,13 +182,13 @@ DEFINE_BOOL(jiggleTTYSizeOnClearBuffer, NO, @"General: Redraw the screen after t
 DEFINE_BOOL(indicateBellsInDockBadgeLabel, YES, @"General: Indicate the number of bells rung while the app is inactive in the dock icon’s badge label");
 DEFINE_STRING(downloadsDirectory, @"", @"General: Downloads folder.\nIf set, downloaded files go to this location instead of the user’s $HOME/Downloads folder.");
 DEFINE_FLOAT(pointSizeOfTimeStamp, 10, @"General: Point size for timestamps");
-DEFINE_INT(terminalMargin, 5, @"General: Width of left and right margins in terminal panes\nHow much space to leave between the left and right edges of the terminal.\nYou must restart iTerm2 after modifying this property. Saved window arrangements should be re-created.");
-DEFINE_INT(terminalVMargin, 5, @"General: Height of top and bottom margins in terminal panes\nHow much space to leave between the top and bottom edges of the terminal.\nYou must restart iTerm2 after modifying this property. Saved window arrangements should be re-created.");
-DEFINE_BOOL(useVirtualKeyCodesForDetectingDigits, YES, @"General: On keyboards that require a modifier to press a digit, do not require that modifier for switching between windows, tabs, and panes by number.\nFor example, AZERTY requires you to hold down Shift to enter a number. To switch tabs with Cmd+Number on an AZERTY keyboard, you must enable this setting. Then, for example, Cmd-& switches to tab 1. When this setting is enabled, some user-defined shortcuts may become unavailable because the tab/window/pane switching behavior takes precedence.");
+DEFINE_BOUNDED_INT(terminalMargin, 5, @"General: Width of left and right margins in terminal panes\nHow much space to leave between the left and right edges of the terminal.\nYou must restart iTerm2 after modifying this property. Saved window arrangements should be re-created.", 1, 100);
+DEFINE_INT(terminalVMargin, 2, @"General: Height of top and bottom margins in terminal panes\nHow much space to leave between the top and bottom edges of the terminal.\nYou must restart iTerm2 after modifying this property. Saved window arrangements should be re-created.");
+DEFINE_BOOL(useVirtualKeyCodesForDetectingDigits, YES, @"General: On keyboards that require a modifier to press a digit, do not require that modifier for switching between windows, tabs, and panes by number.\nFor example, AZERTY requires you to hold down Shift to enter a number. To switch tabs with ⌘+Number on an AZERTY keyboard, you must enable this setting. Then, for example, ⌘-& switches to tab 1. When this setting is enabled, some user-defined shortcuts may become unavailable because the tab/window/pane switching behavior takes precedence.");
 DEFINE_STRING(viewManPageCommand, @"man %@ || sleep 3", @"General: Command to view man pages.\nUsed when you press the man page button on the touch bar. %@ is replaced with the command. End the command with & to avoid opening an iTerm2 window (e.g., if you're launching an external viewer).");
 DEFINE_BOOL(hideStuckTooltips, YES, @"General: Hide stuck tooltips.\nWhen you hide iTerm2 using a hotkey while a tooltip is fading out it gets stuck because of an OS bug. Work around it with a nasty hack by enabling this feature.")
 DEFINE_BOOL(openFileOverridesSendText, YES, @"General: Should opening a script with iTerm2 disable the default profile's “Send Text at Start” setting?\nIf you use “open iTerm2 file.command” or drag a script onto iTerm2's icon and this setting is enabled then the script will be executed in lieu of the profile's “Send Text at Start” setting. If this setting is off then both will be executed.");
-DEFINE_BOOL(statusBarIcon, YES, @"General: Add status bar icon when excluded from dock?\nWhen you turn on “Exclude from Dock and Cmd-Tab Application Switcher” a status bar icon is added to the menu bar so you can switch the setting back off. Disable this to remove the status bar icon. Doing so makes it very hard to get to Preferences. You must restart iTerm2 after changing this setting.");
+DEFINE_BOOL(statusBarIcon, YES, @"General: Add status bar icon when excluded from dock?\nWhen you turn on “Exclude from Dock and ⌘-Tab Application Switcher” a status bar icon is added to the menu bar so you can switch the setting back off. Disable this to remove the status bar icon. Doing so makes it very hard to get to Preferences. You must restart iTerm2 after changing this setting.");
 DEFINE_BOOL(wrapFocus, YES, @"General: Should the directional focus hotkeys wrap");
 DEFINE_BOOL(disableGrowl, YES_IF_BETA_ELSE_NO, @"General: Disable Growl notifications.\nSend notifications directly to Notification Center instead of relying on Growl to deliver them. Enables sound alerts on notifications.");
 DEFINE_BOOL(openUntitledFile, YES, @"General: Open a new window when you click the dock icon and no windows are already open?");
@@ -192,15 +205,17 @@ DEFINE_BOOL(drawOutlineAroundCursor, NO, @"Drawing: Draw outline around underlin
 DEFINE_BOOL(disableCustomBoxDrawing, NO, @"Drawing: Use your typeface’s box-drawing characters instead of iTerm2’s custom drawing code.\nYou must restart iTerm2 after changing this setting.");
 
 #pragma mark - Semantic History
-DEFINE_BOOL(ignoreHardNewlinesInURLs, NO, @"Semantic History: Ignore hard newlines for the purposes of locating URLs and file names for Semantic History.\nIf a hard newline occurs at the end of a line then cmd-click will not see it all unless this setting is turned on. This is useful for some interactive applications. Turning this on will remove newlines from the \\3 and \\4 substitutions.");
+DEFINE_BOOL(ignoreHardNewlinesInURLs, NO, @"Semantic History: Ignore hard newlines for the purposes of locating URLs and file names for Semantic History.\nIf a hard newline occurs at the end of a line then ⌘-click will not see it all unless this setting is turned on. This is useful for some interactive applications. Turning this on will remove newlines from the \\3 and \\4 substitutions.");
 // Note: square brackets are included for ipv6 addresses like http://[2600:3c03::f03c:91ff:fe96:6a7a]/
 DEFINE_STRING(URLCharacterSet, @".?\\/:;%=&_-,+~#@!*'(（)）|[]", @"Semantic History: Non-alphanumeric characters considered part of a URL for Semantic History.\nLetters and numbers are always considered part of the URL. These non-alphanumeric characters are used in addition for the purposes of figuring out where a URL begins and ends.");
 DEFINE_INT(maxSemanticHistoryPrefixOrSuffix, 2000, @"Semantic History: Maximum number of bytes of text before and after click location to take into account.\nThis also limits the size of the \\3 and \\4 substitutions.");
 DEFINE_STRING(pathsToIgnore, @"", @"Semantic History: Paths to ignore for Semantic History.\nSeparate paths with a comma. Any file under one of these paths will not be openable with Semantic History. It is wise to add network file systems to this list, since they can be very slow.");
 DEFINE_BOOL(showYellowMarkForJobStoppedBySignal, YES, @"Semantic History: Use a yellow for a Shell Integration prompt mark when the job is stopped by a signal.");
+DEFINE_BOOL(conservativeURLGuessing, NO, @"Semantic History: URLs must contain a scheme?\nEnable this to reduce the number of false positives that semantic history things are a URL");
 
 #pragma mark - Debugging
 DEFINE_BOOL(startDebugLoggingAutomatically, NO, @"Debugging: Start debug logging automatically when iTerm2 is launched.");
+DEFINE_BOOL(appendToExistingDebugLog, NO, @"Debugging: Append to existing debug log rather than replacing it.");
 DEFINE_BOOL(logDrawingPerformance, NO, @"Debugging: Log stats about text drawing performance to console.\nUsed for performance testing.");
 DEFINE_BOOL(logRestorableStateSize, NO, @"Debugging: Log restorable state size info to /tmp/statesize.*.txt.");
 
@@ -231,7 +246,7 @@ DEFINE_BOOL(tmuxUsesDedicatedProfile, YES, @"Tmux Integration: Tmux always uses 
 DEFINE_BOOL(tolerateUnrecognizedTmuxCommands, NO, @"Tmux Integration: Tolerate unrecognized commands from server.\nIf enabled, an unknown command from tmux (such as output from ssh or wall) will end the session. Turning this off helps detect dead ssh sessions.");
 
 #pragma mark Warnings
-DEFINE_BOOL(neverWarnAboutMeta, NO, @"Warnings: Suppress a warning when Option Key Acts as Meta is enabled in Prefs>Profiles>Keys.");
+DEFINE_BOOL(neverWarnAboutMeta, NO, @"Warnings: Suppress a warning when ⌥ Key Acts as Meta is enabled in Prefs>Profiles>Keys.");
 DEFINE_BOOL(neverWarnAboutSpaces, NO, @"Warnings: Suppress a warning about how to configure Spaces when setting a window's Space.");
 DEFINE_BOOL(neverWarnAboutOverrides, NO, @"Warnings: Suppress a warning about a change to a Profile key setting that overrides a global setting.");
 DEFINE_BOOL(neverWarnAboutPossibleOverrides, NO, @"Warnings: Suppress a warning about a change to a global key that's overridden by a Profile.");
@@ -300,12 +315,12 @@ DEFINE_BOOL(useExperimentalFontMetrics, NO, @"Experimental Features: Use a more 
 DEFINE_BOOL(supportREPCode, YES_IF_BETA_ELSE_NO, @"Experimental Features: Enable support for REP (Repeat previous character) escape sequence?");
 
 DEFINE_BOOL(showBlockBoundaries, NO, @"Debugging: Show line buffer block boundaries (issue 6207)");
-DEFINE_BOOL(useMetal, YES_IF_BETA_ELSE_NO, @"Experimental Features: Use Metal GPU-based renderer.\nThis should provide higher performance but it does not support transparent windows or ligatures and may have other missing features.");
 DEFINE_BOOL(showMetalFPSmeter, NO, @"Experimental Features: Show FPS meter\nRequires Metal renderer");
 DEFINE_BOOL(disableMetalWhenUnplugged, YES, @"Experimental Features: Disable Metal renderer when not connected to power?\nThis helps to conserve energy.");
 
 // TODO: Turn this back on by default in a few days. Let's see if it is responsible for the spike in nightly build crasehs starting with the 3-12-2018 build.
-DEFINE_BOOL(disableMetalWhenIdle, NO, @"Experimental Features: Disable metal renderer when idle to save CPU utilization?\nRequires Metal renderer");
+// The number of crashes fell off a cliff starting with the 3/18 build (usually 0, never more than 2/day, while it had been at 47 on the 3/15 build). I'm switching the default back to YES for the 4/18 build to see if the number climbs.
+DEFINE_BOOL(disableMetalWhenIdle, YES, @"Experimental Features: Disable metal renderer when idle to save CPU utilization?\nRequires Metal renderer");
 
 DEFINE_BOOL(proportionalScrollWheelReporting, YES_IF_BETA_ELSE_NO, @"Experimental Features: Report multiple mouse scroll events when scrolling quickly?");
 DEFINE_BOOL(useModernScrollWheelAccumulator, NO, @"Experimental Features: Use modern scroll wheel accumulator.\nThis should support wheel mice better and feel more natural.");

@@ -703,7 +703,7 @@ typedef struct iTermTextColorContext {
     const CGFloat verticalSpacing = MAX(0, scale * round((cellSize.height / scale - cellSizeWithoutSpacing.height / scale) / 2.0));
     CGRect rect = NSMakeRect(container.origin.x,
                              container.origin.y + verticalSpacing,
-                             [iTermAdvancedSettingsModel terminalMargin] * scale,
+                             container.size.width,
                              cellSizeWithoutSpacing.height);
     const CGFloat kMaxHeight = 15 * scale;
     const CGFloat kMinMargin = 3 * scale;
@@ -748,7 +748,10 @@ typedef struct iTermTextColorContext {
 - (void)drawMarkIfNeededOnLine:(int)line leftMarginRect:(NSRect)leftMargin {
     VT100ScreenMark *mark = [self.delegate drawingHelperMarkOnLine:line];
     if (mark.isVisible && self.drawMarkIndicators) {
-        NSRect rect = [iTermTextDrawingHelper frameForMarkContainedInRect:leftMargin
+        NSRect insetLeftMargin = leftMargin;
+        insetLeftMargin.origin.x += 1;
+        insetLeftMargin.size.width -= 1;
+        NSRect rect = [iTermTextDrawingHelper frameForMarkContainedInRect:insetLeftMargin
                                                                  cellSize:_cellSize
                                                    cellSizeWithoutSpacing:_cellSizeWithoutSpacing
                                                                     scale:1];
@@ -1056,6 +1059,7 @@ typedef struct iTermTextColorContext {
                                bgselected:run->selected
                                   bgColor:box.unprocessedBackgroundColor
                  processedBackgroundColor:box.backgroundColor
+                                 colorRun:box.valuePointer
                                   matches:matches
                            forceTextColor:nil
                                   context:ctx];
@@ -1069,6 +1073,7 @@ typedef struct iTermTextColorContext {
                          bgselected:(BOOL)bgselected
                             bgColor:(NSColor *)bgColor
            processedBackgroundColor:(NSColor *)processedBackgroundColor
+                           colorRun:(iTermBackgroundColorRun *)colorRun
                             matches:(NSData *)matches
                      forceTextColor:(NSColor *)forceTextColor  // optional
                             context:(CGContextRef)ctx {
@@ -1093,6 +1098,7 @@ typedef struct iTermTextColorContext {
                                                                            hasSelectedText:bgselected
                                                                            backgroundColor:bgColor
                                                                             forceTextColor:forceTextColor
+                                                                                  colorRun:colorRun
                                                                                findMatches:matches
                                                                            underlinedRange:[self underlinedRangeOnLine:row + _totalScrollbackOverflow]
                                                                                  positions:&positions];
@@ -1572,12 +1578,17 @@ typedef struct iTermTextColorContext {
     return maskContext;
 }
 
-NSColor *iTermTextDrawingHelperGetTextColor(screen_char_t *c,
+NSColor *iTermTextDrawingHelperGetTextColor(iTermTextDrawingHelper *self,
+                                            screen_char_t *c,
                                             BOOL inUnderlinedRange,
                                             int index,
-                                            iTermTextColorContext *context) {
+                                            iTermTextColorContext *context,
+                                            iTermBackgroundColorRun *colorRun) {
     NSColor *rawColor = nil;
     BOOL isMatch = NO;
+    if (c->faint && colorRun && !context->backgroundColor) {
+        context->backgroundColor = [self unprocessedColorForBackgroundRun:colorRun];
+    }
     const BOOL needsProcessing = context->backgroundColor && (context->minimumContrast > 0.001 ||
                                                               context->dimmingAmount > 0.001 ||
                                                               context->mutingAmount > 0.001 ||
@@ -1727,6 +1738,7 @@ static BOOL iTermTextDrawingHelperShouldAntiAlias(screen_char_t *c,
                           atIndex:(NSInteger)i
                    forceTextColor:(NSColor *)forceTextColor
                    forceUnderline:(BOOL)inUnderlinedRange
+                         colorRun:(iTermBackgroundColorRun *)colorRun
                          drawable:(BOOL)drawable
                  textColorContext:(iTermTextColorContext *)textColorContext
                        attributes:(iTermCharacterAttributes *)attributes {
@@ -1738,10 +1750,12 @@ static BOOL iTermTextDrawingHelperShouldAntiAlias(screen_char_t *c,
     if (forceTextColor) {
         attributes->foregroundColor = forceTextColor;
     } else {
-        attributes->foregroundColor = iTermTextDrawingHelperGetTextColor(c,
+        attributes->foregroundColor = iTermTextDrawingHelperGetTextColor(self,
+                                                                         c,
                                                                          inUnderlinedRange,
                                                                          i,
-                                                                         textColorContext);
+                                                                         textColorContext,
+                                                                         colorRun);
     }
 
     const BOOL isComplex = c->complexChar;
@@ -1859,6 +1873,7 @@ static BOOL iTermTextDrawingHelperShouldAntiAlias(screen_char_t *c,
                                                  hasSelectedText:(BOOL)hasSelectedText
                                                  backgroundColor:(NSColor *)backgroundColor
                                                   forceTextColor:(NSColor *)forceTextColor
+                                                        colorRun:(iTermBackgroundColorRun *)colorRun
                                                      findMatches:(NSData *)findMatches
                                                  underlinedRange:(NSRange)underlinedRange
                                                        positions:(CTVector(CGFloat) *)positions {
@@ -1939,6 +1954,7 @@ static BOOL iTermTextDrawingHelperShouldAntiAlias(screen_char_t *c,
                                 atIndex:i
                          forceTextColor:forceTextColor
                          forceUnderline:NSLocationInRange(i, underlinedRange)
+                               colorRun:colorRun
                                drawable:drawable
                        textColorContext:&textColorContext
                              attributes:&characterAttributes];
@@ -2268,6 +2284,7 @@ static BOOL iTermTextDrawingHelperShouldAntiAlias(screen_char_t *c,
                                    bgselected:NO
                                       bgColor:nil
                      processedBackgroundColor:[self defaultBackgroundColor]
+                                     colorRun:nil
                                       matches:nil
                                forceTextColor:[self defaultTextColor]
                                       context:ctx];
@@ -2785,6 +2802,7 @@ static BOOL iTermTextDrawingHelperShouldAntiAlias(screen_char_t *c,
                            bgselected:NO
                               bgColor:backgroundColor
              processedBackgroundColor:backgroundColor
+                             colorRun:nil
                               matches:nil
                        forceTextColor:overrideColor
                               context:ctx];

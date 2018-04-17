@@ -921,7 +921,7 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (BOOL)windowIsResizing {
-    return liveResize_ || togglingLionFullScreen_ || exitingLionFullscreen_ || zooming_;
+    return togglingFullScreen_ || liveResize_ || togglingLionFullScreen_ || exitingLionFullscreen_ || zooming_;
 }
 
 - (void)hideToolbelt {
@@ -2147,6 +2147,7 @@ ITERM_WEAKLY_REFERENCEABLE
         // TODO: for window type top, set width to screen width.
         rect.size.width = [[arrangement objectForKey:TERMINAL_ARRANGEMENT_WIDTH] doubleValue];
         rect.size.height = [[arrangement objectForKey:TERMINAL_ARRANGEMENT_HEIGHT] doubleValue];
+        DLog(@"Initialize nonfullscreen window to saved frame %@", NSStringFromRect(rect));
         [[term window] setFrame:rect display:NO];
     }
 
@@ -2418,6 +2419,8 @@ ITERM_WEAKLY_REFERENCEABLE
     result[TERMINAL_ARRANGEMENT_Y_ORIGIN] = @(rect.origin.y);
     result[TERMINAL_ARRANGEMENT_WIDTH] = @(rect.size.width);
     result[TERMINAL_ARRANGEMENT_HEIGHT] = @(rect.size.height);
+    DLog(@"While creating arrangement for %@ save frame of %@", self, NSStringFromRect(rect));
+    DLog(@"%@", [NSThread callStackSymbols]);
     result[TERMINAL_ARRANGEMENT_HAS_TOOLBELT] = @(_contentView.shouldShowToolbelt);
     result[TERMINAL_ARRANGEMENT_HIDING_TOOLBELT_SHOULD_RESIZE_WINDOW] =
             @(hidingToolbeltShouldResizeWindow_);
@@ -3607,6 +3610,33 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (void)toggleTraditionalFullScreenMode {
+    if (@available(macOS 10.11, *)) {
+        const BOOL anySessionInSelectedTabUsesMetal = [self.currentTab.sessions anyWithBlock:^BOOL(PTYSession *anObject) {
+            return anObject.useMetal && anObject.view.metalView.alphaValue == 1;
+        }];
+        if (anySessionInSelectedTabUsesMetal) {
+            NSArray *sessions = [self.currentTab.sessions copy];
+            NSArray *tokens = [[sessions mapWithBlock:^id(PTYSession *anObject) {
+                return [anObject temporarilyDisableMetal];
+            }] retain];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [self reallyToggleTraditionalFullScreenMode];
+                [sessions enumerateObjectsUsingBlock:^(id  _Nonnull obj, NSUInteger idx, BOOL * _Nonnull stop) {
+                    id token = tokens[idx];
+                    [obj drawFrameAndRemoveTemporarilyDisablementOfMetalForToken:token];
+                }];
+                [sessions release];
+                [tokens release];
+            });
+            return;
+        }
+    }
+
+    // Pre-10.11 and non-metal code path
+    [self reallyToggleTraditionalFullScreenMode];
+}
+
+- (void)reallyToggleTraditionalFullScreenMode {
     [SessionView windowDidResize];
     PtyLog(@"toggleFullScreenMode called");
     CGFloat savedToolbeltWidth = _contentView.toolbeltWidth;
@@ -5725,9 +5755,10 @@ ITERM_WEAKLY_REFERENCEABLE
     for (PTYSession *session in self.currentTab.sessions) {
         [session.view updateDim];
     }
-    if (targetSession.isDivorced) {
+    if ([[ProfileModel sessionsInstance] bookmarkWithGuid:newSession.profile[KEY_GUID]]) {
         // We assign directly to isDivorced because we know the GUID is unique and in sessions
-        // instance and the original guid is already set. _bookmarkToSplit took care of that.
+        // instance and the original guid is already set. This might be possible to do earlier,
+        // but I'm afraid of introducing bugs.
         newSession.isDivorced = YES;
     }
     if (![newSession.tabColor isEqual:tabColor] && newSession.tabColor != tabColor) {
@@ -5775,6 +5806,19 @@ ITERM_WEAKLY_REFERENCEABLE
         oldCWD = [[[self currentSession] shell] getWorkingDirectory];
     }
 
+    if ([[ProfileModel sessionsInstance] bookmarkWithGuid:theBookmark[KEY_GUID]]) {
+        // We were given a profile that belongs to an existing divorced session.
+        //
+        // Don't want to have two divorced sessions with the same guid. Allocate a new sessions
+        // instance bookmark with a unique GUID. The isDivorced flag gets set later,
+        // by splitVertically:before:...
+        NSMutableDictionary *temp = [[theBookmark mutableCopy] autorelease];
+        temp[KEY_GUID] = [ProfileModel freshGuid];
+        Profile *originalBookmark = targetSession.originalProfile;
+        temp[KEY_ORIGINAL_GUID] = [[originalBookmark[KEY_GUID] copy] autorelease];
+        [[ProfileModel sessionsInstance] addBookmark:temp];
+        theBookmark = temp;
+    }
     PTYSession* newSession = [[self newSessionWithBookmark:theBookmark] autorelease];
     [self splitVertically:isVertical
                    before:before
@@ -5816,16 +5860,6 @@ ITERM_WEAKLY_REFERENCEABLE
     // on.
     if (!theBookmark) {
         theBookmark = [[ProfileModel sharedInstance] defaultBookmark];
-    }
-
-    if (sourceSession.isDivorced) {
-        // Don't want to have two divorced sessions with the same guid. Allocate a new sessions
-        // instance bookmark with a unique GUID.
-        NSMutableDictionary *temp = [[theBookmark mutableCopy] autorelease];
-        temp[KEY_GUID] = [ProfileModel freshGuid];
-        temp[KEY_ORIGINAL_GUID] = [[originalBookmark[KEY_GUID] copy] autorelease];
-        [[ProfileModel sessionsInstance] addBookmark:temp];
-        theBookmark = temp;
     }
 
     return theBookmark;
@@ -7643,6 +7677,7 @@ ITERM_WEAKLY_REFERENCEABLE
         if (!substitutions) {
             return NO;
         }
+        cmd = [cmd stringByReplacingOccurrencesOfString:@"$$$$" withString:@"$$"];
 
         name = [name stringByPerformingSubstitutions:substitutions];
         NSString *pwd = [ITAddressBookMgr bookmarkWorkingDirectory:profile
@@ -7779,6 +7814,7 @@ ITERM_WEAKLY_REFERENCEABLE
     if (!substitutions) {
         return nil;
     }
+    commandForSubs = [commandForSubs stringByReplacingOccurrencesOfString:@"$$$$" withString:@"$$"];
     if (command) {
         // Create a modified profile to run "command".
         NSMutableDictionary *temp = [[profile mutableCopy] autorelease];
@@ -7927,6 +7963,7 @@ ITERM_WEAKLY_REFERENCEABLE
         if (!substitutions) {
             return nil;
         }
+        cmd = [cmd stringByReplacingOccurrencesOfString:@"$$$$" withString:@"$$"];
 
         NSString *pwd = [ITAddressBookMgr bookmarkWorkingDirectory:profile forObjectType:objectType];
         if ([pwd length] == 0) {
