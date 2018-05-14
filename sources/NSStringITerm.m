@@ -1380,10 +1380,6 @@ static TECObjectRef CreateTECConverterForUTF8Variants(TextEncodingVariant varian
     return result;
 }
 
-- (BOOL)containsString:(NSString *)substring {
-    return [self rangeOfString:substring].location != NSNotFound;
-}
-
 - (NSString *)stringRepeatedTimes:(int)n {
     NSMutableString *result = [NSMutableString string];
     for (int i = 0; i < n; i++) {
@@ -1857,6 +1853,26 @@ static TECObjectRef CreateTECConverterForUTF8Variants(TextEncodingVariant varian
     [s replaceOccurrencesOfString:@"\r" withString:@"\\r" options:NSCaseInsensitiveSearch range:NSMakeRange(0, [s length])];
     [s replaceOccurrencesOfString:@"\t" withString:@"\\t" options:NSCaseInsensitiveSearch range:NSMakeRange(0, [s length])];
     return [NSString stringWithFormat:@"\"%@\"", s];
+}
+
++ (NSString *)it_formatBytes:(double)bytes {
+    if (bytes < 1) {
+        return [NSString stringWithFormat:@"%.04lf bytes", bytes];
+    } else if (bytes < 1024) {
+        return [NSString stringWithFormat:@"%d bytes", (int)bytes];
+    } else if (bytes < 10240) {
+        return [NSString stringWithFormat:@"%.1lf kB", bytes / 10];
+    } else if (bytes < 1048576) {
+        return [NSString stringWithFormat:@"%d kB", (int)bytes / 1024];
+    } else if (bytes < 10485760) {
+        return [NSString stringWithFormat:@"%.1lf MB", bytes / 1048576];
+    } else if (bytes < 1024.0 * 1024.0 * 1024.0) {
+        return [NSString stringWithFormat:@"%.0lf MB", bytes / 1048576];
+    } else if (bytes < 1024.0 * 1024.0 * 1024.0 * 10) {
+        return [NSString stringWithFormat:@"%.1lf GB", bytes / (1024.0 * 1024.0 * 1024.0)];
+    } else {
+        return [NSString stringWithFormat:@"%.0lf GB", bytes / (1024.0 * 1024.0 * 1024.0)];
+    }
 }
 
 @end

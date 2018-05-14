@@ -353,6 +353,7 @@ typedef enum {
 
 // Returns whether this session considers itself eligible to use the Metal renderer.
 @property(nonatomic, readonly) BOOL metalAllowed;
+@property(nonatomic, readonly) BOOL idleForMetal;
 
 // Controls whether this session uses the Metal renderer.
 @property(nonatomic) BOOL useMetal;
@@ -510,7 +511,8 @@ typedef enum {
                          withDelegate:(id<PTYSessionDelegate>)delegate
                         forObjectType:(iTermObjectType)objectType;
 + (NSDictionary *)arrangementFromTmuxParsedLayout:(NSDictionary *)parseNode
-                                         bookmark:(Profile *)bookmark;
+                                         bookmark:(Profile *)bookmark
+                                   tmuxController:(TmuxController *)tmuxController;
 + (NSString *)guidInArrangement:(NSDictionary *)arrangement;
 
 - (void)textViewFontDidChange;
@@ -738,6 +740,10 @@ typedef enum {
 - (void)updateMetalDriver;
 - (id)temporarilyDisableMetal NS_AVAILABLE_MAC(10_11);
 - (void)drawFrameAndRemoveTemporarilyDisablementOfMetalForToken:(id)token NS_AVAILABLE_MAC(10_11);
+
+- (void)executeTokens:(const CVector *)vector bytesHandled:(int)length;
+- (void)setVariableNamed:(NSString *)name toValue:(NSString *)newValue;
+- (void)injectData:(NSData *)data;
 
 #pragma mark - API
 

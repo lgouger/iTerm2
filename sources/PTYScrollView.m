@@ -108,6 +108,10 @@
     NSTimer *timer_;
 }
 
++ (BOOL)isCompatibleWithResponsiveScrolling {
+    return NO;
+}
+
 - (instancetype)initWithFrame:(NSRect)frame hasVerticalScroller:(BOOL)hasVerticalScroller {
     self = [super initWithFrame:frame];
     if (self) {
@@ -119,7 +123,7 @@
         aScroller = [[PTYScroller alloc] init];
         [self setVerticalScroller:aScroller];
         [aScroller release];
-
+        self.verticalScrollElasticity = NSScrollElasticityNone;
         creationDate_ = [[NSDate date] retain];
         [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(it_scrollViewDidScroll:) name:NSScrollViewDidLiveScrollNotification object:self];
     }
@@ -158,16 +162,37 @@
     }
 }
 
+// The scroll wheel handling code is like Mr. Burns: it has every possible
+// disease and they are in perfect balance.
+//
+// Overriding scrollWheel: is a horror show of undocumented crazytimes. This is
+// hinted at in various places in the documentation, release notes from a
+// decade ago, stack overflow, and my nightmares. But it must be done.
+//
+// If you turn on the "hide scrollbars" setting then PTYTextView's scrollWheel:
+// does not get momentum scrolling. The only way to get momentum scrolling in
+// that case is to do what is done in the else branch here.
+//
+// Note that -[PTYTextView scrollWheel:] can elect not to call [super
+// scrollWheel] when reporting mouse events, in which case this does not get
+// called.
+//
+// We HAVE to call super when the scroll bars are not hidden because otherwise
+// you get issue 6637.
 - (void)scrollWheel:(NSEvent *)theEvent {
-    NSRect scrollRect;
+    if (self.hasVerticalScroller) {
+        [super scrollWheel:theEvent];
+    } else {
+        NSRect scrollRect;
 
-    scrollRect = [self documentVisibleRect];
+        scrollRect = [self documentVisibleRect];
 
-    CGFloat amount = [self accumulateVerticalScrollFromEvent:theEvent];
-    scrollRect.origin.y -= amount * self.verticalLineScroll;
-    [[self documentView] scrollRectToVisible:scrollRect];
+        CGFloat amount = [self accumulateVerticalScrollFromEvent:theEvent];
+        scrollRect.origin.y -= amount * self.verticalLineScroll;
+        [[self documentView] scrollRectToVisible:scrollRect];
 
-    [self detectUserScroll];
+        [self detectUserScroll];
+    }
 }
 
 - (void)detectUserScroll {

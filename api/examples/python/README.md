@@ -1,39 +1,18 @@
 # iTerm2 API
 
-This is an example of how to use the iTerm2 API in Python. It sets up a
-websocket connection, sends an RPC to subscribe to notifications about changes
-to the current username, hostname, or working directory. It prints incoming
-notifications.
+This is an example of a command-line application using the iTerm2 API. It
+allows you to perform various actions such as creating windows or switching
+tabs.
 
 ## Installation
 
-First, install the dependencies.
+The easiest way to prepare an environment is to create a script in iTerm2.
+Select **Scripts > New Python Script**. Select the *basic* environment and
+*simple* script template. Name it `it2api`.
 
-### Using virtualenvwrapper
+iTerm2 will install the Python runtime if needed and will create a template app
+which it will open in your default Python editor.
 
-```
-mkvirtualenv iterm2api
-pip install websocket-client
-pip install protobuf
-```
+Paste the contents of it2api into it.
 
-### Using system python
-
-It is also possible to install the dependencies as system libraries.
-
-```
-sudo easy_install pip
-sudo /usr/bin/python -m pip install websocket-client
-sudo /usr/bin/python -m pip install --ignore-installed protobuf
-```
-
-Then `cd api/examples/python` and then `./iterm2.py` to run the program.
-
-Now you can run `iTerm2/api/examples/python`.
-
-## Writing your own app
-
-To write your own app, copy `api_pb2.py` from `iTerm2/api/examples/python` to
-your source directory and follow the model of the example.
-
-Documentation is in the proto file in `proto/api.proto`.
+You can then run `$HOME/Library/ApplicationSupport/iTerm2/Scripts/it2api`.

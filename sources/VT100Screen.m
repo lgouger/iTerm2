@@ -3470,14 +3470,26 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
     iTermImage *image;
     if (nativeImage) {
         image = [iTermImage imageWithNativeImage:nativeImage];
+        DLog(@"Image is native");
     } else {
         image = [iTermImage imageWithCompressedData:data];
     }
     const BOOL isBroken = !image;
     if (isBroken) {
+        DLog(@"Image is broken");
         image = [iTermImage imageWithNativeImage:[NSImage imageNamed:@"broken_image"]];
         assert(image);
     }
+
+    NSSize scaledSize = image.size;
+    CGFloat scale;
+    if ([iTermAdvancedSettingsModel retinaInlineImages]) {
+        scale = MAX(1, [delegate_ screenBackingScaleFactor]);
+    } else {
+        scale = 1;
+    }
+    scaledSize.width /= scale;
+    scaledSize.height /= scale;
 
     BOOL needsWidth = NO;
     NSSize cellSize = [delegate_ screenCellSize];
@@ -3495,7 +3507,7 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
 
         case kVT100TerminalUnitsAuto:
             if (heightUnits == kVT100TerminalUnitsAuto) {
-                width = ceil((double)image.size.width / cellSize.width);
+                width = ceil((double)scaledSize.width / cellSize.width);
             } else {
                 needsWidth = YES;
             }
@@ -3515,16 +3527,16 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
 
         case kVT100TerminalUnitsAuto:
             if (widthUnits == kVT100TerminalUnitsAuto) {
-                height = ceil((double)image.size.height / cellSize.height);
+                height = ceil((double)scaledSize.height / cellSize.height);
             } else {
-                double aspectRatio = image.size.width / image.size.height;
+                double aspectRatio = scaledSize.width / scaledSize.height;
                 height = ((double)(width * cellSize.width) / aspectRatio) / cellSize.height;
             }
             break;
     }
 
     if (needsWidth) {
-        double aspectRatio = image.size.width / image.size.height;
+        double aspectRatio = scaledSize.width / scaledSize.height;
         width = ((double)(height * cellSize.height) * aspectRatio) / cellSize.width;
     }
 
@@ -3565,12 +3577,14 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
                                            fractionalInset);
     iTermImageInfo *imageInfo = GetImageInfo(c.code);
     imageInfo.broken = isBroken;
+    DLog(@"Append %d rows of image characters with %d columns. The value of c.image is %@", height, width, @(c.image));
     for (int y = 0; y < height; y++) {
         if (y > 0) {
             [self linefeed];
         }
         for (int x = xOffset; x < xOffset + width && x < screenWidth; x++) {
             SetPositionInImageChar(&c, x - xOffset, y);
+            // DLog(@"Set character at %@,%@: %@", @(x), @(currentGrid_.cursorY), DebugStringForScreenChar(c));
             [currentGrid_ setCharsFrom:VT100GridCoordMake(x, currentGrid_.cursorY)
                                     to:VT100GridCoordMake(x, currentGrid_.cursorY)
                                 toChar:c];
@@ -3610,6 +3624,7 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
 
 - (void)terminalDidFinishReceivingFile {
     if (inlineFileInfo_) {
+        DLog(@"Inline file received");
         // TODO: Handle objects other than images.
         NSData *data = [NSData dataWithBase64EncodedString:inlineFileInfo_[kInlineFileBase64String]];
         [self appendImageAtCursorWithName:inlineFileInfo_[kInlineFileName]
@@ -3625,6 +3640,7 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
         inlineFileInfo_ = nil;
         [delegate_ screenDidFinishReceivingInlineFile];
     } else {
+        DLog(@"Download finished");
         [delegate_ screenDidFinishReceivingFile];
     }
 }
@@ -3848,6 +3864,9 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
     // FinalTerm uses this to define the start of a collapsable region. That would be a nightmare
     // to add to iTerm, and our answer to this is marks, which already existed anyway.
     [delegate_ screenPromptDidStartAtLine:[self numberOfScrollbackLines] + self.cursorY - 1];
+    if ([iTermAdvancedSettingsModel resetSGROnPrompt]) {
+        [terminal_ resetGraphicRendition];
+    }
 }
 
 - (void)terminalCommandDidStart {

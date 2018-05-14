@@ -97,6 +97,7 @@ NSString *const kCurrentSessionDidChange = @"kCurrentSessionDidChange";
 NSString *const kTerminalWindowControllerWasCreatedNotification = @"kTerminalWindowControllerWasCreatedNotification";
 NSString *const iTermDidDecodeWindowRestorableStateNotification = @"iTermDidDecodeWindowRestorableStateNotification";
 NSString *const iTermTabDidChangePositionInWindowNotification = @"iTermTabDidChangePositionInWindowNotification";
+NSString *const iTermSelectedTabDidChange = @"iTermSelectedTabDidChange";
 
 static NSString *const kWindowNameFormat = @"iTerm Window %d";
 
@@ -178,10 +179,10 @@ static NSRect iTermRectCenteredVerticallyWithinRect(NSRect frameToCenter, NSRect
     // A bookmark may have metasyntactic variables like $$FOO$$ in the command.
     // When opening such a bookmark, pop up a sheet and ask the user to fill in
     // the value. These fields belong to that sheet.
-    IBOutlet NSTextField *parameterName;
-    IBOutlet NSPanel *parameterPanel;
-    IBOutlet NSTextField *parameterValue;
-    IBOutlet NSTextField *parameterPrompt;
+    __weak IBOutlet NSTextField *parameterName;
+    __weak IBOutlet NSPanel *parameterPanel;
+    __weak IBOutlet NSTextField *parameterValue;
+    __weak IBOutlet NSTextField *parameterPrompt;
 
     ////////////////////////////////////////////////////////////////////////////
     // Instant Replay
@@ -285,10 +286,10 @@ static NSRect iTermRectCenteredVerticallyWithinRect(NSRect frameToCenter, NSRect
     // In 10.7 style full screen mode
     BOOL lionFullScreen_;
 
-    IBOutlet NSPanel *coprocesssPanel_;
-    IBOutlet NSButton *coprocessOkButton_;
-    IBOutlet NSComboBox *coprocessCommand_;
-    IBOutlet NSButton *coprocessIgnoreErrors_;
+    __weak IBOutlet NSPanel *coprocesssPanel_;
+    __weak IBOutlet NSButton *coprocessOkButton_;
+    __weak IBOutlet NSComboBox *coprocessCommand_;
+    __weak IBOutlet NSButton *coprocessIgnoreErrors_;
 
     NSDictionary *lastArrangement_;
 
@@ -2468,8 +2469,8 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 // NSWindow delegate methods
-- (void)windowDidDeminiaturize:(NSNotification *)aNotification
-{
+- (void)windowDidDeminiaturize:(NSNotification *)aNotification {
+    DLog(@"windowDidDeminiaturize: %@\n%@", self, [NSThread callStackSymbols]);
     [self.window.dockTile setBadgeLabel:@""];
     [self.window.dockTile setShowsApplicationBadge:NO];
     if ([[self currentTab] blur]) {
@@ -2675,8 +2676,8 @@ ITERM_WEAKLY_REFERENCEABLE
                                                       userInfo:nil];
 }
 
-- (void)windowWillMiniaturize:(NSNotification *)aNotification
-{
+- (void)windowWillMiniaturize:(NSNotification *)aNotification {
+    DLog(@"windowWillMiniaturize: %@\n%@", self, [NSThread callStackSymbols]);
     [self disableBlur];
     [[NSNotificationCenter defaultCenter] postNotificationName:@"iTermWindowWillMiniaturize"
                                                         object:self
@@ -2758,7 +2759,7 @@ ITERM_WEAKLY_REFERENCEABLE
         PtyLog(@"makeCurrentSessionFirstResponder. New first responder will be %@. The current first responder is %@",
                [[self currentSession] textview], [[self window] firstResponder]);
         [[self window] makeFirstResponder:[[self currentSession] textview]];
-        [[NSNotificationCenter defaultCenter] postNotificationName:@"iTermSessionBecameKey"
+        [[NSNotificationCenter defaultCenter] postNotificationName:iTermSessionBecameKey
                                                             object:[self currentSession]
                                                           userInfo:nil];
     } else {
@@ -4247,7 +4248,7 @@ ITERM_WEAKLY_REFERENCEABLE
 
     [_instantReplayWindowController updateInstantReplayView];
     // Post notifications
-    [[NSNotificationCenter defaultCenter] postNotificationName:@"iTermSessionBecameKey"
+    [[NSNotificationCenter defaultCenter] postNotificationName:iTermSessionBecameKey
                                                         object:[[tabViewItem identifier] activeSession]];
 
     PTYSession *activeSession = [self currentSession];
@@ -4283,6 +4284,7 @@ ITERM_WEAKLY_REFERENCEABLE
     }
     [self updateCurrentLocation];
     [self updateUseMetalInAllTabs];
+    [[NSNotificationCenter defaultCenter] postNotificationName:iTermSelectedTabDidChange object:tab];
 }
 
 - (void)updateUseMetalInAllTabs {
@@ -5288,13 +5290,13 @@ ITERM_WEAKLY_REFERENCEABLE
     [[self window] setFrameTopLeftPoint:point];
 }
 
-- (void)windowPerformMiniaturize:(id)sender
-{
+- (void)windowPerformMiniaturize:(id)sender {
+    DLog(@"windowPerformMiniaturize: %@\n%@", self, [NSThread callStackSymbols]);
     [[self window] performMiniaturize:sender];
 }
 
-- (void)windowDeminiaturize:(id)sender
-{
+- (void)windowDeminiaturize:(id)sender {
+    DLog(@"windowDeminiaturize: %@\n%@", self, [NSThread callStackSymbols]);
     [[self window] deminiaturize:sender];
 }
 
@@ -5308,9 +5310,10 @@ ITERM_WEAKLY_REFERENCEABLE
     [[self window] orderBack:sender];
 }
 
-- (BOOL)windowIsMiniaturized
-{
-    return [[self window] isMiniaturized];
+- (BOOL)windowIsMiniaturized {
+    const BOOL result = [[self window] isMiniaturized];
+    DLog(@"windowIsMiniaturized returning %@", @(result));
+    return result;
 }
 
 - (NSRect)windowFrame
@@ -5444,6 +5447,18 @@ ITERM_WEAKLY_REFERENCEABLE
     }
 }
 
+- (BOOL)wantsCommandHistoryUpdatesFromSession:(PTYSession *)session {
+    if ([session.guid isEqualToString:self.autoCommandHistorySessionGuid]) {
+        return YES;
+    }
+    if (_autocompleteCandidateListItem && session == self.currentSession) {
+        return YES;
+    }
+    return NO;
+}
+
+// NOTE: If you change the conditions under which action is taken here also
+// update wantsCommandHistoryUpdatesFromSession:
 - (void)updateAutoCommandHistoryForPrefix:(NSString *)prefix inSession:(PTYSession *)session popIfNeeded:(BOOL)popIfNeeded {
     if ([session.guid isEqualToString:self.autoCommandHistorySessionGuid]) {
         if (!commandHistoryPopup) {
@@ -5720,10 +5735,11 @@ ITERM_WEAKLY_REFERENCEABLE
         // Inherit from tab.
         tabColor = [[[_contentView.tabBarControl tabColorForTabViewItem:[[self currentTab] tabViewItem]] retain] autorelease];
     }
-    [[self currentTab] splitVertically:isVertical
-                            newSession:newSession
-                                before:before
-                         targetSession:targetSession];
+    PTYTab *tab = [self tabForSession:targetSession] ?: [self currentTab];
+    [tab splitVertically:isVertical
+              newSession:newSession
+                  before:before
+           targetSession:targetSession];
     SessionView *sessionView = newSession.view;
     scrollView = sessionView.scrollview;
     NSSize size = [sessionView frame].size;
@@ -6282,10 +6298,10 @@ ITERM_WEAKLY_REFERENCEABLE
         }
     }
     if (mode == BROADCAST_TO_ALL_PANES) {
-            [[self currentTab] setBroadcasting:YES];
-            mode = BROADCAST_OFF;
+        [[self currentTab] setBroadcasting:YES];
+        mode = BROADCAST_OFF;
     } else {
-            [[self currentTab] setBroadcasting:NO];
+        [[self currentTab] setBroadcasting:NO];
     }
     broadcastMode_ = mode;
     [self setDimmingForSessions];
@@ -7210,7 +7226,7 @@ ITERM_WEAKLY_REFERENCEABLE
         [[self currentSession] logStart];
     }
     // send a notification
-    [[NSNotificationCenter defaultCenter] postNotificationName:@"iTermSessionBecameKey"
+    [[NSNotificationCenter defaultCenter] postNotificationName:iTermSessionBecameKey
                                                         object:[self currentSession]];
 }
 
@@ -7220,7 +7236,7 @@ ITERM_WEAKLY_REFERENCEABLE
         [[self currentSession] logStop];
     }
     // send a notification
-    [[NSNotificationCenter defaultCenter] postNotificationName:@"iTermSessionBecameKey"
+    [[NSNotificationCenter defaultCenter] postNotificationName:iTermSessionBecameKey
                                                         object:[self currentSession]];
 }
 

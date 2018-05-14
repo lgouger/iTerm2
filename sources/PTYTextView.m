@@ -1091,15 +1091,21 @@ static const int kDragThreshold = 3;
     return _primaryFont.underlineOffset;
 }
 
-- (iTermTextDrawingHelper *)drawingHelper {
+- (void)performBlockWithFlickerFixerGrid:(void (NS_NOESCAPE ^)(void))block {
     // Try to use a saved grid if one is available. If it succeeds, that implies that the cursor was
     // recently hidden and what we're drawing is how the screen looked just before the cursor was
     // hidden. Therefore, we'll temporarily show the cursor, but we'll need to restore cursorVisible's
     // value when we're done.
+    BOOL savedCursorVisible = _drawingHelper.cursorVisible;
     if ([_dataSource setUseSavedGridIfAvailable:YES]) {
         _drawingHelper.cursorVisible = YES;
     }
+    block();
+    [_dataSource setUseSavedGridIfAvailable:NO];
+    _drawingHelper.cursorVisible = savedCursorVisible;
+}
 
+- (iTermTextDrawingHelper *)drawingHelper {
     _drawingHelper.showStripes = (_showStripesWhenBroadcastingInput &&
                                   [_delegate textViewSessionIsBroadcastingInput]);
     _drawingHelper.cursorBlinking = [self isCursorBlinking];
@@ -1173,41 +1179,38 @@ static const int kDragThreshold = 3;
         ITCriticalError(_dataSource.width < 0, @"Negative datasource width of %@", @(_dataSource.width));
         return;
     }
-    BOOL savedCursorVisible = _drawingHelper.cursorVisible;
-
     DLog(@"drawing document visible rect %@", NSStringFromRect(self.enclosingScrollView.documentVisibleRect));
 
     const NSRect *rectArray;
     NSInteger rectCount;
     [self getRectsBeingDrawn:&rectArray count:&rectCount];
 
-    // Initialize drawing helper
-    [self drawingHelper];
+    [self performBlockWithFlickerFixerGrid:^{
+        // Initialize drawing helper
+        [self drawingHelper];
 
-    if (_drawingHook) {
-        // This is used by tests to customize the draw helper.
-        _drawingHook(_drawingHelper);
-    }
+        if (_drawingHook) {
+            // This is used by tests to customize the draw helper.
+            _drawingHook(_drawingHelper);
+        }
 
-    [_drawingHelper drawTextViewContentInRect:rect rectsPtr:rectArray rectCount:rectCount];
+        [_drawingHelper drawTextViewContentInRect:rect rectsPtr:rectArray rectCount:rectCount];
 
-    [_indicatorsHelper drawInFrame:_drawingHelper.indicatorFrame];
-    [_drawingHelper drawTimestamps];
+        [_indicatorsHelper drawInFrame:_drawingHelper.indicatorFrame];
+        [_drawingHelper drawTimestamps];
 
-    // Not sure why this is needed, but for some reason this view draws over its subviews.
-    for (NSView *subview in [self subviews]) {
-        [subview setNeedsDisplay:YES];
-    }
+        // Not sure why this is needed, but for some reason this view draws over its subviews.
+        for (NSView *subview in [self subviews]) {
+            [subview setNeedsDisplay:YES];
+        }
 
-    if (_drawingHelper.blinkingFound) {
-        // The user might have used the scroll wheel to cause blinking text to become
-        // visible. Make sure the timer is running if anything onscreen is
-        // blinking.
-        [self.delegate textViewWillNeedUpdateForBlink];
-    }
-
-    [_dataSource setUseSavedGridIfAvailable:NO];
-    _drawingHelper.cursorVisible = savedCursorVisible;
+        if (_drawingHelper.blinkingFound) {
+            // The user might have used the scroll wheel to cause blinking text to become
+            // visible. Make sure the timer is running if anything onscreen is
+            // blinking.
+            [self.delegate textViewWillNeedUpdateForBlink];
+        }
+    }];
 }
 
 - (BOOL)getAndResetDrawingAnimatedImageFlag {
@@ -1396,7 +1399,6 @@ static const int kDragThreshold = 3;
 // * "special" keys, like Enter which go through doCommandBySelector
 // * Repeated special keys
 - (void)keyDown:(NSEvent *)event {
-    event = [event eventByChangingYenToBackslash];
     [_altScreenMouseScrollInferer keyDown:event];
     if (![_delegate textViewShouldAcceptKeyDownEvent:event]) {
         return;
@@ -5234,6 +5236,10 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
         [gCurrentKeyEventTextView insertText:aString];
         return;
     }
+
+    // See issue 6699
+    aString = [aString stringByReplacingOccurrencesOfString:@"¥" withString:@"\\"];
+
     DLog(@"PTYTextView insertText:%@", aString);
     if ([self hasMarkedText]) {
         DLog(@"insertText: clear marked text");
@@ -7174,53 +7180,92 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
 
 #pragma mark - Accessibility
 
-- (BOOL)accessibilityIsIgnored {
-    return NO;
+- (BOOL)isAccessibilityElement {
+    return YES;
 }
 
-- (NSArray *)accessibilityAttributeNames {
-    return [_accessibilityHelper accessibilityAttributeNames];
+- (NSInteger)accessibilityLineForIndex:(NSInteger)index {
+    return [_accessibilityHelper lineForIndex:index];
 }
 
-- (NSArray *)accessibilityParameterizedAttributeNames {
-    return [_accessibilityHelper accessibilityParameterizedAttributeNames];
+- (NSRange)accessibilityRangeForLine:(NSInteger)line {
+    return [_accessibilityHelper rangeForLine:line];
 }
 
-- (id)accessibilityAttributeValue:(NSString *)attribute forParameter:(id)parameter {
-    BOOL handled;
-    id result = [_accessibilityHelper accessibilityAttributeValue:attribute
-                                                     forParameter:parameter
-                                                          handled:&handled];
-    if (!handled) {
-        result = [super accessibilityAttributeValue:attribute forParameter:parameter];
-    }
-    return result;
+- (NSString *)accessibilityStringForRange:(NSRange)range {
+    return [_accessibilityHelper stringForRange:range];
 }
 
-- (BOOL)accessibilityIsAttributeSettable:(NSString *)attribute {
-    BOOL handled;
-    BOOL result = [_accessibilityHelper accessibilityIsAttributeSettable:attribute handled:&handled];
-    if (!handled) {
-        result = [super accessibilityIsAttributeSettable:attribute];
-    }
-    return result;
+- (NSRange)accessibilityRangeForPosition:(NSPoint)point {
+    return [_accessibilityHelper rangeForPosition:point];
 }
 
-- (void)accessibilitySetValue:(id)value forAttribute:(NSString *)attribute {
-    BOOL handled;
-    [_accessibilityHelper accessibilitySetValue:value forAttribute:attribute handled:&handled];
-    if (!handled) {
-        [super accessibilitySetValue:value forAttribute:attribute];
-    }
+- (NSRange)accessibilityRangeForIndex:(NSInteger)index {
+    return [_accessibilityHelper rangeOfIndex:index];
 }
 
-- (id)accessibilityAttributeValue:(NSString *)attribute {
-    BOOL handled;
-    id result = [_accessibilityHelper accessibilityAttributeValue:attribute handled:&handled];
-    if (!handled) {
-        result = [super accessibilityAttributeValue:attribute];
-    }
-    return result;
+- (NSRect)accessibilityFrameForRange:(NSRange)range {
+    return [_accessibilityHelper boundsForRange:range];
+}
+
+- (NSAttributedString *)accessibilityAttributedStringForRange:(NSRange)range {
+    return [_accessibilityHelper attributedStringForRange:range];
+}
+
+- (NSAccessibilityRole)accessibilityRole {
+    return [_accessibilityHelper role];
+}
+
+- (NSString *)accessibilityRoleDescription {
+    return [_accessibilityHelper roleDescription];
+}
+
+- (NSString *)accessibilityHelp {
+    return [_accessibilityHelper help];
+}
+
+- (BOOL)isAccessibilityFocused {
+    return [_accessibilityHelper focused];
+}
+
+- (NSString *)accessibilityLabel {
+    return [_accessibilityHelper label];
+}
+
+- (id)accessibilityValue {
+    return [_accessibilityHelper allText];
+}
+
+- (NSInteger)accessibilityNumberOfCharacters {
+    return [_accessibilityHelper numberOfCharacters];
+}
+
+- (NSString *)accessibilitySelectedText {
+    return [_accessibilityHelper selectedText];
+}
+
+- (NSRange)accessibilitySelectedTextRange {
+    return [_accessibilityHelper selectedTextRange];
+}
+
+- (NSArray<NSValue *> *)accessibilitySelectedTextRanges {
+    return [_accessibilityHelper selectedTextRanges];
+}
+
+- (NSInteger)accessibilityInsertionPointLineNumber {
+    return [_accessibilityHelper insertionPointLineNumber];
+}
+
+- (NSRange)accessibilityVisibleCharacterRange {
+    return [_accessibilityHelper visibleCharacterRange];
+}
+
+- (NSString *)accessibilityDocument {
+    return [[_accessibilityHelper currentDocumentURL] absoluteString];
+}
+
+- (void)setAccessibilitySelectedTextRange:(NSRange)accessibilitySelectedTextRange {
+    [_accessibilityHelper setSelectedTextRange:accessibilitySelectedTextRange];
 }
 
 #pragma mark - Accessibility Helper Delegate

@@ -192,17 +192,22 @@ DEFINE_BOOL(statusBarIcon, YES, @"General: Add status bar icon when excluded fro
 DEFINE_BOOL(wrapFocus, YES, @"General: Should the directional focus hotkeys wrap");
 DEFINE_BOOL(disableGrowl, YES_IF_BETA_ELSE_NO, @"General: Disable Growl notifications.\nSend notifications directly to Notification Center instead of relying on Growl to deliver them. Enables sound alerts on notifications.");
 DEFINE_BOOL(openUntitledFile, YES, @"General: Open a new window when you click the dock icon and no windows are already open?");
+DEFINE_BOOL(openNewWindowAtStartup, YES, @"General: Open a window at startup?\nThis is useful if you wish to use the system window restoration settings but not create a new window if none would be restored.");
 
 #pragma mark - Drawing
 DEFINE_BOOL(zippyTextDrawing, YES, @"Drawing: Use zippy text drawing algorithm?\nThis draws non-ASCII text more quickly but with lower fidelity. This setting is ignored if ligatures are enabled in Prefs > Profiles > Text.");
 DEFINE_BOOL(lowFiCombiningMarks, NO, @"Drawing: Prefer speed to accuracy for characters with combining marks?");
 DEFINE_BOOL(useAdaptiveFrameRate, YES, @"Drawing: Use adaptive framerate.\nWhen throughput is low, the screen will update at 60 frames per second. When throughput is higher, it will drop to a configurable rate (15 fps by default). Does not apply to Metal renderer.");
 DEFINE_FLOAT(slowFrameRate, 15.0, @"Drawing: When adaptive framerate is enabled, refresh at this rate during high throughput conditions (FPS).");
+DEFINE_FLOAT(activeUpdateCadence, 60.0, @"Drawing: Maximum frame rate (FPS) when adaptive framerate is disabled or GPU renderer is enabled.\nModifications to this setting will not affect existing sessions.");
 DEFINE_INT(adaptiveFrameRateThroughputThreshold, 10000, @"Drawing: Throughput threshold for adaptive frame rate.\nIf more than this many bytes per second are received, use the lower frame rate of 30 fps.");
 DEFINE_BOOL(dwcLineCache, YES, @"Drawing: Enable cache of double-width character locations?\nThis should improve performance. It is always on in nightly builds. You must restart iTerm2 for this setting to take effect.");
 DEFINE_BOOL(useGCDUpdateTimer, YES, @"Drawing: Use GCD-based update timer instead of NSTimer.\nThis should cause more regular screen updates. Restart iTerm2 after changing this setting.");
 DEFINE_BOOL(drawOutlineAroundCursor, NO, @"Drawing: Draw outline around underline and vertical bar cursors using background color.");
 DEFINE_BOOL(disableCustomBoxDrawing, NO, @"Drawing: Use your typeface’s box-drawing characters instead of iTerm2’s custom drawing code.\nYou must restart iTerm2 after changing this setting.");
+
+#warning Bring this back
+//DEFINE_BOOL(useLowPowerGPUWhenUnplugged, NO, @"Drawing: Metal renderer uses integrated GPU when not connected to power?\nFor this to be effective you must disable “Disable Metal renderer when not connected to power”.");
 
 #pragma mark - Semantic History
 DEFINE_BOOL(ignoreHardNewlinesInURLs, NO, @"Semantic History: Ignore hard newlines for the purposes of locating URLs and file names for Semantic History.\nIf a hard newline occurs at the end of a line then ⌘-click will not see it all unless this setting is turned on. This is useful for some interactive applications. Turning this on will remove newlines from the \\3 and \\4 substitutions.");
@@ -320,9 +325,11 @@ DEFINE_BOOL(disableMetalWhenUnplugged, YES, @"Experimental Features: Disable Met
 
 // TODO: Turn this back on by default in a few days. Let's see if it is responsible for the spike in nightly build crasehs starting with the 3-12-2018 build.
 // The number of crashes fell off a cliff starting with the 3/18 build (usually 0, never more than 2/day, while it had been at 47 on the 3/15 build). I'm switching the default back to YES for the 4/18 build to see if the number climbs.
-DEFINE_BOOL(disableMetalWhenIdle, YES, @"Experimental Features: Disable metal renderer when idle to save CPU utilization?\nRequires Metal renderer");
+DEFINE_BOOL(disableMetalWhenIdle, NO, @"Experimental Features: Disable metal renderer when idle to save CPU utilization?\nRequires Metal renderer");
 
 DEFINE_BOOL(proportionalScrollWheelReporting, YES_IF_BETA_ELSE_NO, @"Experimental Features: Report multiple mouse scroll events when scrolling quickly?");
 DEFINE_BOOL(useModernScrollWheelAccumulator, NO, @"Experimental Features: Use modern scroll wheel accumulator.\nThis should support wheel mice better and feel more natural.");
+DEFINE_BOOL(resetSGROnPrompt, YES_IF_BETA_ELSE_NO, @"Experimental Features: Reset colors at shell prompt?\nUses shell integration to detect a shell prompt and, if enabled, resets colors to their defaults.");
+DEFINE_BOOL(retinaInlineImages, YES_IF_BETA_ELSE_NO, @"Experimental Features: Show inline images at Retina resolution.");
 
 @end

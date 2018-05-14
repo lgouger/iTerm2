@@ -1141,6 +1141,7 @@ typedef struct iTermTextColorContext {
             offsetPoint.y -= round((_cellSize.height - _cellSizeWithoutSpacing.height) / 2.0);
             numCellsDrawn = [self drawFastPathString:(iTermCheapAttributedString *)singlePartAttributedString
                                              atPoint:offsetPoint
+                                              origin:origin
                                            positions:subpositions
                                            inContext:ctx
                                      backgroundColor:backgroundColor];
@@ -1195,12 +1196,27 @@ typedef struct iTermTextColorContext {
 // CGContextShowGlyphsAtPositions instead of CTFontDrawGlyphs.
 - (int)drawFastPathString:(iTermCheapAttributedString *)cheapString
                   atPoint:(NSPoint)point
+                   origin:(VT100GridCoord)origin
                 positions:(CGFloat *)positions
                 inContext:(CGContextRef)ctx
           backgroundColor:(NSColor *)backgroundColor {
     if (cheapString.length == 0) {
         return 0;
     }
+    NSDictionary *attributes = cheapString.attributes;
+    if (attributes[iTermImageCodeAttribute]) {
+        // Handle cells that are part of an image.
+        VT100GridCoord originInImage = VT100GridCoordMake([attributes[iTermImageColumnAttribute] intValue],
+                                                          [attributes[iTermImageLineAttribute] intValue]);
+        int displayColumn = [attributes[iTermImageDisplayColumnAttribute] intValue];
+        [self drawImageWithCode:[attributes[iTermImageCodeAttribute] shortValue]
+                         origin:VT100GridCoordMake(displayColumn, origin.y)
+                         length:cheapString.length
+                        atPoint:NSMakePoint(positions[0] + point.x, point.y)
+                  originInImage:originInImage];
+        return cheapString.length;
+    }
+
     CGGlyph glyphs[cheapString.length];
     NSFont *const font = cheapString.attributes[NSFontAttributeName];
     BOOL ok = CTFontGetGlyphsForCharacters((CTFontRef)font,
@@ -2095,7 +2111,8 @@ static BOOL iTermTextDrawingHelperShouldAntiAlias(screen_char_t *c,
     return [backgroundColor brightnessComponent] < PerceivedBrightness(components[0], components[1], components[2]);
 }
 
-- (CGFloat)yOriginForUnderlineGivenFontXHeight:(CGFloat)xHeight yOffset:(CGFloat)yOffset {
+- (CGFloat)yOriginForUnderlineForFont:(NSFont *)font yOffset:(CGFloat)yOffset cellHeight:(CGFloat)cellHeight {
+    const CGFloat xHeight = font.xHeight;
     // Keep the underline a reasonable distance from the baseline.
     CGFloat underlineOffset = _underlineOffset;
     CGFloat distanceFromBaseline = underlineOffset - _baselineOffset;
@@ -2106,7 +2123,10 @@ static BOOL iTermTextDrawingHelperShouldAntiAlias(screen_char_t *c,
         underlineOffset = _baselineOffset + xHeight / 2;
     }
     CGFloat scaleFactor = self.isRetina ? 2.0 : 1.0;
-    return [self retinaRound:yOffset + _cellSize.height + underlineOffset] - 1.0 / (2 * scaleFactor);
+    CGFloat preferredOffset = [self retinaRound:yOffset + _cellSize.height + underlineOffset] - 1.0 / (2 * scaleFactor);
+
+    const CGFloat thickness = [self underlineThicknessForFont:font];
+    return MIN(preferredOffset, yOffset + cellHeight - thickness);
 }
 
 - (CGFloat)underlineThicknessForFont:(NSFont *)font {
@@ -2122,7 +2142,9 @@ static BOOL iTermTextDrawingHelperShouldAntiAlias(screen_char_t *c,
     NSBezierPath *path = [NSBezierPath bezierPath];
 
     NSPoint origin = NSMakePoint(startPoint.x,
-                                 [self yOriginForUnderlineGivenFontXHeight:font.xHeight yOffset:startPoint.y]);
+                                 [self yOriginForUnderlineForFont:font
+                                                          yOffset:startPoint.y
+                                                       cellHeight:_cellSize.height]);
     CGFloat dashPattern[] = { 4, 3 };
     CGFloat phase = fmod(startPoint.x, dashPattern[0] + dashPattern[1]);
 
@@ -2180,12 +2202,15 @@ static BOOL iTermTextDrawingHelperShouldAntiAlias(screen_char_t *c,
                    length:(NSInteger)length
                   atPoint:(NSPoint)point
             originInImage:(VT100GridCoord)originInImage {
+    //DLog(@"Drawing image at %@ with code %@", VT100GridCoordDescription(origin), @(code));
     iTermImageInfo *imageInfo = GetImageInfo(code);
     NSImage *image = [imageInfo imageWithCellSize:_cellSize];
     if (!image) {
         if (!imageInfo) {
+            DLog(@"Image is missing (brown)");
             [[NSColor brownColor] set];
         } else {
+            DLog(@"Image isn't loaded yet (gray)");
             [_missingImages addObject:imageInfo.uniqueIdentifier];
 
             [[NSColor grayColor] set];

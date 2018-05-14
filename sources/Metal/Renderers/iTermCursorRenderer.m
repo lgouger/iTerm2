@@ -21,6 +21,10 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic) NSColor *cachedColor;
 @end
 
+@interface iTermCursorRendererTransientState()
+@property (nonatomic, readonly) CGFloat cursorHeight;
+@end
+
 @implementation iTermCursorRendererTransientState
 
 - (void)writeDebugInfoToFolder:(NSURL *)folder {
@@ -34,6 +38,14 @@ NS_ASSUME_NONNULL_BEGIN
        atomically:NO
          encoding:NSUTF8StringEncoding
             error:NULL];
+}
+
+- (CGFloat)cursorHeight {
+    if ([iTermAdvancedSettingsModel fullHeightCursor]) {
+        return MAX(self.cellConfiguration.cellSize.height, self.cellConfiguration.cellSizeWithoutSpacing.height);
+    } else {
+        return MIN(self.cellConfiguration.cellSize.height, self.cellConfiguration.cellSizeWithoutSpacing.height);
+    }
 }
 
 @end
@@ -258,10 +270,19 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)drawWithFrameData:(iTermMetalFrameData *)frameData
            transientState:(nonnull __kindof iTermMetalRendererTransientState *)transientState {
     iTermCursorRendererTransientState *tState = transientState;
+
+    const CGFloat rowNumber = (tState.cellConfiguration.gridSize.height - tState.coord.y - 1);
+    const CGSize cellSize = tState.cellConfiguration.cellSize;
+    const CGSize cellSizeWithoutSpacing = tState.cellConfiguration.cellSizeWithoutSpacing;
+    CGFloat y = rowNumber * cellSize.height;
+    if (![iTermAdvancedSettingsModel fullHeightCursor]) {
+        const CGFloat scale = tState.configuration.scale;
+        y += cellSize.height - MAX(0, round(((cellSize.height - cellSizeWithoutSpacing.height) / 2) / scale) * scale) - tState.cursorHeight;
+    }
     iTermCursorDescription description = {
         .origin = {
             tState.cellConfiguration.cellSize.width * tState.coord.x,
-            tState.cellConfiguration.cellSize.height * (tState.cellConfiguration.gridSize.height - tState.coord.y - 1),
+            y
         },
         .color = {
             tState.color.redComponent,
@@ -290,9 +311,15 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (void)initializeTransientState:(iTermCursorRendererTransientState *)tState {
     [super initializeTransientState:tState];
-    tState.vertexBuffer = [_cellRenderer newQuadOfSize:CGSizeMake(tState.cellConfiguration.cellSize.width,
+}
+
+- (void)drawWithFrameData:(iTermMetalFrameData *)frameData transientState:(__kindof iTermMetalCellRendererTransientState *)transientState {
+    iTermCursorRendererTransientState *tState = transientState;
+    int d = tState.doubleWidth ? 2 : 1;
+    tState.vertexBuffer = [_cellRenderer newQuadOfSize:CGSizeMake(tState.cellConfiguration.cellSize.width * d,
                                                                   tState.configuration.scale * tState.cellConfiguration.scale)
                                            poolContext:tState.poolContext];
+    [super drawWithFrameData:frameData transientState:transientState];
 }
 
 @end
@@ -317,9 +344,20 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (void)initializeTransientState:(iTermCursorRendererTransientState *)tState {
     [super initializeTransientState:tState];
-    tState.vertexBuffer = [_cellRenderer newQuadOfSize:CGSizeMake(tState.cellConfiguration.cellSize.width,
-                                                                  tState.cellConfiguration.cellSize.height)
-                                           poolContext:tState.poolContext];
+}
+
+- (void)drawWithFrameData:(iTermMetalFrameData *)frameData transientState:(__kindof iTermMetalCellRendererTransientState *)transientState {
+    iTermCursorRendererTransientState *tState = transientState;
+    int d = tState.doubleWidth ? 2 : 1;
+    const CGFloat width = MIN(tState.cellConfiguration.cellSize.width,
+                              tState.cellConfiguration.cellSizeWithoutSpacing.width);
+    tState.vertexBuffer = [_cellRenderer newQuadWithFrame:CGRectMake(0,
+                                                                     0,
+                                                                     width * d,
+                                                                     tState.cursorHeight)
+                                             textureFrame:CGRectMake(0, 0, 1, 1)
+                                              poolContext:tState.poolContext];
+    [super drawWithFrameData:frameData transientState:transientState];
 }
 
 @end
@@ -336,14 +374,20 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)initializeTransientState:(iTermFrameCursorRendererTransientState *)tState {
     [super initializeTransientState:tState];
     tState.renderer = self;
-    tState.vertexBuffer = [_cellRenderer newQuadOfSize:CGSizeMake(tState.cellConfiguration.cellSize.width,
-                                                                  tState.cellConfiguration.cellSize.height)
-                                           poolContext:tState.poolContext];
 }
 
 - (void)drawWithFrameData:(iTermMetalFrameData *)frameData
            transientState:(__kindof iTermMetalCellRendererTransientState *)transientState {
     iTermFrameCursorRendererTransientState *tState = transientState;
+    int d = tState.doubleWidth ? 2 : 1;
+    const CGFloat width = MIN(tState.cellConfiguration.cellSize.width,
+                              tState.cellConfiguration.cellSizeWithoutSpacing.width);
+    tState.vertexBuffer = [_cellRenderer newQuadWithFrame:CGRectMake(0,
+                                                                     0,
+                                                                     width * d,
+                                                                     tState.cursorHeight)
+                                             textureFrame:CGRectMake(0, 0, 1, 1)
+                                              poolContext:tState.poolContext];
     iTermCursorDescription description = {
         .origin = {
             tState.cellConfiguration.cellSize.width * tState.coord.x,

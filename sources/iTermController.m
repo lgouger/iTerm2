@@ -34,6 +34,7 @@
 #import "iTermApplication.h"
 #import "iTermBuriedSessions.h"
 #import "iTermHotKeyController.h"
+#import "iTermWebSocketCookieJar.h"
 #import "NSArray+iTerm.h"
 #import "NSFileManager+iTerm.h"
 #import "NSStringITerm.h"
@@ -119,8 +120,8 @@ static iTermController *gSharedInstance;
     if (self) {
         UKCrashReporterCheckForCrash();
 
-        // create the "~/Library/Application Support/iTerm" directory if it does not exist
-        [[NSFileManager defaultManager] legacyApplicationSupportDirectory];
+        // create the "~/Library/Application Support/iTerm2" directory if it does not exist
+        [[NSFileManager defaultManager] applicationSupportDirectory];
 
         _terminalWindows = [[NSMutableArray alloc] init];
         _restorableSessions = [[NSMutableArray alloc] init];
@@ -139,6 +140,59 @@ static iTermController *gSharedInstance;
     }
 
     return (self);
+}
+
+- (void)migrateApplicationSupportDirectoryIfNeeded {
+    NSFileManager *fileManager = [NSFileManager defaultManager];
+    NSString *modern = [fileManager applicationSupportDirectory];
+    NSString *legacy = [fileManager legacyApplicationSupportDirectory];
+
+    if ([fileManager itemIsSymlink:legacy]) {
+        // Looks migrated, or crazy and impossible to reason about.
+        return;
+    }
+
+    if ([fileManager itemIsDirectory:modern] && [fileManager itemIsDirectory:legacy]) {
+        // This is the normal code path for migrating users.
+        const BOOL legacyEmpty = [fileManager directoryEmpty:legacy];
+
+        if (legacyEmpty) {
+            [fileManager removeItemAtPath:legacy error:nil];
+            [fileManager createSymbolicLinkAtPath:legacy withDestinationPath:modern error:nil];
+            return;
+        }
+
+        const BOOL modernEmpty = [fileManager directoryEmpty:modern];
+        if (modernEmpty) {
+            [fileManager removeItemAtPath:modern error:nil];
+            [fileManager moveItemAtPath:legacy toPath:modern error:nil];
+            [fileManager createSymbolicLinkAtPath:legacy withDestinationPath:modern error:nil];
+            return;
+        }
+
+        NSAlert *alert = [[NSAlert alloc] init];
+        alert.messageText = @"Manual Update Needed";
+        alert.informativeText = @"iTerm2's Application Support directory has changed.\n\n"
+            @"Previously, both ~/Library/Application Support/iTerm and ~/Library/Application Support/iTerm2 were supported.\n\n"
+            @"Now, only the iTerm2 version is supported. But you have files in both so please move everything from iTerm to iTerm2.";
+        [alert addButtonWithTitle:@"Open in Finder"];
+        [alert addButtonWithTitle:@"I Fixed It"];
+        [alert addButtonWithTitle:@"Not Now"];
+        switch ([alert runModal]) {
+            case NSAlertFirstButtonReturn:
+                [[NSWorkspace sharedWorkspace] activateFileViewerSelectingURLs:@[ [NSURL fileURLWithPath:legacy],
+                                                                              [NSURL fileURLWithPath:modern] ]];
+                [self migrateApplicationSupportDirectoryIfNeeded];
+                break;
+
+            case NSAlertThirdButtonReturn:
+                return;
+
+            default:
+                [self migrateApplicationSupportDirectoryIfNeeded];
+                break;
+        }
+    }
 }
 
 - (BOOL)willRestoreWindowsAtNextLaunch {
@@ -366,23 +420,35 @@ static iTermController *gSharedInstance;
     if (!name) {
         return;
     }
-    NSMutableArray *terminalArrangements = [NSMutableArray arrayWithCapacity:[_terminalWindows count]];
+    [self saveWindowArrangmentForAllWindows:allWindows name:name];
+}
+
+- (void)saveWindowArrangmentForAllWindows:(BOOL)allWindows name:(NSString *)name {
     if (allWindows) {
+        NSMutableArray *terminalArrangements = [NSMutableArray arrayWithCapacity:[_terminalWindows count]];
         for (PseudoTerminal *terminal in _terminalWindows) {
             NSDictionary *arrangement = [terminal arrangement];
             if (arrangement) {
                 [terminalArrangements addObject:arrangement];
             }
         }
+        if (terminalArrangements.count) {
+            [WindowArrangements setArrangement:terminalArrangements withName:name];
+        }
     } else {
         PseudoTerminal *currentTerminal = [self currentTerminal];
         if (!currentTerminal) {
             return;
         }
-        NSDictionary *arrangement = [currentTerminal arrangement];
-        if (arrangement) {
-            [terminalArrangements addObject:arrangement];
-        }
+        [self saveWindowArrangementForWindow:currentTerminal name:name];
+    }
+}
+
+- (void)saveWindowArrangementForWindow:(PseudoTerminal *)currentTerminal name:(NSString *)name {
+    NSMutableArray *terminalArrangements = [NSMutableArray arrayWithCapacity:[_terminalWindows count]];
+    NSDictionary *arrangement = [currentTerminal arrangement];
+    if (arrangement) {
+        [terminalArrangements addObject:arrangement];
     }
     if (terminalArrangements.count) {
         [WindowArrangements setArrangement:terminalArrangements withName:name];
@@ -390,16 +456,13 @@ static iTermController *gSharedInstance;
 }
 
 - (void)tryOpenArrangement:(NSDictionary *)terminalArrangement {
-    [self tryOpenArrangement:terminalArrangement asTabs:NO];
+    [self tryOpenArrangement:terminalArrangement asTabsInWindow:nil];
 }
 
-- (void)tryOpenArrangement:(NSDictionary *)terminalArrangement asTabs:(BOOL)asTabs {
-    if (asTabs) {
-        PseudoTerminal *term = [self currentTerminal];
-        if (term) {
-            [term restoreTabsFromArrangement:terminalArrangement sessions:nil];
-            return;
-        }
+- (void)tryOpenArrangement:(NSDictionary *)terminalArrangement asTabsInWindow:(PseudoTerminal *)term {
+    if (term) {
+        [term restoreTabsFromArrangement:terminalArrangement sessions:nil];
+        return;
     }
     BOOL shouldDelay = NO;
     DLog(@"Try to open arrangement %p...", terminalArrangement);
@@ -426,19 +489,22 @@ static iTermController *gSharedInstance;
     }
 }
 
-- (void)loadWindowArrangementWithName:(NSString *)theName asTabs:(BOOL)asTabs {
+- (BOOL)loadWindowArrangementWithName:(NSString *)theName asTabsInTerminal:(PseudoTerminal *)term {
+    BOOL ok = NO;
     _savedArrangementNameBeingRestored = [[theName retain] autorelease];
     NSArray *terminalArrangements = [WindowArrangements arrangementWithName:theName];
     if (terminalArrangements) {
         for (NSDictionary *terminalArrangement in terminalArrangements) {
-            [self tryOpenArrangement:terminalArrangement asTabs:asTabs];
+            [self tryOpenArrangement:terminalArrangement asTabsInWindow:term];
+            ok = YES;
         }
     }
     _savedArrangementNameBeingRestored = nil;
+    return ok;
 }
 
 - (void)loadWindowArrangementWithName:(NSString *)theName {
-    [self loadWindowArrangementWithName:theName asTabs:NO];
+    [self loadWindowArrangementWithName:theName asTabsInTerminal:nil];
 }
 
 // Return all the terminals in the given screen.
@@ -1008,7 +1074,7 @@ static iTermController *gSharedInstance;
             NSString *username = [urlRep user];
             if (username) {
                 NSMutableCharacterSet *legalCharacters = [NSMutableCharacterSet alphanumericCharacterSet];
-                [legalCharacters addCharactersInString:@"_-+"];
+                [legalCharacters addCharactersInString:@"_-+."];
                 NSCharacterSet *illegalCharacters = [legalCharacters invertedSet];
                 NSRange range = [username rangeOfCharacterFromSet:illegalCharacters];
                 if (range.location != NSNotFound) {
@@ -1187,47 +1253,6 @@ static iTermController *gSharedInstance;
     }
 
     return session;
-}
-
-- (void)launchScript:(id)sender {
-    NSString *fullPath = [[[NSFileManager defaultManager] scriptsPath] stringByAppendingPathComponent:[sender title]];
-
-    if ([[[sender title] pathExtension] isEqualToString:@"scpt"]) {
-        NSAppleScript *script;
-        NSDictionary *errorInfo = nil;
-        NSURL *aURL = [NSURL fileURLWithPath:fullPath];
-
-        // Make sure our script suite registry is loaded
-        [NSScriptSuiteRegistry sharedScriptSuiteRegistry];
-
-        script = [[NSAppleScript alloc] initWithContentsOfURL:aURL error:&errorInfo];
-        if (script) {
-            [script executeAndReturnError:&errorInfo];
-            if (errorInfo) {
-                [self showAlertForScript:fullPath error:errorInfo];
-            }
-            [script release];
-        } else {
-            [self showAlertForScript:fullPath error:errorInfo];
-        }
-    } else {
-        [[NSWorkspace sharedWorkspace] launchApplication:fullPath];
-    }
-
-}
-
-- (void)showAlertForScript:(NSString *)fullPath error:(NSDictionary *)errorInfo {
-    NSValue *range = errorInfo[NSAppleScriptErrorRange];
-    NSString *location = @"Location of error not known.";
-    if (range) {
-        location = [NSString stringWithFormat:@"The error starts at byte %d of the script.",
-                    (int)[range rangeValue].location];
-    }
-    NSAlert *alert = [[[NSAlert alloc] init] autorelease];
-    alert.messageText = @"Error running script";
-    alert.informativeText = [NSString stringWithFormat:@"Script at \"%@\" failed.\n\nThe error was: \"%@\"\n\n%@",
-                             fullPath, errorInfo[NSAppleScriptErrorMessage], location];
-    [alert runModal];
 }
 
 - (PTYTextView *)frontTextView {
@@ -1474,6 +1499,10 @@ static iTermController *gSharedInstance;
 }
 
 - (void)openSingleUseWindowWithCommand:(NSString *)command {
+    [self openSingleUseWindowWithCommand:command inject:nil];
+}
+
+- (void)openSingleUseWindowWithCommand:(NSString *)command inject:(NSData *)injection {
     if ([command hasSuffix:@"&"] && command.length > 1) {
         command = [command substringToIndex:command.length - 1];
         system(command.UTF8String);
@@ -1486,6 +1515,7 @@ static iTermController *gSharedInstance;
         [windowProfile[KEY_WINDOW_TYPE] integerValue] == WINDOW_TYPE_LION_FULL_SCREEN) {
         windowProfile = [windowProfile dictionaryBySettingObject:@(WINDOW_TYPE_NORMAL) forKey:KEY_WINDOW_TYPE];
     }
+
     [self launchBookmark:windowProfile
               inTerminal:nil
                  withURL:nil
@@ -1495,10 +1525,13 @@ static iTermController *gSharedInstance;
                  command:command
                    block:^PTYSession *(Profile *profile, PseudoTerminal *term) {
                        profile = [profile dictionaryBySettingObject:@"" forKey:KEY_INITIAL_TEXT];
-                       profile = [profile dictionaryBySettingObject:@YES forKey:KEY_CLOSE_SESSIONS_ON_END];
+                       profile = [profile dictionaryBySettingObject:@NO forKey:KEY_CLOSE_SESSIONS_ON_END];
                        term.window.collectionBehavior = NSWindowCollectionBehaviorFullScreenNone;
                        PTYSession *session = [term createTabWithProfile:profile withCommand:command];
                        session.isSingleUseSession = YES;
+                       if (injection) {
+                           [session injectData:injection];
+                       }
                        return session;
                    }];
 }

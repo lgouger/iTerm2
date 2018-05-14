@@ -9,16 +9,21 @@
 #import <Foundation/Foundation.h>
 #import "Api.pbobjc.h"
 
-extern NSString *const iTermWebSocketConnectionPeerIdentityBundleIdentifier;
+extern NSString *const iTermAPIServerAuthorizationKey;
+extern NSString *const iTermAPIServerDidReceiveMessage;
+extern NSString *const iTermAPIServerWillSendMessage;
+extern NSString *const iTermAPIServerConnectionRejected;
+extern NSString *const iTermAPIServerConnectionAccepted;
+extern NSString *const iTermAPIServerConnectionClosed;
 
 @protocol iTermAPIServerDelegate<NSObject>
-- (NSDictionary *)apiServerAuthorizeProcess:(pid_t)pid;
+- (NSDictionary *)apiServerAuthorizeProcess:(pid_t)pid preauthorized:(BOOL)preauthorized reason:(out NSString **)reason displayName:(out NSString **)displayName;
 - (void)apiServerGetBuffer:(ITMGetBufferRequest *)request handler:(void (^)(ITMGetBufferResponse *))handler;
 - (void)apiServerGetPrompt:(ITMGetPromptRequest *)request handler:(void (^)(ITMGetPromptResponse *))handler;
 - (void)apiServerNotification:(ITMNotificationRequest *)request
                    connection:(id)connection
                       handler:(void (^)(ITMNotificationResponse *))handler;
-- (void)apiServerRemoveSubscriptionsForConnection:(id)connection;
+- (void)apiServerDidCloseConnection:(id)connection;
 - (void)apiServerRegisterTool:(ITMRegisterToolRequest *)request
                  peerIdentity:(NSDictionary *)peerIdentity
                       handler:(void (^)(ITMRegisterToolResponse *))handler;
@@ -34,6 +39,21 @@ extern NSString *const iTermWebSocketConnectionPeerIdentityBundleIdentifier;
                    handler:(void (^)(ITMCreateTabResponse *))handler;
 - (void)apiServerSplitPane:(ITMSplitPaneRequest *)request
                    handler:(void (^)(ITMSplitPaneResponse *))handler;
+- (void)apiServerSetProperty:(ITMSetPropertyRequest *)request
+                     handler:(void (^)(ITMSetPropertyResponse *))handler;
+- (void)apiServerGetProperty:(ITMGetPropertyRequest *)request
+                     handler:(void (^)(ITMGetPropertyResponse *))handler;
+- (void)apiServerInject:(ITMInjectRequest *)request
+                handler:(void (^)(ITMInjectResponse *))handler;
+- (void)apiServerActivate:(ITMActivateRequest *)request
+                  handler:(void (^)(ITMActivateResponse *))handler;
+- (void)apiServerVariable:(ITMVariableRequest *)request
+                  handler:(void (^)(ITMVariableResponse *))handler;
+- (void)apiServerSavedArrangement:(ITMSavedArrangementRequest *)request
+                          handler:(void (^)(ITMSavedArrangementResponse *))response;
+- (void)apiServerFocus:(ITMFocusRequest *)request
+               handler:(void (^)(ITMFocusResponse *))response;
+
 @end
 
 @interface iTermAPIServer : NSObject

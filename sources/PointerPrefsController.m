@@ -121,28 +121,28 @@ typedef enum {
 @end
 
 @implementation PointerPrefsController {
-    IBOutlet NSTableView *tableView_;
-    IBOutlet NSTableColumn *buttonColumn_;
-    IBOutlet NSTableColumn *actionColumn_;
+    __weak IBOutlet NSTableView *tableView_;
+    __weak IBOutlet NSTableColumn *buttonColumn_;
+    __weak IBOutlet NSTableColumn *actionColumn_;
 
-    IBOutlet NSPanel *panel_;
-    IBOutlet NSTextField *editButtonLabel_;
-    IBOutlet NSPopUpButton *editButton_;
-    IBOutlet NSTextField *editModifiersLabel_;
-    IBOutlet NSButton *editModifiersCommand_;
-    IBOutlet NSButton *editModifiersOption_;
-    IBOutlet NSButton *editModifiersShift_;
-    IBOutlet NSButton *editModifiersControl_;
-    IBOutlet NSTextField *editActionLabel_;
-    IBOutlet NSPopUpButton *editAction_;
-    IBOutlet NSTextField *editClickTypeLabel_;
-    IBOutlet NSPopUpButton *editClickType_;
-    IBOutlet NSTextField *editArgumentLabel_;
-    IBOutlet NSPopUpButton *editArgumentButton_;
-    IBOutlet NSTextField *editArgumentField_;
+    __weak IBOutlet NSPanel *panel_;
+    __weak IBOutlet NSTextField *editButtonLabel_;
+    __weak IBOutlet NSPopUpButton *editButton_;
+    __weak IBOutlet NSTextField *editModifiersLabel_;
+    __weak IBOutlet NSButton *editModifiersCommand_;
+    __weak IBOutlet NSButton *editModifiersOption_;
+    __weak IBOutlet NSButton *editModifiersShift_;
+    __weak IBOutlet NSButton *editModifiersControl_;
+    __weak IBOutlet NSTextField *editActionLabel_;
+    __weak IBOutlet NSPopUpButton *editAction_;
+    __weak IBOutlet NSTextField *editClickTypeLabel_;
+    __weak IBOutlet NSPopUpButton *editClickType_;
+    __weak IBOutlet NSTextField *editArgumentLabel_;
+    __weak IBOutlet NSPopUpButton *editArgumentButton_;
+    __weak IBOutlet NSTextField *editArgumentField_;
 
-    IBOutlet NSButton *ok_;
-    IBOutlet NSButton *remove_;
+    __weak IBOutlet NSButton *ok_;
+    __weak IBOutlet NSButton *remove_;
 
     NSString *origKey_;
 }
@@ -620,7 +620,9 @@ typedef enum {
     NSString *key = [PointerPrefsController keyForButton:buttonNumber
                                                   clicks:numClicks
                                                modifiers:modMask];
-    return [[[PointerPrefsController settings] objectForKey:key] objectForKey:kArgumentKey];
+    NSDictionary *settings = [PointerPrefsController settings];
+    NSDictionary *setting = [settings objectForKey:key];
+    return [setting objectForKey:kArgumentKey];
 }
 
 + (NSString *)actionWithButton:(int)buttonNumber
@@ -631,7 +633,9 @@ typedef enum {
                                                   clicks:numClicks
                                                modifiers:modMask];
     DLog(@"Look up key %@", key);
-    NSString *action = [[[PointerPrefsController settings] objectForKey:key] objectForKey:kActionKey];
+    NSDictionary *settings = [PointerPrefsController settings];
+    NSDictionary *setting = [settings objectForKey:key];
+    NSString *action = [setting objectForKey:kActionKey];
     return action;
 }
 
@@ -666,7 +670,9 @@ typedef enum {
     key = [PointerPrefsController keyForGesture:gesture
                                       modifiers:modMask];
     DLog(@"Look up action for gesture %@", key);
-    return [[[PointerPrefsController settings] objectForKey:key] objectForKey:kActionKey];
+    NSDictionary *settings = [PointerPrefsController settings];
+    NSDictionary *setting = [settings objectForKey:key];
+    return [setting objectForKey:kActionKey];
 }
 
 + (NSString *)argumentForGesture:(NSString *)gesture
@@ -675,7 +681,9 @@ typedef enum {
     NSString *key;
     key = [PointerPrefsController keyForGesture:gesture
                                       modifiers:modMask];
-    return [[[PointerPrefsController settings] objectForKey:key] objectForKey:kArgumentKey];
+    NSDictionary *settings = [PointerPrefsController settings];
+    NSDictionary *setting = [settings objectForKey:key];
+    return [setting objectForKey:kArgumentKey];
 }
 
 + (BOOL)haveThreeFingerTapEvents
@@ -781,14 +789,14 @@ typedef enum {
     }
 }
 
-+ (NSString *)actionForKey:(NSString *)key
-{
-    return [[[PointerPrefsController settings] objectForKey:key] objectForKey:kActionKey];
++ (NSString *)actionForKey:(NSString *)key {
+    NSDictionary *setting = [[PointerPrefsController settings] objectForKey:key];
+    return [setting objectForKey:kActionKey];
 }
 
-+ (NSString *)argumentForKey:(NSString *)key
-{
-    return [[[PointerPrefsController settings] objectForKey:key] objectForKey:kArgumentKey];
++ (NSString *)argumentForKey:(NSString *)key {
+    NSDictionary *setting = [[PointerPrefsController settings] objectForKey:key];
+    return [setting objectForKey:kArgumentKey];
 }
 
 - (void)updateArgumentFieldsForAction:(NSString *)actionIdent argument:(NSString *)currentArg

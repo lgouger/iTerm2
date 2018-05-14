@@ -27,12 +27,20 @@
 
 CF_EXTERN_C_BEGIN
 
+@class ITMActivateRequest;
+@class ITMActivateRequest_App;
+@class ITMActivateResponse;
 @class ITMCodePointsPerCell;
 @class ITMCoord;
 @class ITMCoordRange;
 @class ITMCreateTabRequest;
 @class ITMCreateTabResponse;
 @class ITMCustomEscapeSequenceNotification;
+@class ITMFocusChangedNotification;
+@class ITMFocusChangedNotification_Window;
+@class ITMFocusRequest;
+@class ITMFocusResponse;
+@class ITMFrame;
 @class ITMGetBufferRequest;
 @class ITMGetBufferResponse;
 @class ITMGetProfilePropertyRequest;
@@ -40,13 +48,19 @@ CF_EXTERN_C_BEGIN
 @class ITMGetProfilePropertyResponse_Property;
 @class ITMGetPromptRequest;
 @class ITMGetPromptResponse;
+@class ITMGetPropertyRequest;
+@class ITMGetPropertyResponse;
+@class ITMInjectRequest;
+@class ITMInjectResponse;
 @class ITMKeystrokeNotification;
 @class ITMLayoutChangedNotification;
 @class ITMLineContents;
 @class ITMLineRange;
 @class ITMListSessionsRequest;
 @class ITMListSessionsResponse;
-@class ITMListSessionsResponse_Session;
+@class ITMListSessionsResponse_SplitTreeNode;
+@class ITMListSessionsResponse_SplitTreeNode_SplitTreeLink;
+@class ITMListSessionsResponse_SplitTreeNode_SplitTreeLink_Session;
 @class ITMListSessionsResponse_Tab;
 @class ITMListSessionsResponse_Window;
 @class ITMLocationChangeNotification;
@@ -54,20 +68,29 @@ CF_EXTERN_C_BEGIN
 @class ITMNotification;
 @class ITMNotificationRequest;
 @class ITMNotificationResponse;
+@class ITMPoint;
 @class ITMPromptNotification;
 @class ITMRange;
 @class ITMRegisterToolRequest;
 @class ITMRegisterToolResponse;
+@class ITMSavedArrangementRequest;
+@class ITMSavedArrangementResponse;
 @class ITMScreenUpdateNotification;
 @class ITMSendTextRequest;
 @class ITMSendTextResponse;
 @class ITMSetProfilePropertyRequest;
 @class ITMSetProfilePropertyResponse;
+@class ITMSetPropertyRequest;
+@class ITMSetPropertyResponse;
+@class ITMSize;
 @class ITMSplitPaneRequest;
 @class ITMSplitPaneResponse;
 @class ITMTerminateSessionNotification;
 @class ITMTransactionRequest;
 @class ITMTransactionResponse;
+@class ITMVariableRequest;
+@class ITMVariableRequest_Set;
+@class ITMVariableResponse;
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -85,6 +108,7 @@ typedef GPB_ENUM(ITMNotificationType) {
   ITMNotificationType_NotifyOnNewSession = 6,
   ITMNotificationType_NotifyOnTerminateSession = 7,
   ITMNotificationType_NotifyOnLayoutChange = 8,
+  ITMNotificationType_NotifyOnFocusChange = 9,
 };
 
 GPBEnumDescriptor *ITMNotificationType_EnumDescriptor(void);
@@ -94,6 +118,131 @@ GPBEnumDescriptor *ITMNotificationType_EnumDescriptor(void);
  * the time this source was generated.
  **/
 BOOL ITMNotificationType_IsValidValue(int32_t value);
+
+#pragma mark - Enum ITMSavedArrangementRequest_Action
+
+typedef GPB_ENUM(ITMSavedArrangementRequest_Action) {
+  /** Restore an existing arrangement with the given name */
+  ITMSavedArrangementRequest_Action_Restore = 0,
+
+  /** Save windows to a new arrangment with the given name */
+  ITMSavedArrangementRequest_Action_Save = 1,
+};
+
+GPBEnumDescriptor *ITMSavedArrangementRequest_Action_EnumDescriptor(void);
+
+/**
+ * Checks to see if the given value is defined by the enum or was not known at
+ * the time this source was generated.
+ **/
+BOOL ITMSavedArrangementRequest_Action_IsValidValue(int32_t value);
+
+#pragma mark - Enum ITMSavedArrangementResponse_Status
+
+typedef GPB_ENUM(ITMSavedArrangementResponse_Status) {
+  ITMSavedArrangementResponse_Status_Ok = 0,
+
+  /** Tried to restore, but name doesn't exist */
+  ITMSavedArrangementResponse_Status_ArrangementNotFound = 1,
+
+  /** Bad window ID provided */
+  ITMSavedArrangementResponse_Status_WindowNotFound = 2,
+  ITMSavedArrangementResponse_Status_RequestMalformed = 3,
+};
+
+GPBEnumDescriptor *ITMSavedArrangementResponse_Status_EnumDescriptor(void);
+
+/**
+ * Checks to see if the given value is defined by the enum or was not known at
+ * the time this source was generated.
+ **/
+BOOL ITMSavedArrangementResponse_Status_IsValidValue(int32_t value);
+
+#pragma mark - Enum ITMVariableResponse_Status
+
+typedef GPB_ENUM(ITMVariableResponse_Status) {
+  ITMVariableResponse_Status_Ok = 0,
+  ITMVariableResponse_Status_SessionNotFound = 1,
+
+  /** Names you set must begin with "user." */
+  ITMVariableResponse_Status_InvalidName = 2,
+};
+
+GPBEnumDescriptor *ITMVariableResponse_Status_EnumDescriptor(void);
+
+/**
+ * Checks to see if the given value is defined by the enum or was not known at
+ * the time this source was generated.
+ **/
+BOOL ITMVariableResponse_Status_IsValidValue(int32_t value);
+
+#pragma mark - Enum ITMActivateResponse_Status
+
+typedef GPB_ENUM(ITMActivateResponse_Status) {
+  ITMActivateResponse_Status_Ok = 0,
+  ITMActivateResponse_Status_BadIdentifier = 1,
+  ITMActivateResponse_Status_InvalidOption = 2,
+};
+
+GPBEnumDescriptor *ITMActivateResponse_Status_EnumDescriptor(void);
+
+/**
+ * Checks to see if the given value is defined by the enum or was not known at
+ * the time this source was generated.
+ **/
+BOOL ITMActivateResponse_Status_IsValidValue(int32_t value);
+
+#pragma mark - Enum ITMInjectResponse_Status
+
+typedef GPB_ENUM(ITMInjectResponse_Status) {
+  ITMInjectResponse_Status_Ok = 0,
+  ITMInjectResponse_Status_SessionNotFound = 1,
+};
+
+GPBEnumDescriptor *ITMInjectResponse_Status_EnumDescriptor(void);
+
+/**
+ * Checks to see if the given value is defined by the enum or was not known at
+ * the time this source was generated.
+ **/
+BOOL ITMInjectResponse_Status_IsValidValue(int32_t value);
+
+#pragma mark - Enum ITMGetPropertyResponse_Status
+
+typedef GPB_ENUM(ITMGetPropertyResponse_Status) {
+  ITMGetPropertyResponse_Status_Ok = 0,
+  ITMGetPropertyResponse_Status_UnrecognizedName = 1,
+  ITMGetPropertyResponse_Status_InvalidTarget = 2,
+};
+
+GPBEnumDescriptor *ITMGetPropertyResponse_Status_EnumDescriptor(void);
+
+/**
+ * Checks to see if the given value is defined by the enum or was not known at
+ * the time this source was generated.
+ **/
+BOOL ITMGetPropertyResponse_Status_IsValidValue(int32_t value);
+
+#pragma mark - Enum ITMSetPropertyResponse_Status
+
+typedef GPB_ENUM(ITMSetPropertyResponse_Status) {
+  ITMSetPropertyResponse_Status_Ok = 0,
+  ITMSetPropertyResponse_Status_UnrecognizedName = 1,
+
+  /** e.g., bad JSON value */
+  ITMSetPropertyResponse_Status_InvalidValue = 2,
+
+  /** e.g., bogus window_id */
+  ITMSetPropertyResponse_Status_InvalidTarget = 3,
+};
+
+GPBEnumDescriptor *ITMSetPropertyResponse_Status_EnumDescriptor(void);
+
+/**
+ * Checks to see if the given value is defined by the enum or was not known at
+ * the time this source was generated.
+ **/
+BOOL ITMSetPropertyResponse_Status_IsValidValue(int32_t value);
 
 #pragma mark - Enum ITMRegisterToolRequest_ToolType
 
@@ -161,6 +310,27 @@ GPBEnumDescriptor *ITMKeystrokeNotification_Modifiers_EnumDescriptor(void);
  * the time this source was generated.
  **/
 BOOL ITMKeystrokeNotification_Modifiers_IsValidValue(int32_t value);
+
+#pragma mark - Enum ITMFocusChangedNotification_Window_WindowStatus
+
+typedef GPB_ENUM(ITMFocusChangedNotification_Window_WindowStatus) {
+  /** `window_id` became key */
+  ITMFocusChangedNotification_Window_WindowStatus_TerminalWindowBecameKey = 0,
+
+  /** `window_id` is not key, but is the current terminal window. Some other non-terminal window is key. */
+  ITMFocusChangedNotification_Window_WindowStatus_TerminalWindowIsCurrent = 1,
+
+  /** `window_id` is no longer key. */
+  ITMFocusChangedNotification_Window_WindowStatus_TerminalWindowResignedKey = 2,
+};
+
+GPBEnumDescriptor *ITMFocusChangedNotification_Window_WindowStatus_EnumDescriptor(void);
+
+/**
+ * Checks to see if the given value is defined by the enum or was not known at
+ * the time this source was generated.
+ **/
+BOOL ITMFocusChangedNotification_Window_WindowStatus_IsValidValue(int32_t value);
 
 #pragma mark - Enum ITMGetBufferResponse_Status
 
@@ -323,7 +493,11 @@ typedef GPB_ENUM(ITMSplitPaneResponse_Status) {
   ITMSplitPaneResponse_Status_SessionNotFound = 1,
   ITMSplitPaneResponse_Status_InvalidProfileName = 2,
 
-  /** This can happen if the session to be split is too small. */
+  /**
+   * This can happen if the session to be split is too small. If splitting multiple sessions and
+   * one or more cannot be split, the status will be set to CANNOT_SPLIT, even if some did succeed
+   * (in which case there will be one or more session_id's).
+   **/
   ITMSplitPaneResponse_Status_CannotSplit = 3,
 };
 
@@ -350,155 +524,582 @@ BOOL ITMSplitPaneResponse_Status_IsValidValue(int32_t value);
 @interface ITMApiRoot : GPBRootObject
 @end
 
-#pragma mark - ITMRequest
+#pragma mark - ITMClientOriginatedMessage
 
-typedef GPB_ENUM(ITMRequest_FieldNumber) {
-  ITMRequest_FieldNumber_Id_p = 1,
-  ITMRequest_FieldNumber_GetBufferRequest = 100,
-  ITMRequest_FieldNumber_GetPromptRequest = 101,
-  ITMRequest_FieldNumber_TransactionRequest = 102,
-  ITMRequest_FieldNumber_NotificationRequest = 103,
-  ITMRequest_FieldNumber_RegisterToolRequest = 104,
-  ITMRequest_FieldNumber_SetProfilePropertyRequest = 105,
-  ITMRequest_FieldNumber_ListSessionsRequest = 106,
-  ITMRequest_FieldNumber_SendTextRequest = 107,
-  ITMRequest_FieldNumber_CreateTabRequest = 108,
-  ITMRequest_FieldNumber_SplitPaneRequest = 109,
-  ITMRequest_FieldNumber_GetProfilePropertyRequest = 110,
+typedef GPB_ENUM(ITMClientOriginatedMessage_FieldNumber) {
+  ITMClientOriginatedMessage_FieldNumber_Id_p = 1,
+  ITMClientOriginatedMessage_FieldNumber_GetBufferRequest = 100,
+  ITMClientOriginatedMessage_FieldNumber_GetPromptRequest = 101,
+  ITMClientOriginatedMessage_FieldNumber_TransactionRequest = 102,
+  ITMClientOriginatedMessage_FieldNumber_NotificationRequest = 103,
+  ITMClientOriginatedMessage_FieldNumber_RegisterToolRequest = 104,
+  ITMClientOriginatedMessage_FieldNumber_SetProfilePropertyRequest = 105,
+  ITMClientOriginatedMessage_FieldNumber_ListSessionsRequest = 106,
+  ITMClientOriginatedMessage_FieldNumber_SendTextRequest = 107,
+  ITMClientOriginatedMessage_FieldNumber_CreateTabRequest = 108,
+  ITMClientOriginatedMessage_FieldNumber_SplitPaneRequest = 109,
+  ITMClientOriginatedMessage_FieldNumber_GetProfilePropertyRequest = 110,
+  ITMClientOriginatedMessage_FieldNumber_SetPropertyRequest = 111,
+  ITMClientOriginatedMessage_FieldNumber_GetPropertyRequest = 112,
+  ITMClientOriginatedMessage_FieldNumber_InjectRequest = 113,
+  ITMClientOriginatedMessage_FieldNumber_ActivateRequest = 114,
+  ITMClientOriginatedMessage_FieldNumber_VariableRequest = 115,
+  ITMClientOriginatedMessage_FieldNumber_SavedArrangementRequest = 116,
+  ITMClientOriginatedMessage_FieldNumber_FocusRequest = 117,
+};
+
+typedef GPB_ENUM(ITMClientOriginatedMessage_Submessage_OneOfCase) {
+  ITMClientOriginatedMessage_Submessage_OneOfCase_GPBUnsetOneOfCase = 0,
+  ITMClientOriginatedMessage_Submessage_OneOfCase_GetBufferRequest = 100,
+  ITMClientOriginatedMessage_Submessage_OneOfCase_GetPromptRequest = 101,
+  ITMClientOriginatedMessage_Submessage_OneOfCase_TransactionRequest = 102,
+  ITMClientOriginatedMessage_Submessage_OneOfCase_NotificationRequest = 103,
+  ITMClientOriginatedMessage_Submessage_OneOfCase_RegisterToolRequest = 104,
+  ITMClientOriginatedMessage_Submessage_OneOfCase_SetProfilePropertyRequest = 105,
+  ITMClientOriginatedMessage_Submessage_OneOfCase_ListSessionsRequest = 106,
+  ITMClientOriginatedMessage_Submessage_OneOfCase_SendTextRequest = 107,
+  ITMClientOriginatedMessage_Submessage_OneOfCase_CreateTabRequest = 108,
+  ITMClientOriginatedMessage_Submessage_OneOfCase_SplitPaneRequest = 109,
+  ITMClientOriginatedMessage_Submessage_OneOfCase_GetProfilePropertyRequest = 110,
+  ITMClientOriginatedMessage_Submessage_OneOfCase_SetPropertyRequest = 111,
+  ITMClientOriginatedMessage_Submessage_OneOfCase_GetPropertyRequest = 112,
+  ITMClientOriginatedMessage_Submessage_OneOfCase_InjectRequest = 113,
+  ITMClientOriginatedMessage_Submessage_OneOfCase_ActivateRequest = 114,
+  ITMClientOriginatedMessage_Submessage_OneOfCase_VariableRequest = 115,
+  ITMClientOriginatedMessage_Submessage_OneOfCase_SavedArrangementRequest = 116,
+  ITMClientOriginatedMessage_Submessage_OneOfCase_FocusRequest = 117,
 };
 
 /**
  * All requests are wrapped in this message. This encoded message is the entirety of the payload
  * of messages sent over WebSocket from client to iTerm2.
  **/
-@interface ITMRequest : GPBMessage
+@interface ITMClientOriginatedMessage : GPBMessage
 
 @property(nonatomic, readwrite) int64_t id_p;
 
 @property(nonatomic, readwrite) BOOL hasId_p;
-/** Set exactly one of these fields. */
+@property(nonatomic, readonly) ITMClientOriginatedMessage_Submessage_OneOfCase submessageOneOfCase;
+
 @property(nonatomic, readwrite, strong, null_resettable) ITMGetBufferRequest *getBufferRequest;
-/** Test to see if @c getBufferRequest has been set. */
-@property(nonatomic, readwrite) BOOL hasGetBufferRequest;
 
 @property(nonatomic, readwrite, strong, null_resettable) ITMGetPromptRequest *getPromptRequest;
-/** Test to see if @c getPromptRequest has been set. */
-@property(nonatomic, readwrite) BOOL hasGetPromptRequest;
 
 @property(nonatomic, readwrite, strong, null_resettable) ITMTransactionRequest *transactionRequest;
-/** Test to see if @c transactionRequest has been set. */
-@property(nonatomic, readwrite) BOOL hasTransactionRequest;
 
 @property(nonatomic, readwrite, strong, null_resettable) ITMNotificationRequest *notificationRequest;
-/** Test to see if @c notificationRequest has been set. */
-@property(nonatomic, readwrite) BOOL hasNotificationRequest;
 
 @property(nonatomic, readwrite, strong, null_resettable) ITMRegisterToolRequest *registerToolRequest;
-/** Test to see if @c registerToolRequest has been set. */
-@property(nonatomic, readwrite) BOOL hasRegisterToolRequest;
 
 @property(nonatomic, readwrite, strong, null_resettable) ITMSetProfilePropertyRequest *setProfilePropertyRequest;
-/** Test to see if @c setProfilePropertyRequest has been set. */
-@property(nonatomic, readwrite) BOOL hasSetProfilePropertyRequest;
 
 @property(nonatomic, readwrite, strong, null_resettable) ITMListSessionsRequest *listSessionsRequest;
-/** Test to see if @c listSessionsRequest has been set. */
-@property(nonatomic, readwrite) BOOL hasListSessionsRequest;
 
 @property(nonatomic, readwrite, strong, null_resettable) ITMSendTextRequest *sendTextRequest;
-/** Test to see if @c sendTextRequest has been set. */
-@property(nonatomic, readwrite) BOOL hasSendTextRequest;
 
 @property(nonatomic, readwrite, strong, null_resettable) ITMCreateTabRequest *createTabRequest;
-/** Test to see if @c createTabRequest has been set. */
-@property(nonatomic, readwrite) BOOL hasCreateTabRequest;
 
 @property(nonatomic, readwrite, strong, null_resettable) ITMSplitPaneRequest *splitPaneRequest;
-/** Test to see if @c splitPaneRequest has been set. */
-@property(nonatomic, readwrite) BOOL hasSplitPaneRequest;
 
 @property(nonatomic, readwrite, strong, null_resettable) ITMGetProfilePropertyRequest *getProfilePropertyRequest;
-/** Test to see if @c getProfilePropertyRequest has been set. */
-@property(nonatomic, readwrite) BOOL hasGetProfilePropertyRequest;
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMSetPropertyRequest *setPropertyRequest;
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMGetPropertyRequest *getPropertyRequest;
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMInjectRequest *injectRequest;
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMActivateRequest *activateRequest;
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMVariableRequest *variableRequest;
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMSavedArrangementRequest *savedArrangementRequest;
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMFocusRequest *focusRequest;
 
 @end
 
-#pragma mark - ITMResponse
+/**
+ * Clears whatever value was set for the oneof 'submessage'.
+ **/
+void ITMClientOriginatedMessage_ClearSubmessageOneOfCase(ITMClientOriginatedMessage *message);
 
-typedef GPB_ENUM(ITMResponse_FieldNumber) {
-  ITMResponse_FieldNumber_Id_p = 1,
-  ITMResponse_FieldNumber_GetBufferResponse = 100,
-  ITMResponse_FieldNumber_GetPromptResponse = 101,
-  ITMResponse_FieldNumber_TransactionResponse = 102,
-  ITMResponse_FieldNumber_NotificationResponse = 103,
-  ITMResponse_FieldNumber_RegisterToolResponse = 104,
-  ITMResponse_FieldNumber_SetProfilePropertyResponse = 105,
-  ITMResponse_FieldNumber_ListSessionsResponse = 106,
-  ITMResponse_FieldNumber_SendTextResponse = 107,
-  ITMResponse_FieldNumber_CreateTabResponse = 108,
-  ITMResponse_FieldNumber_SplitPaneResponse = 109,
-  ITMResponse_FieldNumber_GetProfilePropertyResponse = 110,
-  ITMResponse_FieldNumber_Notification = 1000,
+#pragma mark - ITMServerOriginatedMessage
+
+typedef GPB_ENUM(ITMServerOriginatedMessage_FieldNumber) {
+  ITMServerOriginatedMessage_FieldNumber_Id_p = 1,
+  ITMServerOriginatedMessage_FieldNumber_Error = 2,
+  ITMServerOriginatedMessage_FieldNumber_GetBufferResponse = 100,
+  ITMServerOriginatedMessage_FieldNumber_GetPromptResponse = 101,
+  ITMServerOriginatedMessage_FieldNumber_TransactionResponse = 102,
+  ITMServerOriginatedMessage_FieldNumber_NotificationResponse = 103,
+  ITMServerOriginatedMessage_FieldNumber_RegisterToolResponse = 104,
+  ITMServerOriginatedMessage_FieldNumber_SetProfilePropertyResponse = 105,
+  ITMServerOriginatedMessage_FieldNumber_ListSessionsResponse = 106,
+  ITMServerOriginatedMessage_FieldNumber_SendTextResponse = 107,
+  ITMServerOriginatedMessage_FieldNumber_CreateTabResponse = 108,
+  ITMServerOriginatedMessage_FieldNumber_SplitPaneResponse = 109,
+  ITMServerOriginatedMessage_FieldNumber_GetProfilePropertyResponse = 110,
+  ITMServerOriginatedMessage_FieldNumber_SetPropertyResponse = 111,
+  ITMServerOriginatedMessage_FieldNumber_GetPropertyResponse = 112,
+  ITMServerOriginatedMessage_FieldNumber_InjectResponse = 113,
+  ITMServerOriginatedMessage_FieldNumber_ActivateResponse = 114,
+  ITMServerOriginatedMessage_FieldNumber_VariableResponse = 115,
+  ITMServerOriginatedMessage_FieldNumber_SavedArrangementResponse = 116,
+  ITMServerOriginatedMessage_FieldNumber_FocusResponse = 117,
+  ITMServerOriginatedMessage_FieldNumber_Notification = 1000,
+};
+
+typedef GPB_ENUM(ITMServerOriginatedMessage_Submessage_OneOfCase) {
+  ITMServerOriginatedMessage_Submessage_OneOfCase_GPBUnsetOneOfCase = 0,
+  ITMServerOriginatedMessage_Submessage_OneOfCase_Error = 2,
+  ITMServerOriginatedMessage_Submessage_OneOfCase_GetBufferResponse = 100,
+  ITMServerOriginatedMessage_Submessage_OneOfCase_GetPromptResponse = 101,
+  ITMServerOriginatedMessage_Submessage_OneOfCase_TransactionResponse = 102,
+  ITMServerOriginatedMessage_Submessage_OneOfCase_NotificationResponse = 103,
+  ITMServerOriginatedMessage_Submessage_OneOfCase_RegisterToolResponse = 104,
+  ITMServerOriginatedMessage_Submessage_OneOfCase_SetProfilePropertyResponse = 105,
+  ITMServerOriginatedMessage_Submessage_OneOfCase_ListSessionsResponse = 106,
+  ITMServerOriginatedMessage_Submessage_OneOfCase_SendTextResponse = 107,
+  ITMServerOriginatedMessage_Submessage_OneOfCase_CreateTabResponse = 108,
+  ITMServerOriginatedMessage_Submessage_OneOfCase_SplitPaneResponse = 109,
+  ITMServerOriginatedMessage_Submessage_OneOfCase_GetProfilePropertyResponse = 110,
+  ITMServerOriginatedMessage_Submessage_OneOfCase_SetPropertyResponse = 111,
+  ITMServerOriginatedMessage_Submessage_OneOfCase_GetPropertyResponse = 112,
+  ITMServerOriginatedMessage_Submessage_OneOfCase_InjectResponse = 113,
+  ITMServerOriginatedMessage_Submessage_OneOfCase_ActivateResponse = 114,
+  ITMServerOriginatedMessage_Submessage_OneOfCase_VariableResponse = 115,
+  ITMServerOriginatedMessage_Submessage_OneOfCase_SavedArrangementResponse = 116,
+  ITMServerOriginatedMessage_Submessage_OneOfCase_FocusResponse = 117,
+  ITMServerOriginatedMessage_Submessage_OneOfCase_Notification = 1000,
 };
 
 /**
  * All responses are wrapped in this message. This encoded message is the entirety of the payload
  * of messages sent over WebSocket from iTerm2 to client.
  **/
-@interface ITMResponse : GPBMessage
+@interface ITMServerOriginatedMessage : GPBMessage
 
 @property(nonatomic, readwrite) int64_t id_p;
 
 @property(nonatomic, readwrite) BOOL hasId_p;
+/** Responses to ClientOriginatedMessages of the corresponding type */
+@property(nonatomic, readonly) ITMServerOriginatedMessage_Submessage_OneOfCase submessageOneOfCase;
+
+/** Set if request was malformed */
+@property(nonatomic, readwrite, copy, null_resettable) NSString *error;
+
 @property(nonatomic, readwrite, strong, null_resettable) ITMGetBufferResponse *getBufferResponse;
-/** Test to see if @c getBufferResponse has been set. */
-@property(nonatomic, readwrite) BOOL hasGetBufferResponse;
 
 @property(nonatomic, readwrite, strong, null_resettable) ITMGetPromptResponse *getPromptResponse;
-/** Test to see if @c getPromptResponse has been set. */
-@property(nonatomic, readwrite) BOOL hasGetPromptResponse;
 
 @property(nonatomic, readwrite, strong, null_resettable) ITMTransactionResponse *transactionResponse;
-/** Test to see if @c transactionResponse has been set. */
-@property(nonatomic, readwrite) BOOL hasTransactionResponse;
 
 @property(nonatomic, readwrite, strong, null_resettable) ITMNotificationResponse *notificationResponse;
-/** Test to see if @c notificationResponse has been set. */
-@property(nonatomic, readwrite) BOOL hasNotificationResponse;
 
 @property(nonatomic, readwrite, strong, null_resettable) ITMRegisterToolResponse *registerToolResponse;
-/** Test to see if @c registerToolResponse has been set. */
-@property(nonatomic, readwrite) BOOL hasRegisterToolResponse;
 
 @property(nonatomic, readwrite, strong, null_resettable) ITMSetProfilePropertyResponse *setProfilePropertyResponse;
-/** Test to see if @c setProfilePropertyResponse has been set. */
-@property(nonatomic, readwrite) BOOL hasSetProfilePropertyResponse;
 
 @property(nonatomic, readwrite, strong, null_resettable) ITMListSessionsResponse *listSessionsResponse;
-/** Test to see if @c listSessionsResponse has been set. */
-@property(nonatomic, readwrite) BOOL hasListSessionsResponse;
 
 @property(nonatomic, readwrite, strong, null_resettable) ITMSendTextResponse *sendTextResponse;
-/** Test to see if @c sendTextResponse has been set. */
-@property(nonatomic, readwrite) BOOL hasSendTextResponse;
 
 @property(nonatomic, readwrite, strong, null_resettable) ITMCreateTabResponse *createTabResponse;
-/** Test to see if @c createTabResponse has been set. */
-@property(nonatomic, readwrite) BOOL hasCreateTabResponse;
 
 @property(nonatomic, readwrite, strong, null_resettable) ITMSplitPaneResponse *splitPaneResponse;
-/** Test to see if @c splitPaneResponse has been set. */
-@property(nonatomic, readwrite) BOOL hasSplitPaneResponse;
 
 @property(nonatomic, readwrite, strong, null_resettable) ITMGetProfilePropertyResponse *getProfilePropertyResponse;
-/** Test to see if @c getProfilePropertyResponse has been set. */
-@property(nonatomic, readwrite) BOOL hasGetProfilePropertyResponse;
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMSetPropertyResponse *setPropertyResponse;
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMGetPropertyResponse *getPropertyResponse;
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMInjectResponse *injectResponse;
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMActivateResponse *activateResponse;
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMVariableResponse *variableResponse;
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMSavedArrangementResponse *savedArrangementResponse;
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMFocusResponse *focusResponse;
 
 /** This is the only response that is sent spontaneously. The 'id' field will not be set. */
 @property(nonatomic, readwrite, strong, null_resettable) ITMNotification *notification;
-/** Test to see if @c notification has been set. */
-@property(nonatomic, readwrite) BOOL hasNotification;
 
+@end
+
+/**
+ * Clears whatever value was set for the oneof 'submessage'.
+ **/
+void ITMServerOriginatedMessage_ClearSubmessageOneOfCase(ITMServerOriginatedMessage *message);
+
+#pragma mark - ITMFocusRequest
+
+@interface ITMFocusRequest : GPBMessage
+
+@end
+
+#pragma mark - ITMFocusResponse
+
+typedef GPB_ENUM(ITMFocusResponse_FieldNumber) {
+  ITMFocusResponse_FieldNumber_NotificationsArray = 1,
+};
+
+@interface ITMFocusResponse : GPBMessage
+
+/**
+ * A collection of notifications that completely describe the state of every tab and window and
+ * the application itself.
+ **/
+@property(nonatomic, readwrite, strong, null_resettable) NSMutableArray<ITMFocusChangedNotification*> *notificationsArray;
+/** The number of items in @c notificationsArray without causing the array to be created. */
+@property(nonatomic, readonly) NSUInteger notificationsArray_Count;
+
+@end
+
+#pragma mark - ITMSavedArrangementRequest
+
+typedef GPB_ENUM(ITMSavedArrangementRequest_FieldNumber) {
+  ITMSavedArrangementRequest_FieldNumber_Name = 1,
+  ITMSavedArrangementRequest_FieldNumber_Action = 2,
+  ITMSavedArrangementRequest_FieldNumber_WindowId = 3,
+};
+
+@interface ITMSavedArrangementRequest : GPBMessage
+
+@property(nonatomic, readwrite, copy, null_resettable) NSString *name;
+/** Test to see if @c name has been set. */
+@property(nonatomic, readwrite) BOOL hasName;
+
+@property(nonatomic, readwrite) ITMSavedArrangementRequest_Action action;
+
+@property(nonatomic, readwrite) BOOL hasAction;
+/**
+ * If given and the action is SAVE then only the tabs in the identified window are saved.
+ * If given and the action is RESTORE then the arrangement will be restored as tabs in the identified window.
+ **/
+@property(nonatomic, readwrite, copy, null_resettable) NSString *windowId;
+/** Test to see if @c windowId has been set. */
+@property(nonatomic, readwrite) BOOL hasWindowId;
+
+@end
+
+#pragma mark - ITMSavedArrangementResponse
+
+typedef GPB_ENUM(ITMSavedArrangementResponse_FieldNumber) {
+  ITMSavedArrangementResponse_FieldNumber_Status = 1,
+};
+
+@interface ITMSavedArrangementResponse : GPBMessage
+
+@property(nonatomic, readwrite) ITMSavedArrangementResponse_Status status;
+
+@property(nonatomic, readwrite) BOOL hasStatus;
+@end
+
+#pragma mark - ITMVariableRequest
+
+typedef GPB_ENUM(ITMVariableRequest_FieldNumber) {
+  ITMVariableRequest_FieldNumber_SessionId = 1,
+  ITMVariableRequest_FieldNumber_SetArray = 2,
+  ITMVariableRequest_FieldNumber_GetArray = 3,
+};
+
+@interface ITMVariableRequest : GPBMessage
+
+/** "all" is allowed only if no gets (only sets allowed) */
+@property(nonatomic, readwrite, copy, null_resettable) NSString *sessionId;
+/** Test to see if @c sessionId has been set. */
+@property(nonatomic, readwrite) BOOL hasSessionId;
+
+@property(nonatomic, readwrite, strong, null_resettable) NSMutableArray<ITMVariableRequest_Set*> *setArray;
+/** The number of items in @c setArray without causing the array to be created. */
+@property(nonatomic, readonly) NSUInteger setArray_Count;
+
+/** Set to special value "*" to get all in newline-delimited list. */
+@property(nonatomic, readwrite, strong, null_resettable) NSMutableArray<NSString*> *getArray;
+/** The number of items in @c getArray without causing the array to be created. */
+@property(nonatomic, readonly) NSUInteger getArray_Count;
+
+@end
+
+#pragma mark - ITMVariableRequest_Set
+
+typedef GPB_ENUM(ITMVariableRequest_Set_FieldNumber) {
+  ITMVariableRequest_Set_FieldNumber_Name = 1,
+  ITMVariableRequest_Set_FieldNumber_Value = 2,
+};
+
+@interface ITMVariableRequest_Set : GPBMessage
+
+@property(nonatomic, readwrite, copy, null_resettable) NSString *name;
+/** Test to see if @c name has been set. */
+@property(nonatomic, readwrite) BOOL hasName;
+
+@property(nonatomic, readwrite, copy, null_resettable) NSString *value;
+/** Test to see if @c value has been set. */
+@property(nonatomic, readwrite) BOOL hasValue;
+
+@end
+
+#pragma mark - ITMVariableResponse
+
+typedef GPB_ENUM(ITMVariableResponse_FieldNumber) {
+  ITMVariableResponse_FieldNumber_Status = 1,
+  ITMVariableResponse_FieldNumber_ValuesArray = 2,
+};
+
+@interface ITMVariableResponse : GPBMessage
+
+@property(nonatomic, readwrite) ITMVariableResponse_Status status;
+
+@property(nonatomic, readwrite) BOOL hasStatus;
+/** 1:1 with get field in request. Empty and undefined are the same. */
+@property(nonatomic, readwrite, strong, null_resettable) NSMutableArray<NSString*> *valuesArray;
+/** The number of items in @c valuesArray without causing the array to be created. */
+@property(nonatomic, readonly) NSUInteger valuesArray_Count;
+
+@end
+
+#pragma mark - ITMActivateRequest
+
+typedef GPB_ENUM(ITMActivateRequest_FieldNumber) {
+  ITMActivateRequest_FieldNumber_WindowId = 1,
+  ITMActivateRequest_FieldNumber_TabId = 2,
+  ITMActivateRequest_FieldNumber_SessionId = 3,
+  ITMActivateRequest_FieldNumber_OrderWindowFront = 4,
+  ITMActivateRequest_FieldNumber_SelectTab = 5,
+  ITMActivateRequest_FieldNumber_SelectSession = 6,
+  ITMActivateRequest_FieldNumber_ActivateApp = 7,
+};
+
+typedef GPB_ENUM(ITMActivateRequest_Identifier_OneOfCase) {
+  ITMActivateRequest_Identifier_OneOfCase_GPBUnsetOneOfCase = 0,
+  ITMActivateRequest_Identifier_OneOfCase_WindowId = 1,
+  ITMActivateRequest_Identifier_OneOfCase_TabId = 2,
+  ITMActivateRequest_Identifier_OneOfCase_SessionId = 3,
+};
+
+@interface ITMActivateRequest : GPBMessage
+
+/** To activate the app without changing anything else omit the identifier. */
+@property(nonatomic, readonly) ITMActivateRequest_Identifier_OneOfCase identifierOneOfCase;
+
+@property(nonatomic, readwrite, copy, null_resettable) NSString *windowId;
+
+@property(nonatomic, readwrite, copy, null_resettable) NSString *tabId;
+
+@property(nonatomic, readwrite, copy, null_resettable) NSString *sessionId;
+
+@property(nonatomic, readwrite) BOOL orderWindowFront;
+
+@property(nonatomic, readwrite) BOOL hasOrderWindowFront;
+/** This may be enabled if tab_id or session_id is set. */
+@property(nonatomic, readwrite) BOOL selectTab;
+
+@property(nonatomic, readwrite) BOOL hasSelectTab;
+/** This may be enabled if session_id is set. */
+@property(nonatomic, readwrite) BOOL selectSession;
+
+@property(nonatomic, readwrite) BOOL hasSelectSession;
+@property(nonatomic, readwrite, strong, null_resettable) ITMActivateRequest_App *activateApp;
+/** Test to see if @c activateApp has been set. */
+@property(nonatomic, readwrite) BOOL hasActivateApp;
+
+@end
+
+/**
+ * Clears whatever value was set for the oneof 'identifier'.
+ **/
+void ITMActivateRequest_ClearIdentifierOneOfCase(ITMActivateRequest *message);
+
+#pragma mark - ITMActivateRequest_App
+
+typedef GPB_ENUM(ITMActivateRequest_App_FieldNumber) {
+  ITMActivateRequest_App_FieldNumber_RaiseAllWindows = 1,
+  ITMActivateRequest_App_FieldNumber_IgnoringOtherApps = 2,
+};
+
+/**
+ * Activate the app?
+ **/
+@interface ITMActivateRequest_App : GPBMessage
+
+@property(nonatomic, readwrite) BOOL raiseAllWindows;
+
+@property(nonatomic, readwrite) BOOL hasRaiseAllWindows;
+@property(nonatomic, readwrite) BOOL ignoringOtherApps;
+
+@property(nonatomic, readwrite) BOOL hasIgnoringOtherApps;
+@end
+
+#pragma mark - ITMActivateResponse
+
+typedef GPB_ENUM(ITMActivateResponse_FieldNumber) {
+  ITMActivateResponse_FieldNumber_Status = 1,
+};
+
+@interface ITMActivateResponse : GPBMessage
+
+@property(nonatomic, readwrite) ITMActivateResponse_Status status;
+
+@property(nonatomic, readwrite) BOOL hasStatus;
+@end
+
+#pragma mark - ITMInjectRequest
+
+typedef GPB_ENUM(ITMInjectRequest_FieldNumber) {
+  ITMInjectRequest_FieldNumber_SessionIdArray = 1,
+  ITMInjectRequest_FieldNumber_Data_p = 2,
+};
+
+/**
+ * Injects bytes as input to the terminal, as though the running program had produced them.
+ **/
+@interface ITMInjectRequest : GPBMessage
+
+@property(nonatomic, readwrite, strong, null_resettable) NSMutableArray<NSString*> *sessionIdArray;
+/** The number of items in @c sessionIdArray without causing the array to be created. */
+@property(nonatomic, readonly) NSUInteger sessionIdArray_Count;
+
+@property(nonatomic, readwrite, copy, null_resettable) NSData *data_p;
+/** Test to see if @c data_p has been set. */
+@property(nonatomic, readwrite) BOOL hasData_p;
+
+@end
+
+#pragma mark - ITMInjectResponse
+
+typedef GPB_ENUM(ITMInjectResponse_FieldNumber) {
+  ITMInjectResponse_FieldNumber_StatusArray = 1,
+};
+
+@interface ITMInjectResponse : GPBMessage
+
+/** One status per session_id in the request */
+// |statusArray| contains |ITMInjectResponse_Status|
+@property(nonatomic, readwrite, strong, null_resettable) GPBEnumArray *statusArray;
+/** The number of items in @c statusArray without causing the array to be created. */
+@property(nonatomic, readonly) NSUInteger statusArray_Count;
+
+@end
+
+#pragma mark - ITMGetPropertyRequest
+
+typedef GPB_ENUM(ITMGetPropertyRequest_FieldNumber) {
+  ITMGetPropertyRequest_FieldNumber_WindowId = 1,
+  ITMGetPropertyRequest_FieldNumber_Name = 2,
+};
+
+typedef GPB_ENUM(ITMGetPropertyRequest_Identifier_OneOfCase) {
+  ITMGetPropertyRequest_Identifier_OneOfCase_GPBUnsetOneOfCase = 0,
+  ITMGetPropertyRequest_Identifier_OneOfCase_WindowId = 1,
+};
+
+@interface ITMGetPropertyRequest : GPBMessage
+
+/**
+ * Eventually you'll be able to request properties on other things besides
+ * window_id. The kind of ID that's set determines the kind of object you're
+ * querying.
+ **/
+@property(nonatomic, readonly) ITMGetPropertyRequest_Identifier_OneOfCase identifierOneOfCase;
+
+@property(nonatomic, readwrite, copy, null_resettable) NSString *windowId;
+
+@property(nonatomic, readwrite, copy, null_resettable) NSString *name;
+/** Test to see if @c name has been set. */
+@property(nonatomic, readwrite) BOOL hasName;
+
+@end
+
+/**
+ * Clears whatever value was set for the oneof 'identifier'.
+ **/
+void ITMGetPropertyRequest_ClearIdentifierOneOfCase(ITMGetPropertyRequest *message);
+
+#pragma mark - ITMGetPropertyResponse
+
+typedef GPB_ENUM(ITMGetPropertyResponse_FieldNumber) {
+  ITMGetPropertyResponse_FieldNumber_Status = 1,
+  ITMGetPropertyResponse_FieldNumber_JsonValue = 2,
+};
+
+@interface ITMGetPropertyResponse : GPBMessage
+
+/**
+ * Name           Example value
+ * -------------  ---------------
+ * frame          { "origin": { "x": 0, "y": 0 }, "size": { "width": 1024, "height": 768 }}
+ * fullscreen     true, false
+ **/
+@property(nonatomic, readwrite) ITMGetPropertyResponse_Status status;
+
+@property(nonatomic, readwrite) BOOL hasStatus;
+@property(nonatomic, readwrite, copy, null_resettable) NSString *jsonValue;
+/** Test to see if @c jsonValue has been set. */
+@property(nonatomic, readwrite) BOOL hasJsonValue;
+
+@end
+
+#pragma mark - ITMSetPropertyRequest
+
+typedef GPB_ENUM(ITMSetPropertyRequest_FieldNumber) {
+  ITMSetPropertyRequest_FieldNumber_WindowId = 1,
+  ITMSetPropertyRequest_FieldNumber_Name = 3,
+  ITMSetPropertyRequest_FieldNumber_JsonValue = 4,
+};
+
+typedef GPB_ENUM(ITMSetPropertyRequest_Identifier_OneOfCase) {
+  ITMSetPropertyRequest_Identifier_OneOfCase_GPBUnsetOneOfCase = 0,
+  ITMSetPropertyRequest_Identifier_OneOfCase_WindowId = 1,
+};
+
+@interface ITMSetPropertyRequest : GPBMessage
+
+/**
+ * Eventually you'll be able to set properties on other things besides
+ * window_id. The kind of ID that's set determines the kind of object you're
+ * updating.
+ **/
+@property(nonatomic, readonly) ITMSetPropertyRequest_Identifier_OneOfCase identifierOneOfCase;
+
+@property(nonatomic, readwrite, copy, null_resettable) NSString *windowId;
+
+/**
+ * Name           Example JSON
+ * -------------  ---------------
+ * frame          { "origin": { "x": 0, "y": 0 }, "size": { "width": 1024, "height": 768 }}
+ * fullscreen     true, false
+ **/
+@property(nonatomic, readwrite, copy, null_resettable) NSString *name;
+/** Test to see if @c name has been set. */
+@property(nonatomic, readwrite) BOOL hasName;
+
+@property(nonatomic, readwrite, copy, null_resettable) NSString *jsonValue;
+/** Test to see if @c jsonValue has been set. */
+@property(nonatomic, readwrite) BOOL hasJsonValue;
+
+@end
+
+/**
+ * Clears whatever value was set for the oneof 'identifier'.
+ **/
+void ITMSetPropertyRequest_ClearIdentifierOneOfCase(ITMSetPropertyRequest *message);
+
+#pragma mark - ITMSetPropertyResponse
+
+typedef GPB_ENUM(ITMSetPropertyResponse_FieldNumber) {
+  ITMSetPropertyResponse_FieldNumber_Status = 1,
+};
+
+@interface ITMSetPropertyResponse : GPBMessage
+
+@property(nonatomic, readwrite) ITMSetPropertyResponse_Status status;
+
+@property(nonatomic, readwrite) BOOL hasStatus;
 @end
 
 #pragma mark - ITMRegisterToolRequest
@@ -570,7 +1171,10 @@ typedef GPB_ENUM(ITMNotificationRequest_FieldNumber) {
 
 @interface ITMNotificationRequest : GPBMessage
 
-/** Leave this empty to use the current session, if any. */
+/**
+ * See documentation on session IDs. NOTIFY_ON_NEW_SESSION, NOTIFY_ON_TERMINATE_SESSION, and
+ * NOTIFY_ON_LAYOUT_CHANGE do not use the session ID and are posted on all such events.
+ **/
 @property(nonatomic, readwrite, copy, null_resettable) NSString *session;
 /** Test to see if @c session has been set. */
 @property(nonatomic, readwrite) BOOL hasSession;
@@ -609,6 +1213,7 @@ typedef GPB_ENUM(ITMNotification_FieldNumber) {
   ITMNotification_FieldNumber_NewSessionNotification = 6,
   ITMNotification_FieldNumber_TerminateSessionNotification = 7,
   ITMNotification_FieldNumber_LayoutChangedNotification = 8,
+  ITMNotification_FieldNumber_FocusChangedNotification = 9,
 };
 
 @interface ITMNotification : GPBMessage
@@ -644,6 +1249,10 @@ typedef GPB_ENUM(ITMNotification_FieldNumber) {
 @property(nonatomic, readwrite, strong, null_resettable) ITMLayoutChangedNotification *layoutChangedNotification;
 /** Test to see if @c layoutChangedNotification has been set. */
 @property(nonatomic, readwrite) BOOL hasLayoutChangedNotification;
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMFocusChangedNotification *focusChangedNotification;
+/** Test to see if @c focusChangedNotification has been set. */
+@property(nonatomic, readwrite) BOOL hasFocusChangedNotification;
 
 @end
 
@@ -782,6 +1391,71 @@ typedef GPB_ENUM(ITMNewSessionNotification_FieldNumber) {
 
 @end
 
+#pragma mark - ITMFocusChangedNotification
+
+typedef GPB_ENUM(ITMFocusChangedNotification_FieldNumber) {
+  ITMFocusChangedNotification_FieldNumber_ApplicationActive = 1,
+  ITMFocusChangedNotification_FieldNumber_Window = 2,
+  ITMFocusChangedNotification_FieldNumber_SelectedTab = 3,
+  ITMFocusChangedNotification_FieldNumber_Session = 4,
+};
+
+typedef GPB_ENUM(ITMFocusChangedNotification_Event_OneOfCase) {
+  ITMFocusChangedNotification_Event_OneOfCase_GPBUnsetOneOfCase = 0,
+  ITMFocusChangedNotification_Event_OneOfCase_ApplicationActive = 1,
+  ITMFocusChangedNotification_Event_OneOfCase_Window = 2,
+  ITMFocusChangedNotification_Event_OneOfCase_SelectedTab = 3,
+  ITMFocusChangedNotification_Event_OneOfCase_Session = 4,
+};
+
+/**
+ * Note this is sent when the app becomes/resigns active, the key window changes, the selected tab
+ * of a window changes, or the active pane of a tab changes. Note that you may receive duplicate
+ * notifications at times. Ignore those that do not signify a change.
+ **/
+@interface ITMFocusChangedNotification : GPBMessage
+
+@property(nonatomic, readonly) ITMFocusChangedNotification_Event_OneOfCase eventOneOfCase;
+
+/** true: application became active. false: application resigned active. */
+@property(nonatomic, readwrite) BOOL applicationActive;
+
+/** If set, gives info about a change to window focus. */
+@property(nonatomic, readwrite, strong, null_resettable) ITMFocusChangedNotification_Window *window;
+
+/** If set, selected tab changed to the one identified herein. */
+@property(nonatomic, readwrite, copy, null_resettable) NSString *selectedTab;
+
+/** If set, the given session became active in its tab. */
+@property(nonatomic, readwrite, copy, null_resettable) NSString *session;
+
+@end
+
+/**
+ * Clears whatever value was set for the oneof 'event'.
+ **/
+void ITMFocusChangedNotification_ClearEventOneOfCase(ITMFocusChangedNotification *message);
+
+#pragma mark - ITMFocusChangedNotification_Window
+
+typedef GPB_ENUM(ITMFocusChangedNotification_Window_FieldNumber) {
+  ITMFocusChangedNotification_Window_FieldNumber_WindowStatus = 1,
+  ITMFocusChangedNotification_Window_FieldNumber_WindowId = 2,
+};
+
+@interface ITMFocusChangedNotification_Window : GPBMessage
+
+/** Describes how to interpret window_id. */
+@property(nonatomic, readwrite) ITMFocusChangedNotification_Window_WindowStatus windowStatus;
+
+@property(nonatomic, readwrite) BOOL hasWindowStatus;
+/** The affected window_id */
+@property(nonatomic, readwrite, copy, null_resettable) NSString *windowId;
+/** Test to see if @c windowId has been set. */
+@property(nonatomic, readwrite) BOOL hasWindowId;
+
+@end
+
 #pragma mark - ITMTerminateSessionNotification
 
 typedef GPB_ENUM(ITMTerminateSessionNotification_FieldNumber) {
@@ -825,7 +1499,7 @@ typedef GPB_ENUM(ITMGetBufferRequest_FieldNumber) {
  **/
 @interface ITMGetBufferRequest : GPBMessage
 
-/** Leave this empty to use the current session, if any. */
+/** See documentation on session IDs. "all" not accepted. */
 @property(nonatomic, readwrite, copy, null_resettable) NSString *session;
 /** Test to see if @c session has been set. */
 @property(nonatomic, readwrite) BOOL hasSession;
@@ -890,7 +1564,7 @@ typedef GPB_ENUM(ITMGetPromptRequest_FieldNumber) {
  **/
 @interface ITMGetPromptRequest : GPBMessage
 
-/** Leave this empty to use the current session, if any. */
+/** See documentation on session IDs. "all" not accepted. */
 @property(nonatomic, readwrite, copy, null_resettable) NSString *session;
 /** Test to see if @c session has been set. */
 @property(nonatomic, readwrite) BOOL hasSession;
@@ -947,7 +1621,7 @@ typedef GPB_ENUM(ITMGetProfilePropertyRequest_FieldNumber) {
 
 @interface ITMGetProfilePropertyRequest : GPBMessage
 
-/** Leave this empty to use the current session, if any. */
+/** See documentation on session IDs */
 @property(nonatomic, readwrite, copy, null_resettable) NSString *session;
 /** Test to see if @c session has been set. */
 @property(nonatomic, readwrite) BOOL hasSession;
@@ -1009,7 +1683,7 @@ typedef GPB_ENUM(ITMSetProfilePropertyRequest_FieldNumber) {
  **/
 @interface ITMSetProfilePropertyRequest : GPBMessage
 
-/** Leave this empty to use the current session, if any. */
+/** See documentation on session IDs */
 @property(nonatomic, readwrite, copy, null_resettable) NSString *session;
 /** Test to see if @c session has been set. */
 @property(nonatomic, readwrite) BOOL hasSession;
@@ -1391,7 +2065,7 @@ typedef GPB_ENUM(ITMSendTextRequest_FieldNumber) {
 
 @interface ITMSendTextRequest : GPBMessage
 
-/** Leave this empty to use the current session, if any. */
+/** See documentation on session IDs */
 @property(nonatomic, readwrite, copy, null_resettable) NSString *session;
 /** Test to see if @c session has been set. */
 @property(nonatomic, readwrite) BOOL hasSession;
@@ -1419,6 +2093,59 @@ typedef GPB_ENUM(ITMSendTextResponse_FieldNumber) {
 @property(nonatomic, readwrite) BOOL hasStatus;
 @end
 
+#pragma mark - ITMSize
+
+typedef GPB_ENUM(ITMSize_FieldNumber) {
+  ITMSize_FieldNumber_Width = 1,
+  ITMSize_FieldNumber_Height = 2,
+};
+
+@interface ITMSize : GPBMessage
+
+@property(nonatomic, readwrite) int32_t width;
+
+@property(nonatomic, readwrite) BOOL hasWidth;
+@property(nonatomic, readwrite) int32_t height;
+
+@property(nonatomic, readwrite) BOOL hasHeight;
+@end
+
+#pragma mark - ITMPoint
+
+typedef GPB_ENUM(ITMPoint_FieldNumber) {
+  ITMPoint_FieldNumber_X = 1,
+  ITMPoint_FieldNumber_Y = 2,
+};
+
+@interface ITMPoint : GPBMessage
+
+@property(nonatomic, readwrite) int32_t x;
+
+@property(nonatomic, readwrite) BOOL hasX;
+@property(nonatomic, readwrite) int32_t y;
+
+@property(nonatomic, readwrite) BOOL hasY;
+@end
+
+#pragma mark - ITMFrame
+
+typedef GPB_ENUM(ITMFrame_FieldNumber) {
+  ITMFrame_FieldNumber_Origin = 1,
+  ITMFrame_FieldNumber_Size = 2,
+};
+
+@interface ITMFrame : GPBMessage
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMPoint *origin;
+/** Test to see if @c origin has been set. */
+@property(nonatomic, readwrite) BOOL hasOrigin;
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMSize *size;
+/** Test to see if @c size has been set. */
+@property(nonatomic, readwrite) BOOL hasSize;
+
+@end
+
 #pragma mark - ITMListSessionsResponse
 
 typedef GPB_ENUM(ITMListSessionsResponse_FieldNumber) {
@@ -1438,6 +2165,7 @@ typedef GPB_ENUM(ITMListSessionsResponse_FieldNumber) {
 typedef GPB_ENUM(ITMListSessionsResponse_Window_FieldNumber) {
   ITMListSessionsResponse_Window_FieldNumber_TabsArray = 1,
   ITMListSessionsResponse_Window_FieldNumber_WindowId = 2,
+  ITMListSessionsResponse_Window_FieldNumber_Frame = 3,
 };
 
 @interface ITMListSessionsResponse_Window : GPBMessage
@@ -1450,20 +2178,24 @@ typedef GPB_ENUM(ITMListSessionsResponse_Window_FieldNumber) {
 /** Test to see if @c windowId has been set. */
 @property(nonatomic, readwrite) BOOL hasWindowId;
 
+@property(nonatomic, readwrite, strong, null_resettable) ITMFrame *frame;
+/** Test to see if @c frame has been set. */
+@property(nonatomic, readwrite) BOOL hasFrame;
+
 @end
 
 #pragma mark - ITMListSessionsResponse_Tab
 
 typedef GPB_ENUM(ITMListSessionsResponse_Tab_FieldNumber) {
-  ITMListSessionsResponse_Tab_FieldNumber_SessionsArray = 1,
   ITMListSessionsResponse_Tab_FieldNumber_TabId = 2,
+  ITMListSessionsResponse_Tab_FieldNumber_Root = 3,
 };
 
 @interface ITMListSessionsResponse_Tab : GPBMessage
 
-@property(nonatomic, readwrite, strong, null_resettable) NSMutableArray<ITMListSessionsResponse_Session*> *sessionsArray;
-/** The number of items in @c sessionsArray without causing the array to be created. */
-@property(nonatomic, readonly) NSUInteger sessionsArray_Count;
+@property(nonatomic, readwrite, strong, null_resettable) ITMListSessionsResponse_SplitTreeNode *root;
+/** Test to see if @c root has been set. */
+@property(nonatomic, readwrite) BOOL hasRoot;
 
 @property(nonatomic, readwrite, copy, null_resettable) NSString *tabId;
 /** Test to see if @c tabId has been set. */
@@ -1471,17 +2203,80 @@ typedef GPB_ENUM(ITMListSessionsResponse_Tab_FieldNumber) {
 
 @end
 
-#pragma mark - ITMListSessionsResponse_Session
+#pragma mark - ITMListSessionsResponse_SplitTreeNode
 
-typedef GPB_ENUM(ITMListSessionsResponse_Session_FieldNumber) {
-  ITMListSessionsResponse_Session_FieldNumber_UniqueIdentifier = 1,
+typedef GPB_ENUM(ITMListSessionsResponse_SplitTreeNode_FieldNumber) {
+  ITMListSessionsResponse_SplitTreeNode_FieldNumber_Vertical = 1,
+  ITMListSessionsResponse_SplitTreeNode_FieldNumber_LinksArray = 2,
 };
 
-@interface ITMListSessionsResponse_Session : GPBMessage
+@interface ITMListSessionsResponse_SplitTreeNode : GPBMessage
+
+/** Direction of split pane divider */
+@property(nonatomic, readwrite) BOOL vertical;
+
+@property(nonatomic, readwrite) BOOL hasVertical;
+/** Links to children */
+@property(nonatomic, readwrite, strong, null_resettable) NSMutableArray<ITMListSessionsResponse_SplitTreeNode_SplitTreeLink*> *linksArray;
+/** The number of items in @c linksArray without causing the array to be created. */
+@property(nonatomic, readonly) NSUInteger linksArray_Count;
+
+@end
+
+#pragma mark - ITMListSessionsResponse_SplitTreeNode_SplitTreeLink
+
+typedef GPB_ENUM(ITMListSessionsResponse_SplitTreeNode_SplitTreeLink_FieldNumber) {
+  ITMListSessionsResponse_SplitTreeNode_SplitTreeLink_FieldNumber_Session = 1,
+  ITMListSessionsResponse_SplitTreeNode_SplitTreeLink_FieldNumber_Node = 2,
+};
+
+typedef GPB_ENUM(ITMListSessionsResponse_SplitTreeNode_SplitTreeLink_Child_OneOfCase) {
+  ITMListSessionsResponse_SplitTreeNode_SplitTreeLink_Child_OneOfCase_GPBUnsetOneOfCase = 0,
+  ITMListSessionsResponse_SplitTreeNode_SplitTreeLink_Child_OneOfCase_Session = 1,
+  ITMListSessionsResponse_SplitTreeNode_SplitTreeLink_Child_OneOfCase_Node = 2,
+};
+
+@interface ITMListSessionsResponse_SplitTreeNode_SplitTreeLink : GPBMessage
+
+@property(nonatomic, readonly) ITMListSessionsResponse_SplitTreeNode_SplitTreeLink_Child_OneOfCase childOneOfCase;
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMListSessionsResponse_SplitTreeNode_SplitTreeLink_Session *session;
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMListSessionsResponse_SplitTreeNode *node;
+
+@end
+
+/**
+ * Clears whatever value was set for the oneof 'child'.
+ **/
+void ITMListSessionsResponse_SplitTreeNode_SplitTreeLink_ClearChildOneOfCase(ITMListSessionsResponse_SplitTreeNode_SplitTreeLink *message);
+
+#pragma mark - ITMListSessionsResponse_SplitTreeNode_SplitTreeLink_Session
+
+typedef GPB_ENUM(ITMListSessionsResponse_SplitTreeNode_SplitTreeLink_Session_FieldNumber) {
+  ITMListSessionsResponse_SplitTreeNode_SplitTreeLink_Session_FieldNumber_UniqueIdentifier = 1,
+  ITMListSessionsResponse_SplitTreeNode_SplitTreeLink_Session_FieldNumber_Frame = 2,
+  ITMListSessionsResponse_SplitTreeNode_SplitTreeLink_Session_FieldNumber_GridSize = 3,
+  ITMListSessionsResponse_SplitTreeNode_SplitTreeLink_Session_FieldNumber_Title = 4,
+};
+
+@interface ITMListSessionsResponse_SplitTreeNode_SplitTreeLink_Session : GPBMessage
 
 @property(nonatomic, readwrite, copy, null_resettable) NSString *uniqueIdentifier;
 /** Test to see if @c uniqueIdentifier has been set. */
 @property(nonatomic, readwrite) BOOL hasUniqueIdentifier;
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMFrame *frame;
+/** Test to see if @c frame has been set. */
+@property(nonatomic, readwrite) BOOL hasFrame;
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMSize *gridSize;
+/** Test to see if @c gridSize has been set. */
+@property(nonatomic, readwrite) BOOL hasGridSize;
+
+@property(nonatomic, readwrite, copy, null_resettable) NSString *title;
+/** Test to see if @c title has been set. */
+@property(nonatomic, readwrite) BOOL hasTitle;
 
 @end
 
@@ -1555,7 +2350,7 @@ typedef GPB_ENUM(ITMSplitPaneRequest_FieldNumber) {
 
 @interface ITMSplitPaneRequest : GPBMessage
 
-/** Leave this empty to use the current session, if any. */
+/** See documentation on session IDs */
 @property(nonatomic, readwrite, copy, null_resettable) NSString *session;
 /** Test to see if @c session has been set. */
 @property(nonatomic, readwrite) BOOL hasSession;
@@ -1578,7 +2373,7 @@ typedef GPB_ENUM(ITMSplitPaneRequest_FieldNumber) {
 
 typedef GPB_ENUM(ITMSplitPaneResponse_FieldNumber) {
   ITMSplitPaneResponse_FieldNumber_Status = 1,
-  ITMSplitPaneResponse_FieldNumber_SessionId = 2,
+  ITMSplitPaneResponse_FieldNumber_SessionIdArray = 2,
 };
 
 @interface ITMSplitPaneResponse : GPBMessage
@@ -1589,10 +2384,12 @@ typedef GPB_ENUM(ITMSplitPaneResponse_FieldNumber) {
 /**
  * TODO(gln): this will not be set for tmux integration because the split happens only if/when the
  * tmux server acts on the request.
+ * See documentation on session IDs.
+ * If more than one session was split, there will be multiple session_id's.
  **/
-@property(nonatomic, readwrite, copy, null_resettable) NSString *sessionId;
-/** Test to see if @c sessionId has been set. */
-@property(nonatomic, readwrite) BOOL hasSessionId;
+@property(nonatomic, readwrite, strong, null_resettable) NSMutableArray<NSString*> *sessionIdArray;
+/** The number of items in @c sessionIdArray without causing the array to be created. */
+@property(nonatomic, readonly) NSUInteger sessionIdArray_Count;
 
 @end
 

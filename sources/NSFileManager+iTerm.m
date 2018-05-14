@@ -116,6 +116,20 @@ NSString * const DirectoryLocationDomain = @"DirectoryLocationDomain";
     return result;
 }
 
+- (NSString *)applicationSupportDirectoryWithoutSpaces {
+    NSError *error;
+    NSString *realAppSupport = [self findOrCreateDirectory:NSApplicationSupportDirectory
+                                                  inDomain:NSUserDomainMask
+                                       appendPathComponent:nil
+                                                     error:&error];
+    NSString *nospaces = [realAppSupport stringByReplacingOccurrencesOfString:@"Application Support" withString:@"ApplicationSupport"];
+    [[NSFileManager defaultManager] createSymbolicLinkAtPath:nospaces withDestinationPath:realAppSupport error:nil];
+
+    NSString *executableName =
+        [[[NSBundle mainBundle] infoDictionary] objectForKey:(id)kCFBundleExecutableKey];
+    return [nospaces stringByAppendingPathComponent:executableName];
+}
+
 - (NSString *)legacyApplicationSupportDirectory {
     NSError *error;
     NSString *result = [self findOrCreateDirectory:NSApplicationSupportDirectory
@@ -129,26 +143,28 @@ NSString * const DirectoryLocationDomain = @"DirectoryLocationDomain";
 }
 
 - (NSString *)versionNumberFilename {
-    return [[self legacyApplicationSupportDirectory] stringByAppendingPathComponent:@"version.txt"];
+    return [[self applicationSupportDirectory] stringByAppendingPathComponent:@"version.txt"];
 }
 
 - (NSString *)scriptsPath {
-    static dispatch_once_t onceToken;
-    NSString *legacyPath = [[self legacyApplicationSupportDirectory] stringByAppendingPathComponent:@"Scripts"];
-    NSString *modernPath = [[self applicationSupportDirectory] stringByAppendingPathComponent:@"Scripts"];
-    static BOOL useLegacy;
-    dispatch_once(&onceToken, ^{
-        useLegacy = [self fileExistsAtPath:legacyPath] && ![self fileExistsAtPath:modernPath];
-    });
-    return useLegacy ? legacyPath : modernPath;
+    return [[self applicationSupportDirectory] stringByAppendingPathComponent:@"Scripts"];
 }
 
-- (NSString *)autolaunchScriptPath {
+- (NSString *)scriptsPathWithoutSpaces {
+    NSString *modernPath = [[self applicationSupportDirectoryWithoutSpaces] stringByAppendingPathComponent:@"Scripts"];
+    return modernPath;
+}
+
+- (NSString *)legacyAutolaunchScriptPath {
     return [[self scriptsPath] stringByAppendingPathComponent:@"AutoLaunch.scpt"];
 }
 
+- (NSString *)autolaunchScriptPath {
+    return [[self scriptsPath] stringByAppendingPathComponent:@"AutoLaunch"];
+}
+
 - (NSString *)quietFilePath {
-    return [[self legacyApplicationSupportDirectory] stringByAppendingPathComponent:@"quiet"];
+    return [[self applicationSupportDirectory] stringByAppendingPathComponent:@"quiet"];
 }
 
 - (NSString *)temporaryDirectory {
@@ -241,6 +257,26 @@ NSString * const DirectoryLocationDomain = @"DirectoryLocationDomain";
         ok = NO;
     }
     return ok;
+}
+
+- (BOOL)itemIsDirectory:(NSString *)path {
+    NSDictionary<NSFileAttributeKey, id> *attributes = [self attributesOfItemAtPath:path error:nil];
+    return [attributes[NSFileType] isEqual:NSFileTypeDirectory];
+}
+
+- (BOOL)itemIsSymlink:(NSString *)path {
+    NSDictionary<NSFileAttributeKey, id> *attributes = [self attributesOfItemAtPath:path error:nil];
+    return [attributes[NSFileType] isEqual:NSFileTypeSymbolicLink];
+}
+
+- (BOOL)directoryEmpty:(NSString *)path {
+    NSDirectoryEnumerator *enumerator = [self enumeratorAtPath:path];
+    for (NSString *file in enumerator) {
+        if (file) {
+            return NO;
+        }
+    }
+    return YES;
 }
 
 @end

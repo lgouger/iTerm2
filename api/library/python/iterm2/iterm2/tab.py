@@ -1,74 +1,88 @@
-#!/usr/bin/python
-# This is python 2.7 on macOS 10.12.
+"""Provides a class that represents an iTerm2 tab."""
 
-from __future__ import print_function
+import iterm2.rpc
 
-from sharedstate import get_socket, wait
-import api_pb2
-import session
-import _socket as socket
-import logging
+class Tab:
+    """Represents a tab."""
+    def __init__(self, connection, tab_id, root):
+        self.connection = connection
+        self.__tab_id = tab_id
+        self.__root = root
+        self.active_session_id = None
 
-class AbstractTab(object):
-  def __repr__(self):
-    raise NotImplementedError("unimplemented")
+    def __repr__(self):
+        return "<Tab id=%s sessions=%s>" % (self.__tab_id, self.sessions)
 
-  def get_tab_id(self):
-    raise NotImplementedError("unimplemented")
+    def update_from(self, other):
+        """Copies state from another tab into this one."""
+        self.__root = other.root
+        self.active_session_id = other.active_session_id
 
-  def get_sessions(self):
-    raise NotImplementedError("unimplemented")
+    def update_session(self, session):
+        """Replaces references to a session."""
+        self.__root.update_session(session)
 
-  def pretty_str(self, indent=""):
-    s = indent + "Tab id=%s\n" % self.get_tab_id()
-    for j in self.get_sessions():
-      s += j.pretty_str(indent=indent + "  ")
-    return s
+    @property
+    def tab_id(self):
+        """
+        Each tab has a globally unique identifier.
 
-class FutureTab(AbstractTab):
-  def __init__(self, future):
-    self.future = future
-    self.tab = None
-    self.status = None
+        :returns: The tab's identifier.
+        """
+        return self.__tab_id
 
-  def __repr__(self):
-    return "<FutureTab status=%s tab=%s>" % (str(self.get_status()), repr(self._get_tab()))
+    @property
+    def sessions(self):
+        """
+        A tab contains a list of sessions, which are its split panes.
 
-  def get_tab_id(self):
-    return self._get_tab().get_tab_id()
+        :returns: A list of :class:`Session` objects belonging to this tab.
+        """
+        return self.__root.sessions
 
-  def get_sessions(self):
-    return self._get_tab().get_sessions()
+    @property
+    def root(self):
+        """
+        A tab's sessions are stored in a tree. This returns the root.
 
-  def get_status(self):
-    self.parse_if_needed()
-    return self.status
+        An interior node of the tree is a Splitter. That corresponds to a
+        collection of adjacent sessions with split pane dividers that are all
+        either vertical or horizontal.
 
-  def _get_tab(self):
-    self._parse_if_needed()
-    return self.tab
+        Leaf nodes are Sessions.
 
-  def _parse_if_needed(self):
-    if self.future is not None:
-      self._parse(self.future.get())
-      self.future = None
+        :returns: An :class:`Splitter` forming the root of this tab's session tree.
+        """
+        return self.__root
 
-  def _parse(self, response):
-    self.status = response.status
-    if self.status == api_pb2.CreateTabResponse.OK:
-       self.tab = Tab(response.tab_id, [ session.Session(response.session_id) ])
+    @property
+    def current_session(self):
+        """
+        :returns: The active iterm2.Session in this tab or None if it could not be determined.
+        """
+        for session in self.sessions:
+            if session.session_id == self.active_session_id:
+                return session
+        return None
 
-class Tab(AbstractTab):
-  def __init__(self, tab_id, sessions):
-    self.tab_id = tab_id
-    self.sessions = sessions
+    def pretty_str(self, indent=""):
+        """
+        :returns: A human readable description of the tab and its sessions.
+        """
+        session = indent + "Tab id=%s\n" % self.tab_id
+        session += self.__root.pretty_str(indent=indent + "  ")
+        return session
 
-  def __repr__(self):
-    return "<Tab id=%s sessions=%s>" % (self.tab_id, self.sessions)
+    async def async_select(self, order_window_front=True):
+        """
+        Selects this tab.
 
-  def get_tab_id(self):
-    return self.tab_id
-
-  def get_sessions(self):
-    return self.sessions
-
+        :param order_window_front: Whether the window this session is in should be
+          brought to the front and given keyboard focus.
+        """
+        await iterm2.rpc.async_activate(
+            self.connection,
+            False,
+            True,
+            order_window_front,
+            tab_id=self.__tab_id)

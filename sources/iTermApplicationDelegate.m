@@ -31,7 +31,6 @@
 #import "ColorsMenuItemView.h"
 #import "FileTransferManager.h"
 #import "ITAddressBookMgr.h"
-#import "iTermAPIServer.h"
 #import "iTermAboutWindowController.h"
 #import "iTermAppHotKeyProvider.h"
 #import "iTermAdvancedSettingsModel.h"
@@ -50,6 +49,7 @@
 #import "iTermLSOF.h"
 #import "iTermModifierRemapper.h"
 #import "iTermPreferences.h"
+#import "iTermPythonRuntimeDownloader.h"
 #import "iTermRemotePreferences.h"
 #import "iTermAdvancedSettingsModel.h"
 #import "iTermOpenQuicklyWindowController.h"
@@ -60,10 +60,12 @@
 #import "iTermPromptOnCloseReason.h"
 #import "iTermProfilePreferences.h"
 #import "iTermProfilesWindowController.h"
+#import "iTermScriptConsole.h"
 #import "iTermServiceProvider.h"
 #import "iTermQuickLookController.h"
 #import "iTermRemotePreferences.h"
 #import "iTermRestorableSession.h"
+#import "iTermScriptsMenuController.h"
 #import "iTermSystemVersion.h"
 #import "iTermTipController.h"
 #import "iTermTipWindowController.h"
@@ -110,7 +112,6 @@ static NSString *const kMarkAlertAction = @"Mark Alert Action";
 NSString *const kMarkAlertActionModalAlert = @"Modal Alert";
 NSString *const kMarkAlertActionPostNotification = @"Post Notification";
 NSString *const kShowFullscreenTabsSettingDidChange = @"kShowFullscreenTabsSettingDidChange";
-NSString *const iTermRemoveAPIServerSubscriptionsNotification = @"iTermRemoveAPIServerSubscriptionsNotification";
 
 static NSString *const kScreenCharRestorableStateKey = @"kScreenCharRestorableStateKey";
 static NSString *const kURLStoreRestorableStateKey = @"kURLStoreRestorableStateKey";
@@ -126,18 +127,9 @@ NSString *const iTermApplicationWillTerminate = @"iTermApplicationWillTerminate"
 static BOOL gStartupActivitiesPerformed = NO;
 // Prior to 8/7/11, there was only one window arrangement, always called Default.
 static NSString *LEGACY_DEFAULT_ARRANGEMENT_NAME = @"Default";
-static BOOL ranAutoLaunchScript = NO;
 static BOOL hasBecomeActive = NO;
 
-static NSString *const kBundlesWithAPIAccessSettingKey = @"NoSyncBundlesWithAPIAccessSettings";
-static NSString *const kAPIAccessAllowed = @"allowed";
-static NSString *const kAPIAccessDate = @"date";
-static NSString *const kAPINextConfirmationDate = @"next confirmation";
-static NSString *const kAPIAccessLocalizedName = @"app name";
-static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
-
-
-@interface iTermApplicationDelegate () <iTermAPIServerDelegate, iTermPasswordManagerDelegate>
+@interface iTermApplicationDelegate () <iTermPasswordManagerDelegate>
 
 @property(nonatomic, readwrite) BOOL workspaceSessionActive;
 
@@ -148,29 +140,31 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
     iTermPasswordManagerWindowController *_passwordManagerWindowController;
 
     // Menu items
-    IBOutlet NSMenu *bookmarkMenu;
-    IBOutlet NSMenu *toolbeltMenu;
+    __weak IBOutlet NSMenu *bookmarkMenu;
+    __weak IBOutlet NSMenu *toolbeltMenu;
     NSMenuItem *downloadsMenu_;
     NSMenuItem *uploadsMenu_;
-    IBOutlet NSMenuItem *selectTab;
-    IBOutlet NSMenuItem *logStart;
-    IBOutlet NSMenuItem *logStop;
-    IBOutlet NSMenuItem *closeTab;
-    IBOutlet NSMenuItem *closeWindow;
-    IBOutlet NSMenuItem *sendInputToAllSessions;
-    IBOutlet NSMenuItem *sendInputToAllPanes;
-    IBOutlet NSMenuItem *sendInputNormally;
-    IBOutlet NSMenuItem *irPrev;
-    IBOutlet NSMenuItem *windowArrangements_;
-    IBOutlet NSMenuItem *windowArrangementsAsTabs_;
-    IBOutlet NSMenu *_buriedSessions;
+    __weak IBOutlet NSMenuItem *selectTab;
+    __weak IBOutlet NSMenuItem *logStart;
+    __weak IBOutlet NSMenuItem *logStop;
+    __weak IBOutlet NSMenuItem *closeTab;
+    __weak IBOutlet NSMenuItem *closeWindow;
+    __weak IBOutlet NSMenuItem *sendInputToAllSessions;
+    __weak IBOutlet NSMenuItem *sendInputToAllPanes;
+    __weak IBOutlet NSMenuItem *sendInputNormally;
+    __weak IBOutlet NSMenuItem *irPrev;
+    __weak IBOutlet NSMenuItem *windowArrangements_;
+    __weak IBOutlet NSMenuItem *windowArrangementsAsTabs_;
+    __weak IBOutlet NSMenuItem *_installPythonRuntime;
+    __weak IBOutlet NSMenu *_buriedSessions;
     NSMenu *_statusIconBuriedSessions;  // unsafe unretained
+    __weak IBOutlet NSMenu *_scriptsMenu;
 
-    IBOutlet NSMenuItem *showFullScreenTabs;
-    IBOutlet NSMenuItem *useTransparency;
-    IBOutlet NSMenuItem *maximizePane;
-    IBOutlet SUUpdater * suUpdater;
-    IBOutlet NSMenuItem *_showTipOfTheDay;  // Here because we must remove it for older OS versions.
+    __weak IBOutlet NSMenuItem *showFullScreenTabs;
+    __weak IBOutlet NSMenuItem *useTransparency;
+    __weak IBOutlet NSMenuItem *maximizePane;
+    __weak IBOutlet SUUpdater * suUpdater;
+    __weak IBOutlet NSMenuItem *_showTipOfTheDay;  // Here because we must remove it for older OS versions.
     BOOL secureInputDesired_;
     BOOL quittingBecauseLastWindowClosed_;
 
@@ -197,16 +191,11 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
 
     BOOL _orphansAdopted;  // Have orphan servers been adopted?
 
-    iTermAPIServer *_apiServer;
-
     NSArray<NSDictionary *> *_buriedSessionsState;
-    NSMutableDictionary<id, ITMNotificationRequest *> *_newSessionSubscriptions;
-    NSMutableDictionary<id, ITMNotificationRequest *> *_terminateSessionSubscriptions;
-    NSMutableDictionary<id, ITMNotificationRequest *> *_layoutChangeSubscriptions;
-    BOOL _layoutChanged;
 
     // Location of mouse when the app became inactive.
     NSPoint _savedMouseLocation;
+    iTermScriptsMenuController *_scriptsMenuController;
 }
 
 - (instancetype)init {
@@ -235,7 +224,7 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
 
         [[NSNotificationCenter defaultCenter] addObserver:self
                                                  selector:@selector(reloadSessionMenus:)
-                                                     name:@"iTermSessionBecameKey"
+                                                     name:iTermSessionBecameKey
                                                    object:nil];
 
         [[NSNotificationCenter defaultCenter] addObserver:self
@@ -255,30 +244,6 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
                                                  selector:@selector(currentSessionDidChange)
                                                      name:kCurrentSessionDidChange
                                                    object:nil];
-        [[NSNotificationCenter defaultCenter] addObserver:self
-                                                 selector:@selector(sessionCreated:)
-                                                     name:PTYSessionCreatedNotification
-                                                   object:nil];
-        [[NSNotificationCenter defaultCenter] addObserver:self
-                                                 selector:@selector(sessionCreated:)
-                                                     name:PTYSessionRevivedNotification
-                                                   object:nil];
-        [[NSNotificationCenter defaultCenter] addObserver:self
-                                                 selector:@selector(sessionDidTerminate:)
-                                                     name:PTYSessionTerminatedNotification
-                                                   object:nil];
-        [[NSNotificationCenter defaultCenter] addObserver:self
-                                                 selector:@selector(layoutChanged:)
-                                                     name:iTermSessionDidChangeTabNotification
-                                                   object:nil];
-        [[NSNotificationCenter defaultCenter] addObserver:self
-                                                 selector:@selector(layoutChanged:)
-                                                     name:iTermTabDidChangeWindowNotification
-                                                   object:nil];
-        [[NSNotificationCenter defaultCenter] addObserver:self
-                                                 selector:@selector(layoutChanged:)
-                                                     name:iTermTabDidChangePositionInWindowNotification
-                                                   object:nil];
 
         [[NSAppleEventManager sharedAppleEventManager] setEventHandler:self
                                                            andSelector:@selector(getUrl:withReplyEvent:)
@@ -296,9 +261,6 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
     [[NSNotificationCenter defaultCenter] removeObserver:self];
     [[[NSWorkspace sharedWorkspace] notificationCenter] removeObserver:self];
     [_appNapStoppingActivity release];
-    [_newSessionSubscriptions release];
-    [_layoutChangeSubscriptions release];
-    [_terminateSessionSubscriptions release];
     [super dealloc];
 }
 
@@ -560,9 +522,6 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
     [sendInputNormally setState:noBroadcast];
 }
 
-- (void)postAPINotification:(ITMNotification *)notification toConnection:(id)connection {
-    [_apiServer postAPINotification:notification toConnection:connection];
-}
 
 #pragma mark - Application Delegate Overrides
 
@@ -985,6 +944,7 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
         DLog(@"applicationWillFinishLaunching:");
     }
 
+    [[iTermController sharedInstance] migrateApplicationSupportDirectoryIfNeeded];
     [self buildScriptMenu:nil];
 
     // Fix up various user defaults settings.
@@ -1024,8 +984,7 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
     }
 
     if ([iTermAdvancedSettingsModel enableAPIServer]) {
-        _apiServer = [[iTermAPIServer alloc] init];
-        _apiServer.delegate = self;
+        _apiHelper = [[iTermAPIHelper alloc] init];
     }
 
     if ([self shouldNotifyAboutIncompatibleSoftware]) {
@@ -1212,40 +1171,6 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
     [menuItem setState:newState];
 }
 
-- (void)sessionCreated:(NSNotification *)notification {
-    PTYSession *session = notification.object;
-    [_newSessionSubscriptions enumerateKeysAndObjectsUsingBlock:^(id  _Nonnull key, ITMNotificationRequest * _Nonnull obj, BOOL * _Nonnull stop) {
-        ITMNotification *notification = [[[ITMNotification alloc] init] autorelease];
-        notification.newSessionNotification = [[[ITMNewSessionNotification alloc] init] autorelease];
-        notification.newSessionNotification.uniqueIdentifier = session.guid;
-        [[[iTermApplication sharedApplication] delegate] postAPINotification:notification toConnection:key];
-    }];
-}
-
-- (void)layoutChanged:(NSNotification *)notification {
-    if (!_layoutChanged) {
-        _layoutChanged = YES;
-        dispatch_async(dispatch_get_main_queue(), ^{
-            _layoutChanged = NO;
-            [_layoutChangeSubscriptions enumerateKeysAndObjectsUsingBlock:^(id  _Nonnull key, ITMNotificationRequest * _Nonnull obj, BOOL * _Nonnull stop) {
-                ITMNotification *notification = [[[ITMNotification alloc] init] autorelease];
-                notification.layoutChangedNotification.listSessionsResponse = [self newListSessionsResponse];
-                [[[iTermApplication sharedApplication] delegate] postAPINotification:notification toConnection:key];
-            }];
-        });
-    }
-}
-
-- (void)sessionDidTerminate:(NSNotification *)notification {
-    PTYSession *session = notification.object;
-    [_terminateSessionSubscriptions enumerateKeysAndObjectsUsingBlock:^(id  _Nonnull key, ITMNotificationRequest * _Nonnull obj, BOOL * _Nonnull stop) {
-        ITMNotification *notification = [[[ITMNotification alloc] init] autorelease];
-        notification.terminateSessionNotification = [[[ITMTerminateSessionNotification alloc] init] autorelease];
-        notification.terminateSessionNotification.uniqueIdentifier = session.guid;
-        [[[iTermApplication sharedApplication] delegate] postAPINotification:notification toConnection:key];
-    }];
-}
-
 - (void)getUrl:(NSAppleEventDescriptor *)event withReplyEvent:(NSAppleEventDescriptor *)replyEvent {
     NSString *urlStr = [[event paramDescriptorForKeyword:keyDirectObject] stringValue];
     NSURL *url = [NSURL URLWithString:urlStr];
@@ -1392,50 +1317,36 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
         return;
     }
     [[iTermController sharedInstance] setStartingUp:YES];
+
     // Check if we have an autolaunch script to execute. Do it only once, i.e. at application launch.
-    NSString *autolaunchScriptPath = [[NSFileManager defaultManager] autolaunchScriptPath];
-    if (ranAutoLaunchScript == NO &&
-        [[NSFileManager defaultManager] fileExistsAtPath:autolaunchScriptPath]) {
-        ranAutoLaunchScript = YES;
+    BOOL ranAutoLaunchScripts = [self.scriptsMenuController runAutoLaunchScriptsIfNeeded];
 
-        NSAppleScript *autoLaunchScript;
-        NSDictionary *errorInfo = [NSDictionary dictionary];
-        NSURL *aURL = [NSURL fileURLWithPath:autolaunchScriptPath];
+    if ([WindowArrangements defaultArrangementName] == nil &&
+        [WindowArrangements arrangementWithName:LEGACY_DEFAULT_ARRANGEMENT_NAME] != nil) {
+        [WindowArrangements makeDefaultArrangement:LEGACY_DEFAULT_ARRANGEMENT_NAME];
+    }
 
-        // Make sure our script suite registry is loaded
-        [NSScriptSuiteRegistry sharedScriptSuiteRegistry];
+    if ([iTermPreferences boolForKey:kPreferenceKeyOpenBookmark]) {
+        // Open bookmarks window at startup.
+        [self showBookmarkWindow:nil];
+    }
 
-        autoLaunchScript = [[NSAppleScript alloc] initWithContentsOfURL:aURL
-                                                                  error:&errorInfo];
-        [autoLaunchScript executeAndReturnError:&errorInfo];
-        [autoLaunchScript release];
-    } else {
-        if ([WindowArrangements defaultArrangementName] == nil &&
-            [WindowArrangements arrangementWithName:LEGACY_DEFAULT_ARRANGEMENT_NAME] != nil) {
-            [WindowArrangements makeDefaultArrangement:LEGACY_DEFAULT_ARRANGEMENT_NAME];
-        }
-
-        if ([iTermPreferences boolForKey:kPreferenceKeyOpenBookmark]) {
-            // Open bookmarks window at startup.
-            [self showBookmarkWindow:nil];
-        }
-
-        if ([iTermPreferences boolForKey:kPreferenceKeyOpenArrangementAtStartup]) {
-            // Open the saved arrangement at startup.
-            [[iTermController sharedInstance] loadWindowArrangementWithName:[WindowArrangements defaultArrangementName]];
-        } else if (![iTermPreferences boolForKey:kPreferenceKeyOpenNoWindowsAtStartup] &&
-                   ![PseudoTerminalRestorer willOpenWindows] &&
-                   [[[iTermController sharedInstance] terminals] count] == 0 &&
-                   ![self isApplescriptTestApp] &&
-                   [[[iTermHotKeyController sharedInstance] profileHotKeys] count] == 0 &&
-                   [[[iTermBuriedSessions sharedInstance] buriedSessions] count] == 0) {
-            [self newWindow:nil];
-        }
+    if ([iTermPreferences boolForKey:kPreferenceKeyOpenArrangementAtStartup]) {
+        // Open the saved arrangement at startup.
+        [[iTermController sharedInstance] loadWindowArrangementWithName:[WindowArrangements defaultArrangementName]];
+    } else if (!ranAutoLaunchScripts &&
+               [iTermAdvancedSettingsModel openNewWindowAtStartup] &&
+               ![iTermPreferences boolForKey:kPreferenceKeyOpenNoWindowsAtStartup] &&
+               ![PseudoTerminalRestorer willOpenWindows] &&
+               [[[iTermController sharedInstance] terminals] count] == 0 &&
+               ![self isApplescriptTestApp] &&
+               [[[iTermHotKeyController sharedInstance] profileHotKeys] count] == 0 &&
+               [[[iTermBuriedSessions sharedInstance] buriedSessions] count] == 0) {
+        [self newWindow:nil];
     }
 
     [[iTermController sharedInstance] setStartingUp:NO];
     [PTYSession removeAllRegisteredSessions];
-    ranAutoLaunchScript = YES;
 
     [[iTermTipController sharedInstance] applicationDidFinishLaunching];
 }
@@ -1584,6 +1495,7 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
 
 - (IBAction)checkForUpdatesFromMenu:(id)sender {
     [suUpdater checkForUpdates:(sender)];
+    [[iTermPythonRuntimeDownloader sharedInstance] upgradeIfPossible];
 }
 
 - (void)warnAboutChangeToDefaultPasteBehavior {
@@ -1759,7 +1671,7 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
 }
 
 - (void)restoreWindowArrangementAsTabs:(id)sender {
-    [[iTermController sharedInstance] loadWindowArrangementWithName:[sender title] asTabs:YES];
+    [[iTermController sharedInstance] loadWindowArrangementWithName:[sender title] asTabsInTerminal:[[iTermController sharedInstance] currentTerminal]];
 }
 
 - (IBAction)togglePinHotkeyWindow:(id)sender {
@@ -2047,58 +1959,43 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
     [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:@"https://www.iterm2.com/documentation.html"]];
 }
 
-- (void)addFile:(NSString *)file toScriptMenu:(NSMenu *)scriptMenu {
-    NSMenuItem *scriptItem = [[[NSMenuItem alloc] initWithTitle:file
-                                                         action:@selector(launchScript:)
-                                                  keyEquivalent:@""] autorelease];
-    [scriptItem setTarget:[iTermController sharedInstance]];
-    [scriptMenu addItem:scriptItem];
+- (iTermScriptsMenuController *)scriptsMenuController {
+    if (!_scriptsMenuController) {
+        _scriptsMenuController = [[iTermScriptsMenuController alloc] initWithMenu:_scriptsMenu];
+        _scriptsMenuController.installRuntimeMenuItem = _installPythonRuntime;
+    }
+    return _scriptsMenuController;
+}
+
+- (IBAction)installPythonRuntime:(id)sender {
+    [[iTermPythonRuntimeDownloader sharedInstance] downloadOptionalComponentsIfNeededWithCompletion:^{}];
 }
 
 - (IBAction)buildScriptMenu:(id)sender {
-    static NSString *kScriptTitle = @"Scripts";
-    static const int kScriptMenuItemIndex = 5;
-    if ([[[[NSApp mainMenu] itemAtIndex:kScriptMenuItemIndex] title] isEqualToString:kScriptTitle]) {
-        [[NSApp mainMenu] removeItemAtIndex:kScriptMenuItemIndex];
-    }
+    [iTermScriptConsole sharedInstance];
+    [self.scriptsMenuController build];
+}
 
-    // create menu item with no title and set image
-    NSMenuItem *scriptMenuItem = [[[NSMenuItem alloc] initWithTitle:kScriptTitle action: nil keyEquivalent: @""] autorelease];
+- (IBAction)openREPL:(id)sender {
+    [[iTermPythonRuntimeDownloader sharedInstance] downloadOptionalComponentsIfNeededWithCompletion:^{
+        NSString *command = [[[[iTermPythonRuntimeDownloader sharedInstance] pathToStandardPyenvPython] stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"apython"];
+        NSURL *injectionURL = [[NSBundle mainBundle] URLForResource:@"repl_banner" withExtension:@"txt"];
+        NSData *injection = [NSData dataWithContentsOfURL:injectionURL];
+        [[iTermController sharedInstance] openSingleUseWindowWithCommand:command
+                                                                  inject:injection];
+    }];
+}
 
-    // create submenu
-    NSMenu *scriptMenu = [[[NSMenu alloc] initWithTitle:kScriptTitle] autorelease];
-    [scriptMenuItem setSubmenu:scriptMenu];
-    // populate the submenu with ascripts found in the script directory
-    NSString *scriptsPath = [[NSFileManager defaultManager] scriptsPath];
-    NSDirectoryEnumerator *directoryEnumerator =
-        [[NSFileManager defaultManager] enumeratorAtPath:scriptsPath];
-    NSWorkspace *workspace = [NSWorkspace sharedWorkspace];
-    NSMutableArray<NSString *> *files = [NSMutableArray array];
-    for (NSString *file in directoryEnumerator) {
-        NSString *path = [scriptsPath stringByAppendingPathComponent:file];
-        if ([workspace isFilePackageAtPath:path]) {
-            [directoryEnumerator skipDescendents];
-        }
-        if ([[file pathExtension] isEqualToString:@"scpt"] ||
-            [[file pathExtension] isEqualToString:@"app"] ) {
-            [files addObject:file];
-        }
-    }
-    [files sortUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
-    for (NSString *file in files) {
-        [self addFile:file toScriptMenu:scriptMenu];
-    }
-    if (files.count > 0) {
-        [scriptMenu addItem:[NSMenuItem separatorItem]];
-        NSMenuItem *scriptItem = [[[NSMenuItem alloc] initWithTitle:@"Refresh"
-                                                             action:@selector(buildScriptMenu:)
-                                                      keyEquivalent:@""] autorelease];
-        [scriptItem setTarget:self];
-        [scriptMenu addItem:scriptItem];
+- (IBAction)openScriptConsole:(id)sender {
+    [[[iTermScriptConsole sharedInstance] window] makeKeyAndOrderFront:nil];
+}
 
-        [[NSApp mainMenu] insertItem:scriptMenuItem atIndex:kScriptMenuItemIndex];
-        [scriptMenuItem setTitle:kScriptTitle];
-    }
+- (IBAction)revealScriptsInFinder:(id)sender {
+    [_scriptsMenuController revealScriptsInFinder];
+}
+
+- (IBAction)newPythonScript:(id)sender {
+    [_scriptsMenuController newPythonScript];
 }
 
 - (IBAction)saveWindowArrangement:(id)sender {
@@ -2219,26 +2116,6 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
     return @[ session ];
 }
 
-- (NSString *)formatBytes:(double)bytes {
-    if (bytes < 1) {
-        return [NSString stringWithFormat:@"%.04lf bytes", bytes];
-    } else if (bytes < 1024) {
-        return [NSString stringWithFormat:@"%d bytes", (int)bytes];
-    } else if (bytes < 10240) {
-        return [NSString stringWithFormat:@"%.1lf kB", bytes / 10];
-    } else if (bytes < 1048576) {
-        return [NSString stringWithFormat:@"%d kB", (int)bytes / 1024];
-    } else if (bytes < 10485760) {
-        return [NSString stringWithFormat:@"%.1lf MB", bytes / 1048576];
-    } else if (bytes < 1024.0 * 1024.0 * 1024.0) {
-        return [NSString stringWithFormat:@"%.0lf MB", bytes / 1048576];
-    } else if (bytes < 1024.0 * 1024.0 * 1024.0 * 10) {
-        return [NSString stringWithFormat:@"%.1lf GB", bytes / (1024.0 * 1024.0 * 1024.0)];
-    } else {
-        return [NSString stringWithFormat:@"%.0lf GB", bytes / (1024.0 * 1024.0 * 1024.0)];
-    }
-}
-
 - (void)changePasteSpeedBy:(double)factor
                   bytesKey:(NSString *)bytesKey
               defaultBytes:(int)defaultBytes
@@ -2262,7 +2139,7 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
     double rate = bytes;
     rate /= delay;
 
-    [ToastWindowController showToastWithMessage:[NSString stringWithFormat:@"Pasting at up to %@/sec", [self formatBytes:rate]]];
+    [ToastWindowController showToastWithMessage:[NSString stringWithFormat:@"Pasting at up to %@/sec", [NSString it_formatBytes:rate]]];
 }
 
 - (void)setSecureInput:(BOOL)secure {
@@ -2360,401 +2237,6 @@ static const NSTimeInterval kOneMonth = 30 * 24 * 60 * 60;
             [quickLookController takeControl];
         }
     }
-}
-
-#pragma mark - iTermAPIServerDelegate
-
-- (NSDictionary *)apiServerAuthorizeProcess:(pid_t)pid {
-    NSMutableDictionary *bundles = [[[NSUserDefaults standardUserDefaults] objectForKey:kBundlesWithAPIAccessSettingKey] mutableCopy];
-    if (!bundles) {
-        bundles = [NSMutableDictionary dictionary];
-    }
-
-    NSString *processName = nil;
-    NSString *processIdentifier = nil;
-
-    NSRunningApplication *app = [NSRunningApplication runningApplicationWithProcessIdentifier:pid];
-    if (app.localizedName && app.bundleIdentifier) {
-        processName = app.localizedName;
-        processIdentifier = app.bundleIdentifier;
-    } else {
-        processIdentifier = [iTermLSOF commandForProcess:pid execName:&processName];
-        if (!processName || !processIdentifier) {
-            XLog(@"Could not identify name for process with pid %d", (int)pid);
-            return nil;
-        }
-        processName = [processName lastPathComponent];
-    }
-    NSDictionary *authorizedIdentity = @{ iTermWebSocketConnectionPeerIdentityBundleIdentifier: processIdentifier };
-    NSString *key = [NSString stringWithFormat:@"bundle=%@", processIdentifier];
-    NSDictionary *setting = bundles[key];
-    BOOL reauth = NO;
-    if (setting) {
-        if (![setting[kAPIAccessAllowed] boolValue]) {
-            // Access permanently disallowed.
-            return nil;
-        }
-
-        NSString *name = setting[kAPIAccessLocalizedName];
-        if ([processName isEqualToString:name]) {
-            // Access is permanently allowed and the display name is unchanged. Do we need to reauth?
-
-            NSDate *confirm = setting[kAPINextConfirmationDate];
-            if ([[NSDate date] compare:confirm] == NSOrderedAscending) {
-                // No need to reauth, allow it.
-                XLog(@"Allowing API access to process id %d, name %@, bundle ID %@", pid, processName, processIdentifier);
-                return authorizedIdentity;
-            }
-
-            // It's been a month since API access was confirmed. Request it again.
-            reauth = YES;
-        }
-    }
-    NSAlert *alert = [[[NSAlert alloc] init] autorelease];
-    if (reauth) {
-        alert.messageText = @"Reauthorize API Access";
-        alert.informativeText = [NSString stringWithFormat:@"The application “%@” (%@) has API access, which grants it permission to see and control your activity. Would you like it to continue?", processName, processIdentifier];
-    } else {
-        alert.messageText = @"API Access Request";
-        alert.informativeText = [NSString stringWithFormat:@"The application “%@” (%@) would like to control iTerm2. This exposes a significant amount of data in iTerm2 to %@. Allow this request?", processName, processIdentifier, processName];
-    }
-    [alert addButtonWithTitle:@"Deny"];
-    [alert addButtonWithTitle:@"Allow"];
-    if (!reauth) {
-        // Reauth is always persistent so don't show the button.
-        alert.suppressionButton.title = @"Remember my selection";
-        alert.showsSuppressionButton = YES;
-    }
-    NSModalResponse response = [alert runModal];
-    BOOL allow = (response == NSAlertSecondButtonReturn);
-
-    if (reauth || alert.suppressionButton.state == NSOnState) {
-        bundles[key] = @{ kAPIAccessAllowed: @(allow),
-                          kAPIAccessDate: [NSDate date],
-                          kAPINextConfirmationDate: [[NSDate date] dateByAddingTimeInterval:kOneMonth],
-                          kAPIAccessLocalizedName: processName };
-    } else {
-        [bundles removeObjectForKey:key];
-    }
-    [[NSUserDefaults standardUserDefaults] setObject:bundles forKey:kBundlesWithAPIAccessSettingKey];
-
-    return allow ? authorizedIdentity : nil;
-}
-
-- (PTYSession *)sessionForAPIIdentifier:(NSString *)identifier {
-    if (identifier) {
-        for (PseudoTerminal *term in [[iTermController sharedInstance] terminals]) {
-            for (PTYSession *session in term.allSessions) {
-                if ([session.guid isEqualToString:identifier]) {
-                    return session;
-                }
-            }
-        }
-        return nil;
-    } else {
-        return [[[iTermController sharedInstance] currentTerminal] currentSession];
-    }
-}
-
-- (void)apiServerGetBuffer:(ITMGetBufferRequest *)request
-                   handler:(void (^)(ITMGetBufferResponse *))handler {
-    PTYSession *session = [self sessionForAPIIdentifier:request.hasSession ? request.session : nil];
-    if (!session) {
-        ITMGetBufferResponse *response = [[[ITMGetBufferResponse alloc] init] autorelease];
-        response.status = ITMGetBufferResponse_Status_SessionNotFound;
-        handler(response);
-    } else {
-        handler([session handleGetBufferRequest:request]);
-    }
-}
-
-- (void)apiServerGetPrompt:(ITMGetPromptRequest *)request
-                   handler:(void (^)(ITMGetPromptResponse *))handler {
-    PTYSession *session = [self sessionForAPIIdentifier:request.hasSession ? request.session : nil];
-    if (!session) {
-        ITMGetPromptResponse *response = [[[ITMGetPromptResponse alloc] init] autorelease];
-        response.status = ITMGetPromptResponse_Status_SessionNotFound;
-        handler(response);
-    } else {
-        handler([session handleGetPromptRequest:request]);
-    }
-}
-
-- (ITMNotificationResponse *)handleAPINotificationRequest:(ITMNotificationRequest *)request connection:(id)connection {
-    ITMNotificationResponse *response = [[ITMNotificationResponse alloc] init];
-    if (!request.hasSubscribe) {
-        response.status = ITMNotificationResponse_Status_RequestMalformed;
-        return response;
-    }
-    if (!_newSessionSubscriptions) {
-        _newSessionSubscriptions = [[NSMutableDictionary alloc] init];
-        _terminateSessionSubscriptions = [[NSMutableDictionary alloc] init];
-        _layoutChangeSubscriptions = [[NSMutableDictionary alloc] init];
-    }
-    NSMutableDictionary<id, ITMNotificationRequest *> *subscriptions;
-    if (request.notificationType == ITMNotificationType_NotifyOnNewSession) {
-        subscriptions = _newSessionSubscriptions;
-    } else if (request.notificationType == ITMNotificationType_NotifyOnTerminateSession) {
-        subscriptions = _terminateSessionSubscriptions;
-    } else if (request.notificationType == ITMNotificationType_NotifyOnLayoutChange) {
-        subscriptions = _layoutChangeSubscriptions;
-    } else {
-        assert(false);
-    }
-    if (request.subscribe) {
-        if (subscriptions[connection]) {
-            response.status = ITMNotificationResponse_Status_AlreadySubscribed;
-            return response;
-        }
-        subscriptions[connection] = request;
-    } else {
-        if (!subscriptions[connection]) {
-            response.status = ITMNotificationResponse_Status_NotSubscribed;
-            return response;
-        }
-        [subscriptions removeObjectForKey:connection];
-    }
-
-    response.status = ITMNotificationResponse_Status_Ok;
-    return response;
-}
-
-- (void)apiServerNotification:(ITMNotificationRequest *)request
-                   connection:(id)connection
-                      handler:(void (^)(ITMNotificationResponse *))handler {
-    if (request.notificationType == ITMNotificationType_NotifyOnNewSession ||
-        request.notificationType == ITMNotificationType_NotifyOnTerminateSession |
-        request.notificationType == ITMNotificationType_NotifyOnLayoutChange) {
-        handler([self handleAPINotificationRequest:request connection:connection]);
-    } else {
-        PTYSession *session = [self sessionForAPIIdentifier:request.hasSession ? request.session : nil];
-        if (!session) {
-            ITMNotificationResponse *response = [[[ITMNotificationResponse alloc] init] autorelease];
-            response.status = ITMNotificationResponse_Status_SessionNotFound;
-            handler(response);
-        } else {
-            handler([session handleAPINotificationRequest:request connection:connection]);
-        }
-    }
-}
-
-- (void)apiServerRemoveSubscriptionsForConnection:(id)connection {
-    [[NSNotificationCenter defaultCenter] postNotificationName:iTermRemoveAPIServerSubscriptionsNotification object:connection];
-}
-
-- (void)apiServerRegisterTool:(ITMRegisterToolRequest *)request
-                 peerIdentity:(NSDictionary *)peerIdentity
-                      handler:(void (^)(ITMRegisterToolResponse *))handler {
-    ITMRegisterToolResponse *response = [[[ITMRegisterToolResponse alloc] init] autorelease];
-    if (!request.hasName || !request.hasIdentifier || !request.hasURL) {
-        response.status = ITMRegisterToolResponse_Status_RequestMalformed;
-        handler(response);
-        return;
-    }
-    NSURL *url = [NSURL URLWithString:request.URL];
-    if (!url || !url.host) {
-        response.status = ITMRegisterToolResponse_Status_RequestMalformed;
-        handler(response);
-        return;
-    }
-
-    NSString *bundleId = peerIdentity[iTermWebSocketConnectionPeerIdentityBundleIdentifier];
-    if (![request.identifier hasPrefix:bundleId]) {
-        response.status = ITMRegisterToolResponse_Status_PermissionDenied;
-        handler(response);
-        return;
-    }
-
-    if ([[iTermToolbeltView builtInToolNames] containsObject:request.name]) {
-        response.status = ITMRegisterToolResponse_Status_PermissionDenied;
-        handler(response);
-        return;
-    }
-
-    [iTermToolbeltView registerDynamicToolWithIdentifier:request.identifier
-                                                    name:request.name
-                                                     URL:request.URL
-                               revealIfAlreadyRegistered:request.revealIfAlreadyRegistered];
-}
-
-- (void)apiServerSetProfileProperty:(ITMSetProfilePropertyRequest *)request
-                            handler:(void (^)(ITMSetProfilePropertyResponse *))handler {
-    PTYSession *session = [self sessionForAPIIdentifier:request.hasSession ? request.session : nil];
-    if (!session) {
-        ITMSetProfilePropertyResponse *response = [[[ITMSetProfilePropertyResponse alloc] init] autorelease];
-        response.status = ITMSetProfilePropertyResponse_Status_SessionNotFound;
-        handler(response);
-        return;
-    }
-
-    NSError *error = nil;
-    id value = [NSJSONSerialization JSONObjectWithData:[request.jsonValue dataUsingEncoding:NSUTF8StringEncoding]
-                                               options:NSJSONReadingAllowFragments
-                                                 error:&error];
-    if (!value || error) {
-        XLog(@"JSON parsing error %@ for value in request %@", error, request);
-        ITMSetProfilePropertyResponse *response = [[[ITMSetProfilePropertyResponse alloc] init] autorelease];
-        response.status = ITMSetProfilePropertyResponse_Status_RequestMalformed;
-        handler(response);
-    }
-
-    handler([session handleSetProfilePropertyForKey:request.key value:value]);
-}
-
-- (void)apiServerGetProfileProperty:(ITMGetProfilePropertyRequest *)request
-                            handler:(void (^)(ITMGetProfilePropertyResponse *))handler {
-    PTYSession *session = [self sessionForAPIIdentifier:request.hasSession ? request.session : nil];
-    if (!session) {
-        ITMGetProfilePropertyResponse *response = [[[ITMGetProfilePropertyResponse alloc] init] autorelease];
-        response.status = ITMGetProfilePropertyResponse_Status_SessionNotFound;
-        handler(response);
-        return;
-    }
-
-    handler([session handleGetProfilePropertyForKeys:request.keysArray]);
-}
-
-- (void)apiServerListSessions:(ITMListSessionsRequest *)request
-                      handler:(void (^)(ITMListSessionsResponse *))handler {
-    handler([self newListSessionsResponse]);
-}
-
-- (ITMListSessionsResponse *)newListSessionsResponse {
-    ITMListSessionsResponse *response = [[[ITMListSessionsResponse alloc] init] autorelease];
-    for (PseudoTerminal *window in [[iTermController sharedInstance] terminals]) {
-        ITMListSessionsResponse_Window *windowMessage = [[[ITMListSessionsResponse_Window alloc] init] autorelease];
-        windowMessage.windowId = window.terminalGuid;
-
-        for (PTYTab *tab in window.tabs) {
-            ITMListSessionsResponse_Tab *tabMessage = [[[ITMListSessionsResponse_Tab alloc] init] autorelease];
-            tabMessage.tabId = [@(tab.uniqueId) stringValue];
-
-            for (PTYSession *session in tab.sessions) {
-                ITMListSessionsResponse_Session *sessionMessage = [[[ITMListSessionsResponse_Session alloc] init] autorelease];
-                sessionMessage.uniqueIdentifier = session.guid;
-                [tabMessage.sessionsArray addObject:sessionMessage];
-            }
-
-            [windowMessage.tabsArray addObject:tabMessage];
-        }
-
-        [response.windowsArray addObject:windowMessage];
-    }
-    return response;
-}
-
-- (void)apiServerSendText:(ITMSendTextRequest *)request handler:(void (^)(ITMSendTextResponse *))handler {
-    PTYSession *session = [self sessionForAPIIdentifier:request.hasSession ? request.session : nil];
-    if (!session || session.exited) {
-        ITMSendTextResponse *response = [[[ITMSendTextResponse alloc] init] autorelease];
-        response.status = ITMSendTextResponse_Status_SessionNotFound;
-        handler(response);
-        return;
-    }
-    [session writeTask:request.text];
-    ITMSendTextResponse *response = [[[ITMSendTextResponse alloc] init] autorelease];
-    response.status = ITMSendTextResponse_Status_Ok;
-    handler(response);
-}
-
-- (void)apiServerCreateTab:(ITMCreateTabRequest *)request handler:(void (^)(ITMCreateTabResponse *))handler {
-    PseudoTerminal *term = nil;
-    if (request.hasWindowId) {
-        term = [[iTermController sharedInstance] terminalWithGuid:request.windowId];
-        if (!term) {
-            ITMCreateTabResponse *response = [[[ITMCreateTabResponse alloc] init] autorelease];
-            response.status = ITMCreateTabResponse_Status_InvalidWindowId;
-            handler(response);
-            return;
-        }
-    }
-
-    Profile *profile = [[ProfileModel sharedInstance] defaultBookmark];
-    if (request.hasProfileName) {
-        profile = [[ProfileModel sharedInstance] bookmarkWithName:request.profileName];
-        if (!profile) {
-            ITMCreateTabResponse *response = [[[ITMCreateTabResponse alloc] init] autorelease];
-            response.status = ITMCreateTabResponse_Status_InvalidProfileName;
-            handler(response);
-            return;
-        }
-    }
-
-    PTYSession *session = [[iTermController sharedInstance] launchBookmark:profile
-                                                                inTerminal:term
-                                                                   withURL:nil
-                                                          hotkeyWindowType:iTermHotkeyWindowTypeNone
-                                                                   makeKey:YES
-                                                               canActivate:YES
-                                                                   command:request.hasCommand ? request.command : nil
-                                                                     block:nil];
-    if (!session) {
-        ITMCreateTabResponse *response = [[[ITMCreateTabResponse alloc] init] autorelease];
-        response.status = ITMCreateTabResponse_Status_MissingSubstitution;
-        handler(response);
-        return;
-    }
-
-    term = [[iTermController sharedInstance] terminalWithSession:session];
-    PTYTab *tab = [term tabForSession:session];
-
-    ITMCreateTabResponse_Status status = ITMCreateTabResponse_Status_Ok;
-
-    if (request.hasTabIndex) {
-        NSInteger sourceIndex = [term indexOfTab:tab];
-        if (term.numberOfTabs > request.tabIndex && sourceIndex != NSNotFound) {
-            [term.tabBarControl moveTabAtIndex:sourceIndex toIndex:request.tabIndex];
-        } else {
-            status = ITMCreateTabResponse_Status_InvalidTabIndex;
-        }
-    }
-
-    ITMCreateTabResponse *response = [[[ITMCreateTabResponse alloc] init] autorelease];
-    response.status = status;
-    response.windowId = term.terminalGuid;
-    response.tabId = tab.uniqueId;
-    response.sessionId = session.guid;
-    handler(response);
-}
-
-- (void)apiServerSplitPane:(ITMSplitPaneRequest *)request handler:(void (^)(ITMSplitPaneResponse *))handler {
-    PTYSession *session = [self sessionForAPIIdentifier:request.hasSession ? request.session : nil];
-    PseudoTerminal *term = session ? [[iTermController sharedInstance] terminalWithSession:session] : nil;
-    if (!term || !session || session.exited) {
-        ITMSplitPaneResponse *response = [[[ITMSplitPaneResponse alloc] init] autorelease];
-        response.status = ITMSplitPaneResponse_Status_SessionNotFound;
-        handler(response);
-        return;
-    }
-
-    Profile *profile = [[ProfileModel sharedInstance] defaultBookmark];
-    if (request.hasProfileName) {
-        profile = [[ProfileModel sharedInstance] bookmarkWithName:request.profileName];
-        if (!profile) {
-            ITMSplitPaneResponse *response = [[[ITMSplitPaneResponse alloc] init] autorelease];
-            response.status = ITMSplitPaneResponse_Status_InvalidProfileName;
-            handler(response);
-            return;
-        }
-    }
-
-    PTYSession *newSession = [term splitVertically:request.splitDirection == ITMSplitPaneRequest_SplitDirection_Vertical
-                                            before:request.before
-                                           profile:profile
-                                     targetSession:session];
-    if (newSession == nil && !session.isTmuxClient) {
-        ITMSplitPaneResponse *response = [[[ITMSplitPaneResponse alloc] init] autorelease];
-        response.status = ITMSplitPaneResponse_Status_CannotSplit;
-        handler(response);
-        return;
-    }
-
-    ITMSplitPaneResponse *response = [[[ITMSplitPaneResponse alloc] init] autorelease];
-    response.status = ITMSplitPaneResponse_Status_Ok;
-    if (newSession != nil) {
-        response.sessionId = newSession.guid;
-    }
-    handler(response);
 }
 
 @end

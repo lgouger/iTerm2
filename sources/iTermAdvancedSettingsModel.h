@@ -213,5 +213,13 @@
 + (BOOL)aggressiveFocusFollowsMouse;
 + (BOOL)enableUnderlineSemanticHistoryOnCmdHover;
 + (BOOL)conservativeURLGuessing;
++ (double)activeUpdateCadence;
++ (BOOL)openNewWindowAtStartup;
++ (BOOL)resetSGROnPrompt;
+
+#warning Bring this back
+//+ (BOOL)useLowPowerGPUWhenUnplugged;
+
++ (BOOL)retinaInlineImages;
 
 @end

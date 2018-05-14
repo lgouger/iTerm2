@@ -179,9 +179,6 @@ int decode_utf8_char(const unsigned char * restrict datap,
 - (NSString *)stringByReplacingVariableReferencesWithVariables:(NSDictionary *)vars;
 - (NSString *)stringByPerformingSubstitutions:(NSDictionary *)substituions;
 
-// Does self contain |substring|?
-- (BOOL)containsString:(NSString *)substring;
-
 // Returns self repeated |n| times.
 - (NSString *)stringRepeatedTimes:(int)n;
 
@@ -268,6 +265,7 @@ int decode_utf8_char(const unsigned char * restrict datap,
 - (void)it_drawInRect:(CGRect)rect attributes:(NSDictionary *)attributes;
 
 - (BOOL)startsWithEmoji;
++ (NSString *)it_formatBytes:(double)bytes;
 
 @end
 

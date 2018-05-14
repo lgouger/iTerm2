@@ -10,6 +10,7 @@
 #import "EquivalenceClassSet.h"
 #import "iTermApplicationDelegate.h"
 #import "iTermController.h"
+#import "iTermNotificationController.h"
 #import "iTermPreferences.h"
 #import "iTermProfilePreferences.h"
 #import "iTermShortcut.h"
@@ -146,7 +147,6 @@ static NSString *kListWindowsFormat = @"\"#{session_name}\t#{window_id}\t"
     BOOL _haveOpenendInitialWindows;
     Profile *_profile;
     ProfileModel *_profileModel;
-    NSDictionary *_fontOverrides;
     NSMutableIndexSet *_pendingNewWindows;
 }
 
@@ -405,6 +405,7 @@ static NSString *kListWindowsFormat = @"\"#{session_name}\t#{window_id}\t"
         DLog(@"Hidden windows existing, showing dashboard");
         [[TmuxDashboardController sharedInstance] showWindow:nil];
         [[[TmuxDashboardController sharedInstance] window] makeKeyAndOrderFront:nil];
+        [[iTermNotificationController sharedInstance] notify:@"Too many tmux windows!" withDescription:@"Use the tmux dashboard to select which to open."];
     }
     for (NSArray *record in windowsToOpen) {
         DLog(@"Open window %@", record);
@@ -1455,20 +1456,6 @@ static NSString *kListWindowsFormat = @"\"#{session_name}\t#{window_id}\t"
                          KEY_NON_ASCII_FONT: [nonAsciiFont stringValue],
                          KEY_HORIZONTAL_SPACING: @(hs),
                          KEY_VERTICAL_SPACING: @(vs) } retain];
-
-    [_profileModel setObject:[font stringValue]
-                      forKey:KEY_NORMAL_FONT
-                  inBookmark:self.profile];
-    [_profileModel setObject:[nonAsciiFont stringValue]
-                      forKey:KEY_NON_ASCII_FONT
-                  inBookmark:self.profile];
-    [_profileModel setObject:[NSNumber numberWithDouble:hs]
-                      forKey:KEY_HORIZONTAL_SPACING
-                  inBookmark:self.profile];
-    [_profileModel setObject:[NSNumber numberWithDouble:vs]
-                      forKey:KEY_VERTICAL_SPACING
-                  inBookmark:self.profile];
-    [_profileModel postChangeNotification];
 }
 
 #pragma mark - Private

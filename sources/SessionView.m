@@ -6,6 +6,7 @@
 #import "iTermAdvancedSettingsModel.h"
 #import "iTermAnnouncementViewController.h"
 #import "iTermMetalClipView.h"
+#import "iTermMetalDeviceProvider.h"
 #import "iTermPreferences.h"
 #import "NSView+iTerm.h"
 #import "MovePaneController.h"
@@ -56,7 +57,7 @@ static NSDate* lastResizeDate_;
 @end
 
 
-@interface SessionView () <iTermAnnouncementDelegate, PTYScrollerDelegate>
+@interface SessionView () <iTermAnnouncementDelegate, NSDraggingSource, PTYScrollerDelegate>
 @property(nonatomic, retain) PTYScrollView *scrollview;
 @end
 
@@ -144,11 +145,22 @@ static NSDate* lastResizeDate_;
 
         // assign the main view
         [self addSubview:_scrollview];
+
+#warning Bring this back
+#if 0
+        if (@available(macOS 10.11, *)) {
+            [[NSNotificationCenter defaultCenter] addObserver:self
+                                                     selector:@selector(preferredMetalDeviceDidChange:)
+                                                         name:iTermMetalDeviceProviderPreferredDeviceDidChangeNotification
+                                                       object:nil];
+        }
+#endif
     }
     return self;
 }
 
 - (void)dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
     _inDealloc = YES;
     if (self.verticalScroller.ptyScrollerDelegate == self) {
         self.verticalScroller.ptyScrollerDelegate = nil;
@@ -191,10 +203,19 @@ static NSDate* lastResizeDate_;
     }
 }
 
+- (void)preferredMetalDeviceDidChange:(NSNotification *)notification NS_AVAILABLE_MAC(10_11) {
+    if (_metalView) {
+        [self.delegate sessionViewRecreateMetalView];
+    }
+}
+
 - (void)installMetalViewWithDataSource:(id<iTermMetalDriverDataSource>)dataSource NS_AVAILABLE_MAC(10_11) {
     // Allocate a new metal view
     _metalView = [[MTKView alloc] initWithFrame:_scrollview.contentView.frame
                                          device:MTLCreateSystemDefaultDevice()];
+    // There was a spike in crashes on 5/1. I'm removing this temporarily to see if it was the cause.
+#warning Bring this back
+//                                         device:[[iTermMetalDeviceProvider sharedInstance] preferredDevice]];
     _metalView.layer.opaque = YES;
     // Tell the clip view about it so it can ask the metalview to draw itself on scroll.
     _metalClipView.metalView = _metalView;
@@ -236,6 +257,15 @@ static NSDate* lastResizeDate_;
         // TODO: Would be nice to draw only the rect, but I don't see a way to do that with MTKView
         // that doesn't involve doing something nutty like saving a copy of the drawable.
         [_metalView setNeedsDisplay:YES];
+    }
+}
+
+- (void)setNeedsDisplay:(BOOL)needsDisplay {
+    [super setNeedsDisplay:needsDisplay];
+    if (@available(macOS 10.11, *)) {
+        if (needsDisplay) {
+            [_metalView setNeedsDisplay:YES];
+        }
     }
 }
 
@@ -308,7 +338,7 @@ static NSDate* lastResizeDate_;
 
 - (void)reallyUpdateMetalViewFrame {
     [_delegate sessionViewHideMetalViewUntilNextFrame];
-    _metalView.frame = [self frameByInsettingForMetal:_scrollview.frame];
+    _metalView.frame = [self frameByInsettingForMetal:_scrollview.contentView.frame];
     [_driver mtkView:_metalView drawableSizeWillChange:_metalView.drawableSize];
 }
 
@@ -658,21 +688,22 @@ static NSDate* lastResizeDate_;
 
 #pragma mark NSDraggingSource protocol
 
-- (void)draggedImage:(NSImage *)draggedImage movedTo:(NSPoint)screenPoint {
+- (void)draggingSession:(NSDraggingSession *)session movedToPoint:(NSPoint)screenPoint {
     [[NSCursor closedHandCursor] set];
 }
 
-- (NSDragOperation)draggingSourceOperationMaskForLocal:(BOOL)isLocal {
+- (NSDragOperation)draggingSession:(NSDraggingSession *)session sourceOperationMaskForDraggingContext:(NSDraggingContext)context {
+    const BOOL isLocal = (context == NSDraggingContextWithinApplication);
     return (isLocal ? NSDragOperationMove : NSDragOperationNone);
 }
 
-- (BOOL)ignoreModifierKeysWhileDragging {
+- (BOOL)ignoreModifierKeysForDraggingSession:(NSDraggingSession *)session {
     return YES;
 }
 
-- (void)draggedImage:(NSImage *)anImage
-             endedAt:(NSPoint)aPoint
-           operation:(NSDragOperation)operation {
+- (void)draggingSession:(NSDraggingSession *)session
+           endedAtPoint:(NSPoint)aPoint
+              operation:(NSDragOperation)operation {
     if (![[MovePaneController sharedInstance] dragFailed]) {
         [[MovePaneController sharedInstance] dropInSession:nil half:kNoHalf atPoint:aPoint];
     }

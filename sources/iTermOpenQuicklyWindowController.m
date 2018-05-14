@@ -28,14 +28,14 @@
 
 @implementation iTermOpenQuicklyWindowController {
     // Text field where quries are entered
-    IBOutlet iTermOpenQuicklyTextField *_textField;
+    __weak IBOutlet iTermOpenQuicklyTextField *_textField;
 
     // Table that shows search results
-    IBOutlet NSTableView *_table;
+    __weak IBOutlet NSTableView *_table;
 
-    IBOutlet NSScrollView *_scrollView;
+    __weak IBOutlet NSScrollView *_scrollView;
 
-    IBOutlet SolidColorView *_divider;
+    __weak IBOutlet SolidColorView *_divider;
 }
 
 + (instancetype)sharedInstance {
@@ -201,7 +201,7 @@
         } else if ([object isKindOfClass:[iTermOpenQuicklyArrangementItem class]]) {
             // Load window arrangement
             iTermOpenQuicklyArrangementItem *item = (iTermOpenQuicklyArrangementItem *)object;
-            [[iTermController sharedInstance] loadWindowArrangementWithName:item.identifier asTabs:item.inTabs];
+            [[iTermController sharedInstance] loadWindowArrangementWithName:item.identifier asTabsInTerminal:item.inTabs ? [[iTermController sharedInstance] currentTerminal] : nil];
         } else if ([object isKindOfClass:[iTermOpenQuicklyChangeProfileItem class]]) {
             // Change profile
             PseudoTerminal *term = [[iTermController sharedInstance] currentTerminal];

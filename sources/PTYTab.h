@@ -8,6 +8,7 @@
 #import "PTYSplitView.h"
 #import "PTYTabDelegate.h"
 #import "WindowControllerInterface.h"
+#import "Api.pbobjc.h"
 
 @class PTYSession;
 @class PTYTab;
@@ -17,6 +18,7 @@
 @class SolidColorView;
 
 extern NSString *const iTermTabDidChangeWindowNotification;
+extern NSString *const iTermSessionBecameKey;
 
 // This implements NSSplitViewDelegate but it was an informal protocol in 10.5. If 10.5 support
 // is eventually dropped, change this to make it official.
@@ -211,5 +213,6 @@ extern NSString *const iTermTabDidChangeWindowNotification;
 - (void)setTmuxWindowName:(NSString *)tmuxWindowName;
 
 - (void)updateUseMetal NS_AVAILABLE_MAC(10_11);
+- (ITMListSessionsResponse_SplitTreeNode *)rootSplitTreeNode;
 
 @end

@@ -80,7 +80,6 @@ typedef NS_ENUM(NSUInteger, iTermHotkeyWindowType) {
 - (void)nextTerminal;
 - (void)newSessionsInWindow:(id)sender;
 - (void)newSessionsInNewWindow:(id)sender;
-- (void)launchScript:(id)sender;
 
 - (void)arrangeHorizontally;
 - (void)newSessionInTabAtIndex:(id)sender;
@@ -94,8 +93,12 @@ typedef NS_ENUM(NSUInteger, iTermHotkeyWindowType) {
 - (int)allocateWindowNumber;
 
 - (void)saveWindowArrangement:(BOOL)allWindows;
+- (void)saveWindowArrangmentForAllWindows:(BOOL)allWindows name:(NSString *)name;
+- (void)saveWindowArrangementForWindow:(PseudoTerminal *)currentTerminal name:(NSString *)name;
+
 - (void)loadWindowArrangementWithName:(NSString *)theName;
-- (void)loadWindowArrangementWithName:(NSString *)theName asTabs:(BOOL)asTabs;
+- (BOOL)loadWindowArrangementWithName:(NSString *)theName asTabsInTerminal:(PseudoTerminal *)term;
+
 - (void)repairSavedArrangementNamed:(NSString *)savedArrangementName
                replacingMissingGUID:(NSString *)guidToReplace
                            withGUID:(NSString *)replacementGuid;
@@ -167,6 +170,8 @@ void OnHotKeyEvent(void);
 - (void)makeTerminalWindowFullScreen:(NSWindowController<iTermWindowController> *)term;
 
 - (void)openSingleUseWindowWithCommand:(NSString *)command;
+- (void)openSingleUseWindowWithCommand:(NSString *)command inject:(NSData *)injection;
+- (void)migrateApplicationSupportDirectoryIfNeeded;
 
 @end
 

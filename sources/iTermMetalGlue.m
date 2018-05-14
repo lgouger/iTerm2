@@ -274,40 +274,43 @@ static NSColor *ColorForVector(vector_float4 v) {
     if (self) {
         _startTime = [NSDate timeIntervalSinceReferenceDate];
 
-        // Getting the drawingHelper may reset the cursorVisible flag as a side effect of the
-        // hacky flicker fixer.
-        BOOL savedCursorVisible = textView.cursorVisible;
-        iTermTextDrawingHelper *drawingHelper = textView.drawingHelper;
-        _cursorVisible = drawingHelper.cursorVisible;
-        drawingHelper.cursorVisible = savedCursorVisible;
-
-        // Copy lines from model. Always use these for consistency. I should also copy the color map
-        // and any other data dependencies.
-        _lines = [NSMutableArray array];
-        _dates = [NSMutableArray array];
-        _markStyles = [NSMutableArray array];
-        _selectedIndexes = [NSMutableArray array];
-        _matches = [NSMutableDictionary dictionary];
-        _underlinedRanges = [NSMutableDictionary dictionary];
-
-        [self loadMetricsWithDrawingHelper:drawingHelper textView:textView screen:screen];
-        [self loadSettingsWithDrawingHelper:drawingHelper textView:textView];
-        [self loadLinesWithDrawingHelper:drawingHelper textView:textView screen:screen];
-        [self loadBadgeWithDrawingHelper:drawingHelper textView:textView];
-        [self loadBlinkingCursorWithTextView:textView glue:glue];
-        [self loadCursorInfoWithDrawingHelper:drawingHelper textView:textView];
-        [self loadCursorGuideWithDrawingHelper:drawingHelper];
-        [self loadBackgroundImageWithTextView:textView];
-        [self loadUnderlineDescriptorsWithDrawingHelper:drawingHelper];
-        [self loadMarkedTextWithDrawingHelper:drawingHelper];
-        [self loadIndicatorsFromTextView:textView];
-        [self loadHighlightedRowsFromTextView:textView];
-        [self loadAnnotationRangesFromTextView:textView];
-        [self loadCornerCutoutsFromTextView:textView];
-
-        [textView.dataSource setUseSavedGridIfAvailable:NO];
+        [textView performBlockWithFlickerFixerGrid:^{
+            [self loadAllWithTextView:textView screen:screen glue:glue];
+        }];
     }
     return self;
+}
+
+- (void)loadAllWithTextView:(PTYTextView *)textView
+                     screen:(VT100Screen *)screen
+                       glue:(iTermMetalGlue *)glue {
+    iTermTextDrawingHelper *drawingHelper = textView.drawingHelper;
+
+    // Copy lines from model. Always use these for consistency. I should also copy the color map
+    // and any other data dependencies.
+    _lines = [NSMutableArray array];
+    _dates = [NSMutableArray array];
+    _markStyles = [NSMutableArray array];
+    _selectedIndexes = [NSMutableArray array];
+    _matches = [NSMutableDictionary dictionary];
+    _underlinedRanges = [NSMutableDictionary dictionary];
+
+    [self loadMetricsWithDrawingHelper:drawingHelper textView:textView screen:screen];
+    [self loadSettingsWithDrawingHelper:drawingHelper textView:textView];
+    [self loadLinesWithDrawingHelper:drawingHelper textView:textView screen:screen];
+    [self loadBadgeWithDrawingHelper:drawingHelper textView:textView];
+    [self loadBlinkingCursorWithTextView:textView glue:glue];
+    [self loadCursorInfoWithDrawingHelper:drawingHelper textView:textView];
+    [self loadCursorGuideWithDrawingHelper:drawingHelper];
+    [self loadBackgroundImageWithTextView:textView];
+    [self loadUnderlineDescriptorsWithDrawingHelper:drawingHelper];
+    [self loadMarkedTextWithDrawingHelper:drawingHelper];
+    [self loadIndicatorsFromTextView:textView];
+    [self loadHighlightedRowsFromTextView:textView];
+    [self loadAnnotationRangesFromTextView:textView];
+    [self loadCornerCutoutsFromTextView:textView];
+
+    [textView.dataSource setUseSavedGridIfAvailable:NO];
 }
 
 - (void)loadMetricsWithDrawingHelper:(iTermTextDrawingHelper *)drawingHelper
@@ -423,6 +426,7 @@ static NSColor *ColorForVector(vector_float4 v) {
 
 - (void)loadCursorInfoWithDrawingHelper:(iTermTextDrawingHelper *)drawingHelper
                                textView:(PTYTextView *)textView {
+    _cursorVisible = drawingHelper.cursorVisible;
     const int offset = _visibleRange.start.y - _numberOfScrollbackLines;
     _cursorInfo = [[iTermMetalCursorInfo alloc] init];
     _cursorInfo.copyMode = drawingHelper.copyMode;
@@ -436,14 +440,27 @@ static NSColor *ColorForVector(vector_float4 v) {
         _cursorVisible &&
         _visibleRange.start.y <= lineWithCursor &&
         lineWithCursor < _visibleRange.end.y) {
+        
         _cursorInfo.cursorVisible = YES;
         _cursorInfo.type = drawingHelper.cursorType;
         _cursorInfo.cursorColor = [self backgroundColorForCursor];
+        const screen_char_t *line = (screen_char_t *)_lines[_cursorInfo.coord.y].mutableBytes;
+        screen_char_t screenChar = line[_cursorInfo.coord.x];
+        if (screenChar.code) {
+            if (screenChar.code == DWC_RIGHT) {
+                _cursorInfo.doubleWidth = NO;
+            } else {
+                const int column = _cursorInfo.coord.x;
+                _cursorInfo.doubleWidth = (column < _gridSize.width - 1) && (line[column + 1].code == DWC_RIGHT);
+            }
+        } else {
+            _cursorInfo.doubleWidth = NO;
+        }
+
         if (_cursorInfo.type == CURSOR_BOX) {
             _cursorInfo.shouldDrawText = YES;
-            const screen_char_t *line = (screen_char_t *)_lines[_cursorInfo.coord.y].mutableBytes;
-            screen_char_t screenChar = line[_cursorInfo.coord.x];
             const BOOL focused = ((_isInKeyWindow && _textViewIsActiveSession) || _shouldDrawFilledInCursor);
+
 
             iTermSmartCursorColor *smartCursorColor = nil;
             if (drawingHelper.useSmartCursorColor) {
@@ -512,11 +529,15 @@ static NSColor *ColorForVector(vector_float4 v) {
 
 - (void)loadUnderlineDescriptorsWithDrawingHelper:(iTermTextDrawingHelper *)drawingHelper {
     _asciiUnderlineDescriptor.color = VectorForColor([_colorMap colorForKey:kColorMapUnderline]);
-    _asciiUnderlineDescriptor.offset = [drawingHelper yOriginForUnderlineGivenFontXHeight:_asciiFont.font.xHeight yOffset:0];
+    _asciiUnderlineDescriptor.offset = [drawingHelper yOriginForUnderlineForFont:_asciiFont.font
+                                                                         yOffset:0
+                                                                      cellHeight:_cellSize.height];
     _asciiUnderlineDescriptor.thickness = [drawingHelper underlineThicknessForFont:_asciiFont.font];
 
     _nonAsciiUnderlineDescriptor.color = _asciiUnderlineDescriptor.color;
-    _nonAsciiUnderlineDescriptor.offset = [drawingHelper yOriginForUnderlineGivenFontXHeight:_nonAsciiFont.font.xHeight yOffset:0];
+    _nonAsciiUnderlineDescriptor.offset = [drawingHelper yOriginForUnderlineForFont:_nonAsciiFont.font
+                                                                            yOffset:0
+                                                                         cellHeight:_cellSize.height];
     _nonAsciiUnderlineDescriptor.thickness = [drawingHelper underlineThicknessForFont:_nonAsciiFont.font];
 }
 
@@ -860,6 +881,7 @@ ambiguousIsDoubleWidth:(BOOL)ambiguousIsDoubleWidth
     NSIndexSet *annotatedIndexes = _rowToAnnotationRanges[@(row)];
     NSUInteger sketch = *sketchPtr;
     vector_float4 lastUnprocessedBackgroundColor = simd_make_float4(0, 0, 0, 0);
+    BOOL lastSelected = NO;
 
     // Prime numbers chosen more or less arbitrarily.
     const vector_float4 bmul = simd_make_float4(7, 11, 13, 1) * 255;
@@ -872,6 +894,18 @@ ambiguousIsDoubleWidth:(BOOL)ambiguousIsDoubleWidth
         BOOL findMatch = NO;
         if (findMatches && !selected) {
             findMatch = CheckFindMatchAtIndex(findMatches, x);
+        }
+        if (lastSelected && line[x].code == DWC_RIGHT && !line[x].complexChar) {
+            // If the left half of a DWC was selected, extend the selection to the right half.
+            lastSelected = selected;
+            selected = YES;
+        } else if (!lastSelected && selected && line[x].code == DWC_RIGHT && !line[x].complexChar) {
+            // If the right half of a DWC is selected but the left half is not, un-select the right half.
+            lastSelected = YES;
+            selected = NO;
+        } else {
+            // Normal code path
+            lastSelected = selected;
         }
         const BOOL annotated = [annotatedIndexes containsIndex:x];
         const BOOL inUnderlinedRange = NSLocationInRange(x, underlinedRange) || annotated;

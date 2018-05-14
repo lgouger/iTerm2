@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<document type="com.apple.InterfaceBuilder3.Cocoa.XIB" version="3.0" toolsVersion="13771" targetRuntime="MacOSX.Cocoa" propertyAccessControl="none">
+<document type="com.apple.InterfaceBuilder3.Cocoa.XIB" version="3.0" toolsVersion="14109" targetRuntime="MacOSX.Cocoa" propertyAccessControl="none">
     <dependencies>
         <deployment identifier="macosx"/>
-        <plugIn identifier="com.apple.InterfaceBuilder.CocoaPlugin" version="13771"/>
+        <plugIn identifier="com.apple.InterfaceBuilder.CocoaPlugin" version="14109"/>
     </dependencies>
     <objects>
         <customObject id="-2" userLabel="File's Owner" customClass="NSApplication">
@@ -37,7 +37,7 @@
                             </menuItem>
                             <menuItem title="Check For Updates…" identifier="Check For Updates…" id="880">
                                 <connections>
-                                    <action selector="checkForUpdates:" target="879" id="881"/>
+                                    <action selector="checkForUpdatesFromMenu:" target="201" id="vmh-LD-TwW"/>
                                 </connections>
                             </menuItem>
                             <menuItem title="Toggle Debug Logging" enabled="NO" identifier="Toggle Debug Logging" id="950">
@@ -834,6 +834,45 @@ DQ
                         </items>
                     </menu>
                 </menuItem>
+                <menuItem title="Scripts" id="eAB-5s-fVh">
+                    <modifierMask key="keyEquivalentModifierMask"/>
+                    <menu key="submenu" title="Scripts" id="CZD-7u-bch">
+                        <items>
+                            <menuItem title="Install Python Runtime" identifier="Install Python Runtime" id="wHh-8e-oU2">
+                                <modifierMask key="keyEquivalentModifierMask"/>
+                                <connections>
+                                    <action selector="installPythonRuntime:" target="201" id="r4H-5W-hCN"/>
+                                </connections>
+                            </menuItem>
+                            <menuItem title="New Python Script" identifier="New Python Script" id="ds5-gY-cX0">
+                                <modifierMask key="keyEquivalentModifierMask"/>
+                                <connections>
+                                    <action selector="newPythonScript:" target="201" id="v2b-iE-k7t"/>
+                                </connections>
+                            </menuItem>
+                            <menuItem title="Reveal Scripts in Finder" identifier="Reveal in Finder" id="eeH-ly-45H">
+                                <modifierMask key="keyEquivalentModifierMask"/>
+                                <connections>
+                                    <action selector="revealScriptsInFinder:" target="201" id="2jN-7I-BfW"/>
+                                </connections>
+                            </menuItem>
+                            <menuItem isSeparatorItem="YES" id="Rsa-x0-U18"/>
+                            <menuItem title="Open Python REPL" identifier="Open Interactive Window" id="jXH-0I-Wtc">
+                                <modifierMask key="keyEquivalentModifierMask"/>
+                                <connections>
+                                    <action selector="openREPL:" target="201" id="1Pl-tK-Km1"/>
+                                </connections>
+                            </menuItem>
+                            <menuItem title="Script Console" keyEquivalent="j" identifier="Script Console" id="YqT-f8-W2j">
+                                <modifierMask key="keyEquivalentModifierMask" option="YES" command="YES"/>
+                                <connections>
+                                    <action selector="openScriptConsole:" target="201" id="DYl-Yt-fdf"/>
+                                </connections>
+                            </menuItem>
+                            <menuItem isSeparatorItem="YES" identifier="Separator" id="fcT-12-G86"/>
+                        </items>
+                    </menu>
+                </menuItem>
                 <menuItem title="Profiles" id="591">
                     <menu key="submenu" title="Profiles" id="592">
                         <items>
@@ -1124,6 +1163,8 @@ DQ
         <customObject id="201" userLabel="iTermApplicationDelegate" customClass="iTermApplicationDelegate">
             <connections>
                 <outlet property="_buriedSessions" destination="PTu-aD-qbz" id="Fl9-Gn-jv2"/>
+                <outlet property="_installPythonRuntime" destination="wHh-8e-oU2" id="qv8-po-q7I"/>
+                <outlet property="_scriptsMenu" destination="CZD-7u-bch" id="2Q5-aI-74T"/>
                 <outlet property="_showTipOfTheDay" destination="ft3-BP-igZ" id="WZt-qp-iuC"/>
                 <outlet property="bookmarkMenu" destination="592" id="874"/>
                 <outlet property="closeTab" destination="635" id="795"/>
