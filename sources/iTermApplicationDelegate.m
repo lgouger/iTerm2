@@ -61,6 +61,7 @@
 #import "iTermProfilePreferences.h"
 #import "iTermProfilesWindowController.h"
 #import "iTermScriptConsole.h"
+#import "iTermScriptFunctionCall.h"
 #import "iTermServiceProvider.h"
 #import "iTermQuickLookController.h"
 #import "iTermRemotePreferences.h"
@@ -72,6 +73,7 @@
 #import "iTermToolbeltView.h"
 #import "iTermURLStore.h"
 #import "iTermWarning.h"
+#import "iTermWebSocketCookieJar.h"
 #import "MovePaneController.h"
 #import "NSApplication+iTerm.h"
 #import "NSArray+iTerm.h"
@@ -984,7 +986,7 @@ static BOOL hasBecomeActive = NO;
     }
 
     if ([iTermAdvancedSettingsModel enableAPIServer]) {
-        _apiHelper = [[iTermAPIHelper alloc] init];
+        _apiHelper = [iTermAPIHelper sharedInstance];
     }
 
     if ([self shouldNotifyAboutIncompatibleSoftware]) {
@@ -1978,11 +1980,14 @@ static BOOL hasBecomeActive = NO;
 
 - (IBAction)openREPL:(id)sender {
     [[iTermPythonRuntimeDownloader sharedInstance] downloadOptionalComponentsIfNeededWithCompletion:^{
-        NSString *command = [[[[iTermPythonRuntimeDownloader sharedInstance] pathToStandardPyenvPython] stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"apython"];
-        NSURL *injectionURL = [[NSBundle mainBundle] URLForResource:@"repl_banner" withExtension:@"txt"];
-        NSData *injection = [NSData dataWithContentsOfURL:injectionURL];
+        NSString *command = [[[[[iTermPythonRuntimeDownloader sharedInstance] pathToStandardPyenvPython] stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"apython"] stringWithEscapedShellCharactersIncludingNewlines:YES];
+        NSURL *bannerURL = [[NSBundle mainBundle] URLForResource:@"repl_banner" withExtension:@"txt"];
+        command = [command stringByAppendingFormat:@" --banner=\"`cat %@`\"", bannerURL.path];
+        NSString *cookie = [[iTermWebSocketCookieJar sharedInstance] newCookie];
+        NSDictionary *environment = @{ @"ITERM2_COOKIE": cookie };
         [[iTermController sharedInstance] openSingleUseWindowWithCommand:command
-                                                                  inject:injection];
+                                                                  inject:nil
+                                                             environment:environment];
     }];
 }
 

@@ -523,7 +523,8 @@ typedef enum {
 - (void)runCommandWithOldCwd:(NSString*)oldCWD
                forObjectType:(iTermObjectType)objectType
               forceUseOldCWD:(BOOL)forceUseOldCWD
-               substitutions:(NSDictionary *)substituions;
+               substitutions:(NSDictionary *)substitutions
+                 environment:(NSDictionary *)environment;
 
 - (void)startProgram:(NSString *)program
          environment:(NSDictionary *)prog_env
@@ -742,7 +743,7 @@ typedef enum {
 - (void)drawFrameAndRemoveTemporarilyDisablementOfMetalForToken:(id)token NS_AVAILABLE_MAC(10_11);
 
 - (void)executeTokens:(const CVector *)vector bytesHandled:(int)length;
-- (void)setVariableNamed:(NSString *)name toValue:(NSString *)newValue;
+- (void)setVariableNamed:(NSString *)name toValue:(id)newValue;
 - (void)injectData:(NSData *)data;
 
 #pragma mark - API
@@ -750,8 +751,12 @@ typedef enum {
 - (ITMGetBufferResponse *)handleGetBufferRequest:(ITMGetBufferRequest *)request;
 - (ITMGetPromptResponse *)handleGetPromptRequest:(ITMGetPromptRequest *)request;
 - (ITMNotificationResponse *)handleAPINotificationRequest:(ITMNotificationRequest *)request connection:(id)connection;
-- (ITMSetProfilePropertyResponse *)handleSetProfilePropertyForKey:(NSString *)key value:(id)value;
+- (ITMSetProfilePropertyResponse_Status)handleSetProfilePropertyForKey:(NSString *)key value:(id)value;
 - (ITMGetProfilePropertyResponse *)handleGetProfilePropertyForKeys:(NSArray<NSString *> *)keys;
+
+// Run a script-side function. Can include composition, references to variables.
+- (void)invokeFunctionCall:(NSString *)invocation
+              extraContext:(NSDictionary *)extraContext;
 
 #pragma mark - Testing utilities
 

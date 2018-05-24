@@ -2,16 +2,25 @@
 import json
 import iterm2.rpc
 
+class BadGUIDException(Exception):
+    """Raised when a profile does not have a GUID or the GUID is unknown."""
+
 class WriteOnlyProfile:
     """A profile that can be modified but not read. Useful for changing many
     sessions' profiles at once without knowing what they are."""
-    def __init__(self, session_id, connection):
+    def __init__(self, session_id, connection, guid=None):
         self.connection = connection
         self.session_id = session_id
+        self.__guid = guid
 
     async def _async_simple_set(self, key, value):
         """value is a json type"""
-        await iterm2.rpc.async_set_profile_property(self.connection, self.session_id, key, value)
+        await iterm2.rpc.async_set_profile_property(
+                self.connection,
+                self.session_id,
+                key,
+                value,
+                self._guids_for_set())
 
     async def _async_color_set(self, key, value):
         if value is None:
@@ -19,13 +28,22 @@ class WriteOnlyProfile:
                 self.connection,
                 self.session_id,
                 key,
-                "null")
+                "null",
+                self._guids_for_set())
         else:
             await iterm2.rpc.async_set_profile_property(
                 self.connection,
                 self.session_id,
                 key,
-                value.get_dict())
+                value.get_dict(),
+                self._guids_for_set())
+
+    def _guids_for_set(self):
+        if self.session_id is None:
+            assert self.__guid is not None
+            return [self.__guid]
+        else:
+            return self.session_id
 
     async def async_set_foreground_color(self, value):
         """Sets the foreground color.
@@ -593,9 +611,106 @@ class WriteOnlyProfile:
         :param value: OPTION_KEY_xxx"""
         return await self._async_simple_set("Right Option Key Sends", value)
 
+    async def async_set_triggers(self, value):
+        """Sets the triggers.
+
+        :param value: A list of dicts of trigger definitions."""
+        return await self._async_simple_set("Triggers", value)
+
+    async def async_set_smart_selection_rules(self, value):
+        """Sets the smart selection rules.
+
+        :param value: A list of dicts of smart selection rules"""
+        return await self._async_simple_set("Smart Selection Rules", value)
+
+    async def async_set_semantic_history(self, value):
+        """Sets the semantic history prefs.
+
+        :param value: Semantic history settings dict."""
+        return await self._async_simple_set("Semantic History", value)
+
+    async def async_set_automatic_profile_switching_rules(self, value):
+        """Sets the automatic profile switching rules.
+
+        :param value: A list of rules (strings)."""
+        return await self._async_simple_set("Bound Hosts", value)
+
+    async def async_set_advanced_working_directory_window_setting(self, value):
+        """Sets the advanced working directory window setting.
+
+        :param value: INITIAL_WORKING_DIRECTORY_xxx, excluding ADVANCED."""
+        return await self._async_simple_set("AWDS Window Option", value)
+
+    async def async_set_advanced_working_directory_window_directory(self, value):
+        """Sets the advanced working directory window directory.
+
+        :param value: Path."""
+        return await self._async_simple_set("AWDS Window Directory", value)
+
+    async def async_set_advanced_working_directory_tab_setting(self, value):
+        """Sets the advanced working directory tab setting.
+
+        :param value: INITIAL_WORKING_DIRECTORY_xxx, excluding ADVANCED."""
+        return await self._async_simple_set("AWDS Tab Option", value)
+
+    async def async_set_advanced_working_directory_tab_directory(self, value):
+        """Sets the advanced working directory tab directory.
+
+        :param value: Path."""
+        return await self._async_simple_set("AWDS Tab Directory", value)
+
+    async def async_set_advanced_working_directory_pane_setting(self, value):
+        """Sets the advanced working directory pane setting.
+
+        :param value: INITIAL_WORKING_DIRECTORY_xxx, excluding ADVANCED."""
+        return await self._async_simple_set("AWDS Pane Option", value)
+
+    async def async_set_advanced_working_directory_pane_directory(self, value):
+        """Sets the advanced working directory pane directory.
+
+        :param value: Path."""
+        return await self._async_simple_set("AWDS Pane Directory", value)
+
+    async def async_set_normal_font(self, value):
+        """Sets the normal font.
+        
+        The normal font is used for either ASCII or all characters depending on
+        whether a separate font is used for non-ascii.
+
+        :param value: Font name and size as a string."""
+        return await self._async_simple_set("Normal Font", value)
+
+    async def async_set_normal_font(self, value):
+        """Sets the non-ASCII font.
+        
+        This is used for non-ASCII characters if use_non_ascii_font is enabled.
+
+        :param value: Font name and size as a string."""
+        return await self._async_simple_set("Non Ascii Font", value)
+
+    async def async_set_background_image_location(self, value):
+        """Sets path to the background image.
+        
+        :param value: Path."""
+        return await self._async_simple_set("Background Image Location", value)
+
+    async def async_set_key_mappings(self, value):
+        """Sets the keyboard shortcuts.
+        
+        :param value: Dictionary mapping keystroke to action."""
+        return await self._async_simple_set("Keyboard Map", value)
+
+    async def async_set_touchbar_mappings(self, value):
+        """Sets the touchbar actions.
+        
+        :param value: Dictionary mapping touch bar item to action."""
+        return await self._async_simple_set("Touch Bar Map", value)
 
 class Profile(WriteOnlyProfile):
-    """Represents a session's current profile settings."""
+    """Represents a profile.
+    
+    If a session_id is set then this is the profile attached to a session.
+    Otherwise, it is a shared profile."""
     CURSOR_TYPE_UNDERLINE = 0
     CURSOR_TYPE_VERTICAL = 1
     CURSOR_TYPE_BOX = 2
@@ -617,16 +732,33 @@ class Profile(WriteOnlyProfile):
     OPTION_KEY_META = 1
     OPTION_KEY_ESC = 2
 
-    def __init__(self, session_id, connection, get_profile_property_response):
-        super().__init__(session_id, connection)
+    INITIAL_WORKING_DIRECTORY_CUSTOM = "Yes"
+    INITIAL_WORKING_DIRECTORY_HOME = "No"
+    INITIAL_WORKING_DIRECTORY_RECYCLE = "Recycle"
+    INITIAL_WORKING_DIRECTORY_ADVANCED = "Advanced"
+
+    def __init__(self, session_id, connection, profile_property_list):
+        props = {}
+        for prop in profile_property_list:
+            props[prop.key] = json.loads(prop.json_value)
+
+        guid_key = "Guid"
+        if guid_key in props:
+            guid = props[guid_key]
+        else:
+            guid = None
+
+        super().__init__(session_id, connection, guid)
+
         self.connection = connection
         self.session_id = session_id
-        self.__props = {}
-        for prop in get_profile_property_response.properties:
-            self.__props[prop.key] = json.loads(prop.json_value)
+        self.__props = props
 
     def _simple_get(self, key):
-        return self.__props[key]
+        if key in self.__props:
+            return self.__props[key]
+        else:
+            return None
 
     def _color_get(self, key):
         try:
@@ -637,6 +769,10 @@ class Profile(WriteOnlyProfile):
             return None
         except KeyError:
             return None
+
+    @property
+    def all_properties(self):
+        return dict(self.__props)
 
     @property
     def foreground_color(self):
@@ -1299,6 +1435,147 @@ class Profile(WriteOnlyProfile):
         :returns: OPTION_KEY_xxx"""
         return self._simple_get("Right Option Key Sends")
 
+    @property
+    def guid(self):
+        """Returns globally unique ID for this profile.
+
+        :returns: A string identifying this profile"""
+        return self._simple_get("Guid")
+
+    @property
+    def triggers(self):
+        """The triggers.
+
+        :returns: A list of dicts of trigger definitions."""
+        return self._simple_get("Triggers")
+
+    @property
+    def smart_selection_rules(self):
+        """The smart selection rules.
+
+        :returns: A list of dicts of smart selection rules"""
+        return self._simple_get("Smart Selection Rules")
+
+    @property
+    def semantic_history(self):
+        """The semantic history prefs.
+
+        :returns: Semantic history settings dict."""
+        return self._simple_get("Semantic History")
+
+    @property
+    def automatic_profile_switching_rules(self):
+        """The automatic profile switching rules.
+
+        :returns: A list of rules (strings)."""
+        return self._simple_get("Bound Hosts")
+
+    @property
+    def advanced_working_directory_window_setting(self):
+        """The advanced working directory window setting.
+
+        :returns: INITIAL_WORKING_DIRECTORY_xxx, excluding ADVANCED."""
+        return self._simple_get("AWDS Window Option")
+
+    @property
+    def advanced_working_directory_window_directory(self):
+        """The advanced working directory window directory.
+
+        :returns: Path."""
+        return self._simple_get("AWDS Window Directory")
+
+    @property
+    def advanced_working_directory_tab_setting(self):
+        """The advanced working directory tab setting.
+
+        :returns: INITIAL_WORKING_DIRECTORY_xxx, excluding ADVANCED."""
+        return self._simple_get("AWDS Tab Option")
+
+    @property
+    def advanced_working_directory_tab_directory(self):
+        """The advanced working directory tab directory.
+
+        :returns: Path."""
+        return self._simple_get("AWDS Tab Directory")
+
+    @property
+    def advanced_working_directory_pane_setting(self):
+        """The advanced working directory pane setting.
+
+        :returns: INITIAL_WORKING_DIRECTORY_xxx, excluding ADVANCED."""
+        return self._simple_get("AWDS Pane Option")
+
+    @property
+    def advanced_working_directory_pane_directory(self):
+        """The advanced working directory pane directory.
+
+        :returns: Path."""
+        return self._simple_get("AWDS Pane Directory")
+
+    @property
+    def normal_font(self):
+        """The normal font.
+        
+        The normal font is used for either ASCII or all characters depending on
+        whether a separate font is used for non-ascii.
+
+        :returns: Font name and size as a string."""
+        return self._simple_get("Normal Font")
+
+    @property
+    def non_ascii_font(self):
+        """The non-ASCII font.
+        
+        This is used for non-ASCII characters if use_non_ascii_font is enabled.
+
+        :returns: Font name and size as a string."""
+        return self._simple_get("Non Ascii Font")
+
+    @property
+    def background_image_location(self):
+        """Gets path to the background image.
+        
+        :returns: Path."""
+        return self._simple_get("Background Image Location")
+
+    @property
+    def key_mappings(self):
+        """The keyboard shortcuts.
+        
+        :returns: Dictionary mapping keystroke to action."""
+        return self._simple_get("Keyboard Map")
+
+    @property
+    def touchbar_mappings(self):
+        """The touchbar actions.
+        
+        :returns: Dictionary mapping touch bar item to action."""
+        return self._simple_get("Touch Bar Map")
+
+    @property
+    def original_guid(self):
+        """The GUID of the original profile from which this one was derived.
+
+        Used for sessions whose profile has been modified from the underlying
+        profile. Otherwise not set.
+
+        :returns: Guid"""
+        return self._simple_get("Original Guid")
+
+    @property
+    def dynamic_profile_parent_name(self):
+        """If the profile is a dynamic profile, returns the name of the parent profile.
+
+        :returns: String name"""
+        return self._simple_get("Dynamic Profile Parent Name")
+
+    @property
+    def dynamic_profile_file_name(self):
+        """If the profile is a dynamic profile, returns the path to the file
+        from which it came.
+
+        :returns: String file name"""
+        return self._simple_get("Dynamic Profile Filename")
 
 class Color:
     """Describes a color."""
@@ -1399,3 +1676,24 @@ class Color:
             self.color_space = input_dict["Color Space"]
         else:
             self.color_space = "sRGB"
+
+class PartialProfile(Profile):
+    """Represents a profile that has only a subset of fields available for reading."""
+    
+    def __init__(self, session_id, connection, profile_property_list):
+        """Initializes a PartialProfile from a profile_property_list protobuf."""
+        super().__init__(session_id, connection, profile_property_list)
+
+    async def async_get_full_profile(self):
+        """Requests a full profile and returns it.
+
+        Raises BadGUIDException if the Guid is not set or does not match a profile.
+        
+        :returns: A :class:`Profile`."""
+        if self.guid is None:
+            raise 
+        response = await iterm2.rpc.async_list_profiles(self.connection, [self.guid], None)
+        if len(response.list_profiles_response.profiles) != 1:
+            raise BadGUIDException()
+        return Profile(None, self.connection, response.list_profiles_response.profiles[0].properties)
+

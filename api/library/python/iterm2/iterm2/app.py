@@ -4,10 +4,16 @@ This module is the starting point for getting access to windows and other applic
 """
 
 import iterm2.notifications
+import iterm2.profile
 import iterm2.rpc
 import iterm2.session
 import iterm2.tab
 import iterm2.window
+
+import inspect
+import json
+import traceback
+import websockets
 
 async def async_get_app(connection):
     """Returns the app singleton, creating it if needed."""
@@ -52,7 +58,7 @@ class App:
     def __init__(self, connection, windows):
         """Do not call this directly. Use App.construct() instead."""
         self.connection = connection
-        self.windows = windows
+        self.__terminal_windows = windows
         self.tokens = []
 
         # None in these fields means unknown. Notifications will update them.
@@ -123,7 +129,7 @@ class App:
     def pretty_str(self):
         """Returns the hierarchy as a human-readable string"""
         session = ""
-        for window in self.windows:
+        for window in self.terminal_windows:
             if session:
                 session += "\n"
             session += window.pretty_str(indent="")
@@ -135,7 +141,7 @@ class App:
         if session_id == "all":
             return iterm2.session.Session.all_proxy(self.connection)
 
-        for window in self.windows:
+        for window in self.terminal_windows:
             for tab in window.tabs:
                 sessions = tab.sessions
                 for session in sessions:
@@ -144,14 +150,14 @@ class App:
         return None
 
     def _search_for_tab_id(self, tab_id):
-        for window in self.windows:
+        for window in self.terminal_windows:
             for tab in window.tabs:
                 if tab_id == tab.tab_id:
                     return tab
         return None
 
     def _search_for_window_id(self, window_id):
-        for window in self.windows:
+        for window in self.terminal_windows:
             if window_id == window.window_id:
                 return window
         return None
@@ -199,7 +205,7 @@ class App:
         return self._search_for_window_with_tab(tab_id)
 
     def _search_for_window_with_tab(self, tab_id):
-        for window in self.windows:
+        for window in self.terminal_windows:
             for tab in window.tabs:
                 if tab.tab_id == tab_id:
                     return window
@@ -208,13 +214,18 @@ class App:
     async def async_refresh(self, _connection=None, _sub_notif=None):
         """Reloads the hierarchy.
 
-        You shouldn't need to call this explicitly. It will update itself from notifications.
+        Note that this calls :meth:`async_refresh_focus`.
+
+        You generally don't need to call this explicitly because App keeps its state fresh by
+        receiving notifications. One exception is if you need the REPL to pick up changes to the
+        state, since it doesn't receive notifications at the Python prompt.
         """
         response = await iterm2.rpc.async_list_sessions(self.connection)
         new_windows = App._windows_from_list_sessions_response(
             self.connection,
             response.list_sessions_response)
         windows = []
+        new_ids = []
         for new_window in new_windows:
             for new_tab in new_window.tabs:
                 for new_session in new_tab.sessions:
@@ -232,14 +243,17 @@ class App:
                         old_tab.update_from(new_tab)
                         # Replace the reference in the new window to the old tab.
                         new_window.update_tab(old_tab)
-                    old_window = self.get_window_by_id(new_window.window_id)
-                    if old_window is not None:
-                        old_window.update_from(new_window)
-                        windows.append(old_window)
-                    else:
-                        windows.append(new_window)
+                    if new_window.window_id not in new_ids:
+                        new_ids.append(new_window.window_id)
+                        old_window = self.get_window_by_id(new_window.window_id)
+                        if old_window is not None:
+                            old_window.update_from(new_window)
+                            windows.append(old_window)
+                        else:
+                            windows.append(new_window)
 
-        self.windows = windows
+        self.__terminal_windows = windows
+        await self.async_refresh_focus()
 
     async def _async_focus_change(self, _connection, sub_notif):
         """Updates the record of what is in focus."""
@@ -254,7 +268,6 @@ class App:
             window = self.get_window_for_tab(sub_notif.selected_tab)
             if window is None:
                 await self.async_refresh()
-                await self.async_refresh_focus()
             else:
                 window.selected_tab_id = sub_notif.selected_tab
         elif sub_notif.HasField("session"):
@@ -262,7 +275,6 @@ class App:
             window, tab = self.get_tab_and_window_for_session(session)
             if tab is None:
                 await self.async_refresh()
-                await self.async_refresh_focus()
             else:
                 tab.active_session_id = sub_notif.session
 
@@ -277,6 +289,14 @@ class App:
         """
         return self.get_window_by_id(self.current_terminal_window_id)
 
+    @property
+    def terminal_windows(self):
+        """Returns a list of all terminal windows.
+
+        :returns: A list of :class:`Window`
+        """
+        return self.__terminal_windows
+
     def get_tab_and_window_for_session(self, session):
         """Finds the tab and window that own a session.
 
@@ -284,7 +304,7 @@ class App:
 
         :returns: A tuple of (:class:`Window`, :class:`Tab`).
         """
-        for window in self.windows:
+        for window in self.terminal_windows:
             for tab in window.tabs:
                 if session in tab.sessions:
                     return window, tab
@@ -334,3 +354,61 @@ class App:
             await iterm2.notifications.async_subscribe_to_focus_change_notification(
                 connection,
                 self._async_focus_change))
+
+    async def async_list_profiles(self, guids=None, properties=["Guid", "Name"]):
+        """Fetches a list of profiles.
+
+        :param properties: Lists the properties to fetch. Pass None for all.
+        :param guids: Lists GUIDs to list. Pass None for all profiles.
+
+        :returns: If properties is a list, returns :class:`PartialProfile` with only the specified properties set. If properties is `None` then returns :class:`Profile`.
+        """
+        response = await iterm2.rpc.async_list_profiles(self.connection, guids, properties)
+        profiles = []
+        for responseProfile in response.list_profiles_response.profiles:
+            if properties is None:
+              profile = iterm2.profile.Profile(None, self.connection, responseProfile.properties)
+            else:
+              profile = iterm2.profile.PartialProfile(None, self.connection, responseProfile.properties)
+            profiles.append(profile)
+        return profiles
+
+    async def async_register_rpc_handler(self, name, coro, timeout=None):
+        """Register a script-defined RPC.
+
+        iTerm2 may be instructed to invoke a registered RPC, such as through a
+        key binding. Only registered RPCs may be called. Use this method to
+        register one.
+
+        :param name: The RPC name. Combined with its arguments, this must be unique among all registered RPCs. It should consist of letters, numbers, and underscores and must begin with a letter.
+        :param coro: An async function. Its arguments are reflected upon to determine the RPC's signature. Only the names of the arguments are used. All arguments should be keyword arguments as any may be omitted at call time.
+        :param timeout: How long iTerm2 should wait before giving up on this function's ever returning. `None` means to use the default timeout.
+        """
+        async def handle_rpc(connection, notif):
+            rpc_notif = notif.server_originated_rpc_notification
+            params = {}
+            for arg in rpc_notif.rpc.arguments:
+                name = arg.name
+                if arg.HasField("json_value"):
+                    value = json.loads(arg.json_value)
+                    params[name] = value
+                else:
+                    params[name] = None
+            ok = False
+            try:
+                result = await coro(**params)
+                ok = True
+            except KeyboardInterrupt as e:
+                raise e
+            except websockets.exceptions.ConnectionClosed as e:
+                raise e
+            except Exception as e:
+                tb = traceback.format_exc()
+                exception = { "reason": repr(e), "traceback": tb }
+                await iterm2.rpc.async_send_rpc_result(connection, rpc_notif.request_id, True, exception)
+
+            if ok:
+                await iterm2.rpc.async_send_rpc_result(connection, rpc_notif.request_id, False, result)
+
+        args = inspect.signature(coro).parameters.keys()
+        await iterm2.notifications.async_subscribe_to_server_originated_rpc_notification(self.connection, handle_rpc, name, args, timeout)

@@ -19,6 +19,7 @@
 #import "iTermCommandHistoryCommandUseMO+Addtions.h"
 #import "iTermController.h"
 #import "iTermCopyModeState.h"
+#import "iTermDisclosableView.h"
 #import "iTermNotificationController.h"
 #import "iTermHistogram.h"
 #import "iTermHotKeyController.h"
@@ -37,6 +38,7 @@
 #import "iTermRestorableSession.h"
 #import "iTermRule.h"
 #import "iTermSavePanel.h"
+#import "iTermScriptFunctionCall.h"
 #import "iTermSelection.h"
 #import "iTermSemanticHistoryController.h"
 #import "iTermSessionHotkeyController.h"
@@ -47,6 +49,7 @@
 #import "iTermTextExtractor.h"
 #import "iTermThroughputEstimator.h"
 #import "iTermUpdateCadenceController.h"
+#import "iTermVariables.h"
 #import "iTermWarning.h"
 #import "MovePaneController.h"
 #import "MovingAverage.h"
@@ -187,20 +190,6 @@ static NSString *const kProgramTypeShellLauncher = @"Shell Launcher";  // Use iT
 static NSString *const kProgramTypeCommand = @"Command";  // Use command in kProgramCommand
 
 static NSString *kTmuxFontChanged = @"kTmuxFontChanged";
-
-// Keys into _variables.
-static NSString *const kVariableKeySessionName = @"session.name";
-static NSString *const kVariableKeySessionColumns = @"session.columns";
-static NSString *const kVariableKeySessionRows = @"session.rows";
-static NSString *const kVariableKeySessionHostname = @"session.hostname";
-static NSString *const kVariableKeySessionUsername = @"session.username";
-static NSString *const kVariableKeySessionPath = @"session.path";
-static NSString *const kVariableKeySessionLastCommand = @"session.lastCommand";
-static NSString *const kVariableKeySessionTTY = @"session.tty";
-static NSString *const kVariableKeyTermID = @"session.termid";
-static NSString *const kVariableKeySessionCreationTimeString = @"session.creationTimeString";
-static NSString *const kVariableKeySessionPID = @"iterm2.pid";
-static NSString *const kVariableKeySessionAutoLogID = @"session.autoLogId";
 
 // Value for SESSION_ARRANGEMENT_TMUX_TAB_COLOR that means "don't use the
 // default color from the tmux profile; this tab should have no color."
@@ -356,6 +345,7 @@ static const NSUInteger kMaxHosts = 100;
     iTermMark *_lastMark;
 
     VT100GridCoordRange _commandRange;
+    VT100GridAbsCoordRange _lastOrCurrentlyRunningCommandAbsRange;
     long long _lastPromptLine;  // Line where last prompt began
 
     // -2: Within command output (inferred)
@@ -543,6 +533,7 @@ static const NSUInteger kMaxHosts = 100;
         _tmuxSecureLogging = NO;
         _tailFindContext = [[FindContext alloc] init];
         _commandRange = VT100GridCoordRangeMake(-1, -1, -1, -1);
+        _lastOrCurrentlyRunningCommandAbsRange = VT100GridAbsCoordRangeMake(-1, -1, -1, -1);
         _activityCounter = [@0 retain];
         _announcements = [[NSMutableDictionary alloc] init];
         _queuedTokens = [[NSMutableArray alloc] init];
@@ -726,6 +717,12 @@ ITERM_WEAKLY_REFERENCEABLE
                [self class], self, [_screen width], [_screen height], @(self.useMetal)];
 }
 
+- (void)setGuid:(NSString *)guid {
+    [_guid autorelease];
+    _guid = [guid copy];
+    [self updateVariables];
+}
+
 - (void)setLiveSession:(PTYSession *)liveSession {
     assert(liveSession != self);
     if (liveSession) {
@@ -843,53 +840,55 @@ ITERM_WEAKLY_REFERENCEABLE
 
 - (void)updateVariables {
     if (_name) {
-        _variables[kVariableKeySessionName] = [[_name copy] autorelease];
+        _variables[iTermVariableKeySessionPID] = [[_name copy] autorelease];
     } else {
-        [_variables removeObjectForKey:kVariableKeySessionName];
+        [_variables removeObjectForKey:iTermVariableKeySessionPID];
     }
 
-    _variables[kVariableKeySessionColumns] = [NSString stringWithFormat:@"%d", _screen.width];
-    _variables[kVariableKeySessionRows] = [NSString stringWithFormat:@"%d", _screen.height];
+    _variables[iTermVariableKeySessionColumns] = @(_screen.width);
+    _variables[iTermVariableKeySessionRows] = @(_screen.height);
     VT100RemoteHost *remoteHost = [self currentHost];
     if (remoteHost.hostname) {
-        _variables[kVariableKeySessionHostname] = remoteHost.hostname;
+        _variables[iTermVariableKeySessionHostname] = remoteHost.hostname;
     } else {
-        [_variables removeObjectForKey:kVariableKeySessionHostname];
+        [_variables removeObjectForKey:iTermVariableKeySessionHostname];
     }
     if (remoteHost.username) {
-        _variables[kVariableKeySessionUsername] = remoteHost.username;
+        _variables[iTermVariableKeySessionUsername] = remoteHost.username;
     } else {
-        [_variables removeObjectForKey:kVariableKeySessionUsername];
+        [_variables removeObjectForKey:iTermVariableKeySessionUsername];
     }
     NSString *path = [_screen workingDirectoryOnLine:_screen.numberOfScrollbackLines + _screen.cursorY - 1];
     if (path) {
-        _variables[kVariableKeySessionPath] = path;
+        _variables[iTermVariableKeySessionPath] = path;
     } else {
-        [_variables removeObjectForKey:kVariableKeySessionPath];
+        [_variables removeObjectForKey:iTermVariableKeySessionPath];
     }
     if (_lastCommand) {
-        _variables[kVariableKeySessionLastCommand] = _lastCommand;
+        _variables[iTermVariableKeySessionLastCommand] = _lastCommand;
     } else {
-        [_variables removeObjectForKey:kVariableKeySessionLastCommand];
+        [_variables removeObjectForKey:iTermVariableKeySessionLastCommand];
     }
     NSString *tty = [self tty];
     if (tty) {
-        _variables[kVariableKeySessionTTY] = tty;
+        _variables[iTermVariableKeySessionTTY] = tty;
     } else {
-        [_variables removeObjectForKey:kVariableKeySessionTTY];
+        [_variables removeObjectForKey:iTermVariableKeySessionTTY];
     }
 
-    if (_variables[kVariableKeyTermID] == nil) {
+    if (_variables[iTermVariableKeyTermID] == nil) {
         // Variables that only need to be updated once.
-        _variables[kVariableKeyTermID] = [self.sessionId stringByReplacingOccurrencesOfString:@":" withString:@"."];
+        _variables[iTermVariableKeyTermID] = [self.sessionId stringByReplacingOccurrencesOfString:@":" withString:@"."];
 
         NSDateFormatter *dateFormatter = [[[NSDateFormatter alloc] init] autorelease];
         dateFormatter.dateFormat = @"yyyyMMdd_HHmmss";
-        _variables[kVariableKeySessionCreationTimeString] = [dateFormatter stringFromDate:_creationDate];
+        _variables[iTermVariableKeySessionCreationTimeString] = [dateFormatter stringFromDate:_creationDate];
 
-        _variables[kVariableKeySessionPID] = [@(getpid()) stringValue];
-        _variables[kVariableKeySessionAutoLogID] = [@(_autoLogId) stringValue];
+        _variables[iTermVariableKeyApplicationPID] = [@(getpid()) stringValue];
+        _variables[iTermVariableKeySessionAutoLogID] = [@(_autoLogId) stringValue];
     }
+
+    _variables[iTermVariableKeySessionID] = self.guid;
 
     [_textview setBadgeLabel:[self badgeLabel]];
 }
@@ -1198,7 +1197,8 @@ ITERM_WEAKLY_REFERENCEABLE
                 [aSession runCommandWithOldCwd:oldCWD
                                  forObjectType:objectType
                                 forceUseOldCWD:contents != nil && oldCWD.length
-                                 substitutions:arrangement[SESSION_ARRANGEMENT_SUBSTITUTIONS]];
+                                 substitutions:arrangement[SESSION_ARRANGEMENT_SUBSTITUTIONS]
+                                   environment:nil];
             }
         }
 
@@ -1261,6 +1261,7 @@ ITERM_WEAKLY_REFERENCEABLE
         NSDictionary *variables = arrangement[SESSION_ARRANGEMENT_VARIABLES];
         for (id key in variables) {
             aSession.variables[key] = variables[key];
+            iTermVariablesAdd(key);
         }
         aSession.textview.badgeLabel = aSession.badgeLabel;
     }
@@ -1360,6 +1361,7 @@ ITERM_WEAKLY_REFERENCEABLE
     if (announcement) {
         [aSession queueAnnouncement:announcement identifier:@"ThisProfileNoLongerExists"];
     }
+    [aSession updateVariables];
     return aSession;
 }
 
@@ -1505,7 +1507,8 @@ ITERM_WEAKLY_REFERENCEABLE
 - (void)runCommandWithOldCwd:(NSString*)oldCWD
                forObjectType:(iTermObjectType)objectType
               forceUseOldCWD:(BOOL)forceUseOldCWD
-               substitutions:(NSDictionary *)substitutions {
+               substitutions:(NSDictionary *)substitutions
+                 environment:(NSDictionary *)environment {
     NSString *pwd;
     BOOL isUTF8;
 
@@ -1538,9 +1541,12 @@ ITERM_WEAKLY_REFERENCEABLE
 
     [[_delegate realParentWindow] setName:theName forSession:self];
 
+    NSMutableDictionary *realEnvironment = [[environment mutableCopy] autorelease] ?: [NSMutableDictionary dictionary];
+    realEnvironment[@"PWD"] = pwd;
+
     // Start the command
     [self startProgram:cmd
-           environment:@{ @"PWD": pwd }
+           environment:realEnvironment
                 isUTF8:isUTF8
          substitutions:substitutions];
 }
@@ -3681,7 +3687,7 @@ ITERM_WEAKLY_REFERENCEABLE
                                                             object:[_delegate parentWindow]
                                                           userInfo:nil];
     }
-    _variables[kVariableKeySessionName] = [self name];
+    _variables[iTermVariableKeySessionPID] = [self name];
     [_textview setBadgeLabel:[self badgeLabel]];
 }
 
@@ -5685,6 +5691,56 @@ ITERM_WEAKLY_REFERENCEABLE
     }
 }
 
++ (id (^)(NSString *))functionCallSource {
+    return [^id(NSString *name) {
+        return nil;
+    } copy];
+}
+
+- (id (^)(NSString *))functionCallSource {
+    __weak __typeof(self) weakSelf = self;
+    return [^id(NSString *name) {
+        return weakSelf.variables[name];
+    } copy];
+}
+
++ (void)reportFunctionCallError:(NSError *)error forInvocation:(NSString *)keyBindingText {
+    NSString *message = [NSString stringWithFormat:@"Error running “%@”:\n%@",
+                         keyBindingText, error.localizedDescription];
+    NSString *traceback = error.localizedFailureReason;
+    iTermDisclosableView *accessory = nil;
+    if (traceback) {
+        accessory = [[iTermDisclosableView alloc] initWithFrame:NSZeroRect
+                                                         prompt:@"Traceback"
+                                                        message:traceback];
+        accessory.textView.selectable = YES;
+        accessory.frame = NSMakeRect(0, 0, accessory.intrinsicContentSize.width, accessory.intrinsicContentSize.height);
+    }
+    [iTermWarning showWarningWithTitle:message
+                               actions:@[ @"OK" ]
+                             accessory:accessory
+                            identifier:@"NoSyncFunctionCallError"
+                           silenceable:kiTermWarningTypeTemporarilySilenceable
+                               heading:@"Oops"];
+
+}
+
+- (void)invokeFunctionCall:(NSString *)invocation extraContext:(NSDictionary *)extraContext {
+    [iTermScriptFunctionCall callFunction:invocation
+                                   source:^id(NSString *key) {
+                                       id value = extraContext[key];
+                                       if (value) {
+                                           return value;
+                                       }
+                                       return [self functionCallSource](key);
+                                   }
+                               completion:^(id value, NSError *error) {
+                                   if (error) {
+                                       [PTYSession reportFunctionCallError:error forInvocation:invocation];
+                                   }
+                               }];
+}
+
 // This is limited to the actions that don't need any existing session
 + (BOOL)performKeyBindingAction:(int)keyBindingAction parameter:(NSString *)keyBindingText event:(NSEvent *)event {
     switch (keyBindingAction) {
@@ -5749,7 +5805,16 @@ ITERM_WEAKLY_REFERENCEABLE
         case KEY_ACTION_SWAP_PANE_BELOW:
         case KEY_ACTION_TOGGLE_MOUSE_REPORTING:
             return NO;
-            break;
+
+        case KEY_ACTION_INVOKE_SCRIPT_FUNCTION:
+            [iTermScriptFunctionCall callFunction:keyBindingText
+                                           source:[self functionCallSource]
+                                       completion:^(id value, NSError *error) {
+                                           if (error) {
+                                               [PTYSession reportFunctionCallError:error forInvocation:keyBindingText];
+                                           }
+                                       }];
+            return YES;
 
         case KEY_ACTION_SELECT_MENU_ITEM:
             [PTYSession selectMenuItem:keyBindingText];
@@ -6035,6 +6100,9 @@ ITERM_WEAKLY_REFERENCEABLE
             break;
         case KEY_ACTION_TOGGLE_MOUSE_REPORTING:
             [self setXtermMouseReporting:![self xtermMouseReporting]];
+            break;
+        case KEY_ACTION_INVOKE_SCRIPT_FUNCTION:
+            [self invokeFunctionCall:keyBindingText extraContext:nil];
             break;
         default:
             XLog(@"Unknown key action %d", keyBindingAction);
@@ -6975,13 +7043,20 @@ ITERM_WEAKLY_REFERENCEABLE
         [iTermShellHistoryController showInformationalMessage];
         return VT100GridAbsCoordRangeMake(-1, -1, -1, -1);
     } else {
-        VT100GridAbsCoordRange range =
-            VT100GridAbsCoordRangeMake(_commandRange.start.x,
-                                       _commandRange.start.y + _screen.totalScrollbackOverflow,
-                                       _commandRange.end.x,
-                                       _commandRange.end.y + _screen.totalScrollbackOverflow);
+        VT100GridAbsCoordRange range;
+        iTermTextExtractorTrimTrailingWhitespace trailing;
+        if (self.isAtShellPrompt) {
+            range = VT100GridAbsCoordRangeMake(_commandRange.start.x,
+                                               _commandRange.start.y + _screen.totalScrollbackOverflow,
+                                               _commandRange.end.x,
+                                               _commandRange.end.y + _screen.totalScrollbackOverflow);
+            trailing = iTermTextExtractorTrimTrailingWhitespaceAll;
+        } else {
+            range = _lastOrCurrentlyRunningCommandAbsRange;
+            trailing = iTermTextExtractorTrimTrailingWhitespaceOneLine;
+        }
         iTermTextExtractor *extractor = [iTermTextExtractor textExtractorWithDataSource:_screen];
-        return [extractor rangeByTrimmingWhitespaceFromRange:range];
+        return [extractor rangeByTrimmingWhitespaceFromRange:range leading:YES trailing:trailing];
     }
 }
 
@@ -6995,7 +7070,10 @@ ITERM_WEAKLY_REFERENCEABLE
 - (BOOL)textViewCanSelectCurrentCommand {
     // Return YES if command history has never been used so we can show the informational message.
     return (![[iTermShellHistoryController sharedInstance] commandHistoryHasEverBeenUsed] ||
-            self.isAtShellPrompt);
+            self.isAtShellPrompt ||
+            (_lastOrCurrentlyRunningCommandAbsRange.start.x >= 0 &&
+             // It cannot select when the currently running command is lost due to scrollback overflow.
+             _lastOrCurrentlyRunningCommandAbsRange.start.y >= _screen.totalScrollbackOverflow));
 }
 
 - (iTermUnicodeNormalization)textViewUnicodeNormalizationForm {
@@ -7010,8 +7088,15 @@ ITERM_WEAKLY_REFERENCEABLE
     return [[iTermProfilePreferences objectForKey:KEY_BADGE_COLOR inProfile:_profile] colorValue];
 }
 
+// Returns a dictionary with only string values by converting non-strings.
 - (NSDictionary *)textViewVariables {
-    return _variables;
+    return [_variables mapValuesWithBlock:^id(id key, id object) {
+        if ([NSString castFrom:object]) {
+            return object;
+        } else {
+            return [object stringValue];
+        }
+    }];
 }
 
 - (BOOL)textViewSuppressingAllOutput {
@@ -7445,8 +7530,8 @@ ITERM_WEAKLY_REFERENCEABLE
 - (void)screenSizeDidChange {
     [self updateScroll];
     [_textview updateNoteViewFrames];
-    _variables[kVariableKeySessionColumns] = [NSString stringWithFormat:@"%d", _screen.width];
-    _variables[kVariableKeySessionRows] = [NSString stringWithFormat:@"%d", _screen.height];
+    _variables[iTermVariableKeySessionColumns] = @(_screen.width);
+    _variables[iTermVariableKeySessionRows] = @(_screen.height);
     [_textview setBadgeLabel:[self badgeLabel]];
 }
 
@@ -8162,20 +8247,21 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (void)screenSetUserVar:(NSString *)kvpString {
-    NSArray *kvp = [kvpString keyValuePair];
+    iTermTuple *kvp = [kvpString keyValuePair];
     if (kvp) {
-        NSString *key = [NSString stringWithFormat:@"user.%@", kvp[0]];
-        [self setVariableNamed:key toValue:[kvp[1] stringByBase64DecodingStringWithEncoding:NSUTF8StringEncoding]];
+        NSString *key = [NSString stringWithFormat:@"user.%@", kvp.firstObject];
+        [self setVariableNamed:key toValue:[kvp.secondObject stringByBase64DecodingStringWithEncoding:NSUTF8StringEncoding]];
     } else {
-        [_textview setBadgeLabel:[self badgeLabel]];
+        [self setVariableNamed:[NSString stringWithFormat:@"user.%@", kvpString] toValue:nil];
     }
 }
 
-- (void)setVariableNamed:(NSString *)name toValue:(NSString *)newValue {
-    if (!name.length) {
+- (void)setVariableNamed:(NSString *)name toValue:(id)newValue {
+    if (newValue == nil) {
         [_variables removeObjectForKey:name];
     } else {
         _variables[name] = newValue;
+        iTermVariablesAdd(name);
     }
     [_textview setBadgeLabel:[self badgeLabel]];
 }
@@ -8276,14 +8362,14 @@ ITERM_WEAKLY_REFERENCEABLE
 - (void)screenCurrentHostDidChange:(VT100RemoteHost *)host {
     const BOOL hadHost = (_currentHost != nil);
     if (host.hostname) {
-        _variables[kVariableKeySessionHostname] = host.hostname;
+        _variables[iTermVariableKeySessionHostname] = host.hostname;
     } else {
-        [_variables removeObjectForKey:kVariableKeySessionHostname];
+        [_variables removeObjectForKey:iTermVariableKeySessionHostname];
     }
     if (host.username) {
-        _variables[kVariableKeySessionUsername] = host.username;
+        _variables[iTermVariableKeySessionUsername] = host.username;
     } else {
-        [_variables removeObjectForKey:kVariableKeySessionUsername];
+        [_variables removeObjectForKey:iTermVariableKeySessionUsername];
     }
     [_textview setBadgeLabel:[self badgeLabel]];
     [self dismissAnnouncementWithIdentifier:kShellIntegrationOutOfDateAnnouncementIdentifier];
@@ -8434,13 +8520,13 @@ ITERM_WEAKLY_REFERENCEABLE
                     break;
 
                 case 0: // Yes
-                    self.terminal.reportFocus = NO;
+                    self.terminal.bracketedPasteMode = NO;
                     break;
 
                 case 1: // Always
                     [[NSUserDefaults standardUserDefaults] setBool:YES
                                                             forKey:kTurnOffBracketedPasteOnHostChangeUserDefaultsKey];
-                    self.terminal.reportFocus = NO;
+                    self.terminal.bracketedPasteMode = NO;
                     break;
 
                 case 2: // Never
@@ -8464,9 +8550,9 @@ ITERM_WEAKLY_REFERENCEABLE
 
 - (void)screenCurrentDirectoryDidChangeTo:(NSString *)newPath {
     if (newPath) {
-        _variables[kVariableKeySessionPath] = newPath;
+        _variables[iTermVariableKeySessionPath] = newPath;
     } else {
-        [_variables removeObjectForKey:kVariableKeySessionPath];
+        [_variables removeObjectForKey:iTermVariableKeySessionPath];
     }
 
     int line = [_screen numberOfScrollbackLines] + _screen.cursorY;
@@ -8636,6 +8722,9 @@ ITERM_WEAKLY_REFERENCEABLE
     }
     self.lastCommand = command;
     [self updateVariables];
+    // `_commandRange` is from the beginning of command, to the cursor, not necessarily the end of the command.
+    // `range` here includes the entire command and a new line.
+    _lastOrCurrentlyRunningCommandAbsRange = VT100GridAbsCoordRangeFromCoordRange(range, _screen.totalScrollbackOverflow);
     _commandRange = VT100GridCoordRangeMake(-1, -1, -1, -1);
     DLog(@"Hide ACH because command ended");
     [[_delegate realParentWindow] hideAutoCommandHistoryForSession:self];
@@ -9058,7 +9147,12 @@ ITERM_WEAKLY_REFERENCEABLE
     if (!name) {
         return nil;
     }
-    return self.variables[name];
+    id value = self.variables[name];
+    if ([NSString castFrom:value]) {
+        return value;
+    } else {
+        return [value stringValue];
+    }
 }
 
 #pragma mark - Announcements
@@ -9748,6 +9842,7 @@ ITERM_WEAKLY_REFERENCEABLE
         case ITMNotificationType_NotifyOnTerminateSession:
         case ITMNotificationType_NotifyOnLayoutChange:
         case ITMNotificationType_NotifyOnFocusChange:
+        case ITMNotificationType_NotifyOnServerOriginatedRpc:
             // We won't get called for this
             assert(NO);
             break;
@@ -9774,17 +9869,14 @@ ITERM_WEAKLY_REFERENCEABLE
     return response;
 }
 
-- (ITMSetProfilePropertyResponse *)handleSetProfilePropertyForKey:(NSString *)key value:(id)value {
-    ITMSetProfilePropertyResponse *response = [[[ITMSetProfilePropertyResponse alloc] init] autorelease];
+- (ITMSetProfilePropertyResponse_Status)handleSetProfilePropertyForKey:(NSString *)key value:(id)value {
     if (![iTermProfilePreferences valueIsLegal:value forKey:key]) {
         XLog(@"Value %@ is not legal for key %@", value, key);
-        response.status = ITMSetProfilePropertyResponse_Status_RequestMalformed;
-        return response;
+        return ITMSetProfilePropertyResponse_Status_RequestMalformed;
     }
 
     [self setSessionSpecificProfileValues:@{ key: value }];
-    response.status = ITMSetProfilePropertyResponse_Status_Ok;
-    return response;
+    return ITMSetProfilePropertyResponse_Status_Ok;
 }
 
 - (ITMGetProfilePropertyResponse *)handleGetProfilePropertyForKeys:(NSArray<NSString *> *)keys {
@@ -9796,24 +9888,11 @@ ITERM_WEAKLY_REFERENCEABLE
     for (NSString *key in keys) {
         id value = [iTermProfilePreferences objectForKey:key inProfile:self.profile];
         if (value) {
-            NSError *error = nil;
-            NSData *json = nil;
-            if ([NSJSONSerialization isValidJSONObject:value]) {
-                json = [NSJSONSerialization dataWithJSONObject:value
-                                                       options:0
-                                                         error:&error];
-                if (error) {
-                    XLog(@"Failed to json encode value %@ for key %@: %@", value, key, error);
-                }
-            } else if ([value isKindOfClass:[NSString class]]) {
-                json = [[value jsonEncodedString] dataUsingEncoding:NSUTF8StringEncoding];
-            } else if ([value isKindOfClass:[NSNumber class]]) {
-                json = [[value stringValue] dataUsingEncoding:NSUTF8StringEncoding];
-            }
-            if (json) {
-                ITMGetProfilePropertyResponse_Property *property = [[[ITMGetProfilePropertyResponse_Property alloc] init] autorelease];
+            NSString *jsonString = [iTermProfilePreferences jsonEncodedValueForKey:key inProfile:self.profile];
+            if (jsonString) {
+                ITMProfileProperty *property = [[[ITMProfileProperty alloc] init] autorelease];
                 property.key = key;
-                property.jsonValue = [[[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding] autorelease];
+                property.jsonValue = jsonString;
                 [response.propertiesArray addObject:property];
             }
         }

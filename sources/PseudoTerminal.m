@@ -1159,7 +1159,7 @@ ITERM_WEAKLY_REFERENCEABLE
 {
     Profile* profile = [[ProfileModel sharedInstance] bookmarkWithGuid:[sender representedObject]];
     if (profile) {
-        [self createTabWithProfile:profile withCommand:nil];
+        [self createTabWithProfile:profile withCommand:nil environment:nil];
     }
 }
 
@@ -3048,10 +3048,12 @@ ITERM_WEAKLY_REFERENCEABLE
         return;
     }
 
-    NSArray<NSWindowController *> *siblings = [[iTermHotKeyController sharedInstance] siblingWindowControllersOf:self];
-    NSWindowController *newKeyWindowController = [[NSApp keyWindow] windowController];
-    if (![siblings containsObject:newKeyWindowController]) {
-        [[iTermHotKeyController sharedInstance] autoHideHotKeyWindows:siblings];
+    if (![iTermApplication sharedApplication].it_characterPanelIsOpen) {
+        NSArray<NSWindowController *> *siblings = [[iTermHotKeyController sharedInstance] siblingWindowControllersOf:self];
+        NSWindowController *newKeyWindowController = [[NSApp keyWindow] windowController];
+        if (![siblings containsObject:newKeyWindowController]) {
+            [[iTermHotKeyController sharedInstance] autoHideHotKeyWindows:siblings];
+        }
     }
 
     [_contentView.tabBarControl setFlashing:NO];
@@ -3101,10 +3103,12 @@ ITERM_WEAKLY_REFERENCEABLE
 #endif
     PtyLog(@"%s(%d):-[PseudoTerminal windowDidResignMain:%@]",
           __FILE__, __LINE__, aNotification);
-    NSArray<NSWindowController *> *siblings = [[iTermHotKeyController sharedInstance] siblingWindowControllersOf:self];
-    NSWindowController *newMainWindowController = [[NSApp mainWindow] windowController];
-    if (![siblings containsObject:newMainWindowController]) {
-        [[iTermHotKeyController sharedInstance] autoHideHotKeyWindows:siblings];
+    if (![iTermApplication sharedApplication].it_characterPanelIsOpen) {
+        NSArray<NSWindowController *> *siblings = [[iTermHotKeyController sharedInstance] siblingWindowControllersOf:self];
+        NSWindowController *newMainWindowController = [[NSApp mainWindow] windowController];
+        if (![siblings containsObject:newMainWindowController]) {
+            [[iTermHotKeyController sharedInstance] autoHideHotKeyWindows:siblings];
+        }
     }
 
     // update the cursor
@@ -7790,7 +7794,8 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (PTYSession *)createTabWithProfile:(Profile *)profile
-                         withCommand:(NSString *)command {
+                         withCommand:(NSString *)command
+                         environment:(NSDictionary *)environment {
     assert(profile);
 
     // Get active session's directory
@@ -7850,7 +7855,8 @@ ITERM_WEAKLY_REFERENCEABLE
         [aSession runCommandWithOldCwd:previousDirectory
                          forObjectType:objectType
                         forceUseOldCWD:NO
-                         substitutions:substitutions];
+                         substitutions:substitutions
+                           environment:environment];
         if ([[[self window] title] compare:@"Window"] == NSOrderedSame) {
             [self setWindowTitle];
         }

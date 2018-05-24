@@ -25,7 +25,7 @@ async def async_list_sessions(connection):
     request.list_sessions_request.SetInParent()
     return await _async_call(connection, request)
 
-async def async_notification_request(connection, subscribe, notification_type, session=None):
+async def async_notification_request(connection, subscribe, notification_type, session=None, rpc_registration_request=None):
     """
     Requests a change to a notification subscription.
 
@@ -33,12 +33,19 @@ async def async_notification_request(connection, subscribe, notification_type, s
     subscribe: True to subscribe, False to unsubscribe
     notification_type: iterm2.api_pb2.NotificationType
     session: The unique ID of the session or None.
+    rpc_registration_request: The RPC registration request (only for registering an RPC handler) or None.
 
     Returns: iterm2.api_pb2.ServerOriginatedMessage
     """
     request = _alloc_request()
+
+    request.notification_request.SetInParent()
     if session is not None:
         request.notification_request.session = session
+    if rpc_registration_request is not None:
+        print(type(request.notification_request))
+        request.notification_request.rpc_registration_request.CopyFrom(rpc_registration_request)
+
     request.notification_request.subscribe = subscribe
     request.notification_request.notification_type = notification_type
     return await _async_call(connection, request)
@@ -201,19 +208,23 @@ async def async_register_web_view_tool(connection,
     request.register_tool_request.URL = url
     return await _async_call(connection, request)
 
-async def async_set_profile_property(connection, session_id, key, value):
+async def async_set_profile_property(connection, session_id, key, value, guids=None):
     """
     Sets a property of a session's profile.
 
-    connection: A connected iterm2.Connection.
-    session_id: Session ID
-    key: The key to set
-    value: a Python object, whose type depends on the key
+    :param connection: A connected iterm2.Connection.
+    :param session_id: Session ID to modify or None. If None, guids must be set.
+    :param key: The key to set
+    :param value: a Python object, whose type depends on the key
+    :param guids: List of GUIDs of the profile to modify or None. If None, session_id must be set.
 
     Returns: iterm2.api_pb2.ServerOriginatedMessage
     """
     request = _alloc_request()
-    request.set_profile_property_request.session = session_id
+    if session_id is None:
+        request.set_profile_property_request.guid_list.guids.extend(guids);
+    else:
+        request.set_profile_property_request.session = session_id
     request.set_profile_property_request.key = key
     request.set_profile_property_request.json_value = json.dumps(value)
     return await _async_call(connection, request)
@@ -301,6 +312,8 @@ async def async_activate(connection,
 async def async_variable(connection, session_id, sets, gets):
     """
     Gets or sets session variables.
+
+    `sets` are JSON encoded. The resulting gets will be JSON encoded.
     """
     request = _alloc_request()
     request.variable_request.session_id = session_id
@@ -342,6 +355,39 @@ async def async_get_focus_info(connection):
     """
     request = _alloc_request()
     request.focus_request.SetInParent()
+    return await _async_call(connection, request)
+
+async def async_list_profiles(connection, guids, properties):
+    """
+    Gets a list of all profiles.
+
+    :param guid: If None, get all profiles. Otherwise, a list of GUIDs (strings) to fetch.
+    "param properties: If None, get all properties. Otherwise, a list of strings giving property keys to fetch.
+    """
+    request = _alloc_request()
+    request.list_profiles_request.SetInParent()
+    if guids is not None:
+        request.list_profiles_request.guids.extend(guids)
+    if properties is not None:
+        request.list_profiles_request.properties.extend(properties)
+    return await _async_call(connection, request)
+
+async def async_send_rpc_result(connection, request_id, is_exception, value):
+    """Sends an RPC response."""
+    request = _alloc_request()
+    request.server_originated_rpc_result_request.request_id = request_id
+    if is_exception:
+        request.server_originated_rpc_result_request.json_exception = json.dumps(value)
+    else:
+        request.server_originated_rpc_result_request.json_value = json.dumps(value)
+    return await _async_call(connection, request)
+
+async def async_restart_session(connection, session_id, only_if_exited):
+    """Restarts a session."""
+    request = _alloc_request()
+    request.restart_session_request.SetInParent()
+    request.restart_session_request.session_id = session_id
+    request.restart_session_request.only_if_exited = only_if_exited
     return await _async_call(connection, request)
 
 ## Private --------------------------------------------------------------------

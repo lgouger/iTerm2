@@ -7,13 +7,16 @@
 //
 
 #import "iTermProfilePreferences.h"
+
+#import "DebugLogging.h"
 #import "ITAddressBookMgr.h"
 #import "iTermCursor.h"
 #import "NSColor+iTerm.h"
 #import "NSDictionary+iTerm.h"
+#import "NSJSONSerialization+iTerm.h"
 #import "PreferencePanel.h"
 
-#define PROFILE_BLOCK(x) [[^id(Profile *profile) { return [self x:profile]; } copy] autorelease]
+#define PROFILE_BLOCK(x) [^id(Profile *profile) { return [self x:profile]; } copy]
 
 NSString *const kProfilePreferenceCommandTypeCustomValue = @"Yes";
 NSString *const kProfilePreferenceCommandTypeLoginShellValue = @"No";
@@ -143,7 +146,22 @@ NSString *const kProfilePreferenceInitialDirectoryAdvancedValue = @"Advanced";
 }
 
 + (NSArray<NSString *> *)allKeys {
-    return self.defaultValueMap.allKeys;
+    // KEY_ASK_ABOUT_OUTDATED_KEYMAPS excluded because it should be deprecated.
+    NSArray<NSString *> *keysWithoutDefaultValues =
+        @[ KEY_GUID, KEY_TRIGGERS, KEY_SMART_SELECTION_RULES, KEY_SEMANTIC_HISTORY, KEY_BOUND_HOSTS,
+           KEY_ORIGINAL_GUID, KEY_AWDS_WIN_OPTION, KEY_AWDS_WIN_DIRECTORY, KEY_AWDS_TAB_OPTION,
+           KEY_AWDS_TAB_DIRECTORY, KEY_AWDS_PANE_OPTION, KEY_AWDS_PANE_DIRECTORY,
+           KEY_NORMAL_FONT, KEY_NON_ASCII_FONT, KEY_BACKGROUND_IMAGE_LOCATION, KEY_KEYBOARD_MAP,
+           KEY_TOUCHBAR_MAP, KEY_DYNAMIC_PROFILE_PARENT_NAME, KEY_DYNAMIC_PROFILE_FILENAME ];
+    return [self.defaultValueMap.allKeys arrayByAddingObjectsFromArray:keysWithoutDefaultValues];
+}
+
++ (NSString *)jsonEncodedValueForKey:(NSString *)key inProfile:(Profile *)profile {
+    id value = [self objectForKey:key inProfile:profile];
+    if (!value) {
+        return nil;
+    }
+    return [NSJSONSerialization it_jsonStringForObject:value];
 }
 
 #pragma mark - Private
@@ -334,7 +352,6 @@ NSString *const kProfilePreferenceInitialDirectoryAdvancedValue = @"Advanced";
                   // README.md when adding a new value that should be
                   // API-settable.
                 };
-        [dict retain];
     }
     return dict;
 }
@@ -389,7 +406,6 @@ NSString *const kProfilePreferenceInitialDirectoryAdvancedValue = @"Advanced";
                   KEY_UNICODE_NORMALIZATION: PROFILE_BLOCK(unicodeNormalizationForm),
                   KEY_UNICODE_VERSION: PROFILE_BLOCK(unicodeVersion),
                 };
-        [dict retain];
     }
     return dict;
 }

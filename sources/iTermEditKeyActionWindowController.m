@@ -7,45 +7,43 @@
 //
 
 #import "iTermEditKeyActionWindowController.h"
+#import "iTermFunctionCallTextFieldDelegate.h"
 #import "iTermPasteSpecialViewController.h"
 #import "iTermPreferences.h"
 #import "iTermShortcutInputView.h"
+#import "iTermVariables.h"
 #import "iTermKeyBindingMgr.h"
 #import "NSPopUpButton+iTerm.h"
 #import "RegexKitLite.h"
 
-@interface iTermEditKeyActionWindowController () <iTermShortcutInputViewDelegate>
+@interface iTermEditKeyActionWindowController () <
+    iTermShortcutInputViewDelegate>
 
 @property(nonatomic, assign) BOOL ok;
 
 @end
 
 @implementation iTermEditKeyActionWindowController {
-    __weak IBOutlet iTermShortcutInputView *_shortcutField;
-    __weak IBOutlet NSTextField *_keyboardShortcutLabel;
-    __weak IBOutlet NSTextField *_touchBarLabel;
-    __weak IBOutlet NSPopUpButton *_actionPopup;
-    __weak IBOutlet NSTextField *_parameter;
-    __weak IBOutlet NSTextField *_parameterLabel;
-    __weak IBOutlet NSPopUpButton *_profilePopup;
-    __weak IBOutlet NSPopUpButton *_selectionMovementUnit;
-    __weak IBOutlet NSPopUpButton *_menuToSelectPopup;
-    __weak IBOutlet NSTextField *_profileLabel;
-    __weak IBOutlet NSTextField *_colorPresetsLabel;
-    __weak IBOutlet NSPopUpButton *_colorPresetsPopup;
-    __weak IBOutlet NSView *_pasteSpecialViewContainer;
+    IBOutlet iTermShortcutInputView *_shortcutField;
+    IBOutlet NSTextField *_keyboardShortcutLabel;
+    IBOutlet NSTextField *_touchBarLabel;
+    IBOutlet NSPopUpButton *_actionPopup;
+    IBOutlet NSTextField *_parameter;
+    IBOutlet NSTextField *_parameterLabel;
+    IBOutlet NSPopUpButton *_profilePopup;
+    IBOutlet NSPopUpButton *_selectionMovementUnit;
+    IBOutlet NSPopUpButton *_menuToSelectPopup;
+    IBOutlet NSTextField *_profileLabel;
+    IBOutlet NSTextField *_colorPresetsLabel;
+    IBOutlet NSPopUpButton *_colorPresetsPopup;
+    IBOutlet NSView *_pasteSpecialViewContainer;
 
     iTermPasteSpecialViewController *_pasteSpecialViewController;
+    iTermFunctionCallTextFieldDelegate *_functionCallDelegate;
 }
 
 - (instancetype)init {
     return [super initWithWindowNibName:@"iTermEditKeyActionWindowController"];
-}
-
-- (void)dealloc {
-    [_pasteSpecialViewController release];
-    [_touchBarItemID release];
-    [super dealloc];
 }
 
 - (void)windowDidLoad
@@ -159,77 +157,45 @@
         _shortcutField.hidden = NO;
     }
 
+    BOOL parameterHidden = YES;
+    BOOL parameterLabelHidden = YES;
+    BOOL profilePopupHidden = YES;
+    BOOL selectionMovementUnitHidden = YES;
+    BOOL profileLabelHidden = YES;
+    BOOL menuToSelectPopupHidden = YES;
+    BOOL shortcutFieldDisableKeyRemapping = NO;
+    BOOL colorPresetsLabelHidden = YES;
+    BOOL colorPresetsPopupHidden = YES;
+    BOOL pasteSpecialHidden = YES;
+    id<NSTextFieldDelegate> parameterDelegate = nil;
+
     switch (tag) {
         case KEY_ACTION_HEX_CODE:
-            [_parameter setHidden:NO];
+            parameterHidden = NO;
             [[_parameter cell] setPlaceholderString:@"ex: 0x7f 0x20"];
-            [_parameterLabel setHidden:YES];
-            [_profilePopup setHidden:YES];
-            [_selectionMovementUnit setHidden:YES];
-            [_profileLabel setHidden:YES];
-            [_menuToSelectPopup setHidden:YES];
-            _shortcutField.disableKeyRemapping = NO;
-            [_colorPresetsLabel setHidden:YES];
-            [_colorPresetsPopup setHidden:YES];
-            [self setPasteSpecialHidden:YES];
             break;
 
         case KEY_ACTION_VIM_TEXT:
         case KEY_ACTION_TEXT:
-            [_parameter setHidden:NO];
+            parameterHidden = NO;
             [[_parameter cell] setPlaceholderString:@"Enter value to send"];
-            [_parameterLabel setHidden:YES];
-            [_profilePopup setHidden:YES];
-            [_selectionMovementUnit setHidden:YES];
-            [_profileLabel setHidden:YES];
-            [_menuToSelectPopup setHidden:YES];
-            _shortcutField.disableKeyRemapping = NO;
-            [_colorPresetsLabel setHidden:YES];
-            [_colorPresetsPopup setHidden:YES];
-            [self setPasteSpecialHidden:YES];
             break;
 
         case KEY_ACTION_RUN_COPROCESS:
-            [_parameter setHidden:NO];
+            parameterHidden = NO;
             [[_parameter cell] setPlaceholderString:@"Enter command to run"];
-            [_parameterLabel setHidden:YES];
-            [_profilePopup setHidden:YES];
-            [_selectionMovementUnit setHidden:YES];
-            [_profileLabel setHidden:YES];
-            [_menuToSelectPopup setHidden:YES];
-            _shortcutField.disableKeyRemapping = NO;
-            [_colorPresetsLabel setHidden:YES];
-            [_colorPresetsPopup setHidden:YES];
-            [self setPasteSpecialHidden:YES];
             break;
 
         case KEY_ACTION_SELECT_MENU_ITEM:
-            [_parameter setHidden:YES];
             [[_parameter cell] setPlaceholderString:@"Enter name of menu item"];
-            [_parameterLabel setHidden:YES];
-            [_profilePopup setHidden:YES];
-            [_selectionMovementUnit setHidden:YES];
-            [_menuToSelectPopup setHidden:NO];
-            [_profileLabel setHidden:YES];
-            _shortcutField.disableKeyRemapping = NO;
-            [_colorPresetsLabel setHidden:YES];
-            [_colorPresetsPopup setHidden:YES];
-            [self setPasteSpecialHidden:YES];
+            menuToSelectPopupHidden = NO;
             break;
 
         case KEY_ACTION_ESCAPE_SEQUENCE:
-            [_parameter setHidden:NO];
+            parameterHidden = NO;
             [[_parameter cell] setPlaceholderString:@"characters to send"];
-            [_parameterLabel setHidden:NO];
+            parameterLabelHidden = NO;
             [_parameterLabel setStringValue:@"Esc+"];
-            [_profilePopup setHidden:YES];
-            [_selectionMovementUnit setHidden:YES];
-            [_profileLabel setHidden:YES];
-            [_menuToSelectPopup setHidden:YES];
-            _shortcutField.disableKeyRemapping = NO;
-            [_colorPresetsLabel setHidden:YES];
-            [_colorPresetsPopup setHidden:YES];
-            [self setPasteSpecialHidden:YES];
             break;
 
         case KEY_ACTION_SPLIT_VERTICALLY_WITH_PROFILE:
@@ -237,105 +203,69 @@
         case KEY_ACTION_NEW_TAB_WITH_PROFILE:
         case KEY_ACTION_NEW_WINDOW_WITH_PROFILE:
         case KEY_ACTION_SET_PROFILE:
-            [_parameter setHidden:YES];
-            [_profileLabel setHidden:NO];
-            [_profilePopup setHidden:NO];
-            [_selectionMovementUnit setHidden:YES];
-            [_parameterLabel setHidden:YES];
-            [_menuToSelectPopup setHidden:YES];
-            _shortcutField.disableKeyRemapping = NO;
-            [_colorPresetsLabel setHidden:YES];
-            [_colorPresetsPopup setHidden:YES];
-            [self setPasteSpecialHidden:YES];
+            profileLabelHidden = NO;
+            profilePopupHidden = NO;
             break;
 
         case KEY_ACTION_LOAD_COLOR_PRESET:
-            [_parameter setHidden:YES];
-            [_profileLabel setHidden:YES];
-            [_profilePopup setHidden:YES];
-            [_selectionMovementUnit setHidden:YES];
-            [_parameterLabel setHidden:YES];
-            [_menuToSelectPopup setHidden:YES];
-            _shortcutField.disableKeyRemapping = NO;
             [_colorPresetsLabel setHidden:NO];
             [_colorPresetsPopup setHidden:NO];
-            [self setPasteSpecialHidden:YES];
             break;
 
         case KEY_ACTION_DO_NOT_REMAP_MODIFIERS:
         case KEY_ACTION_REMAP_LOCALLY:
-            _shortcutField.disableKeyRemapping = YES;
-            [_parameter setHidden:YES];
+            shortcutFieldDisableKeyRemapping = YES;
             [_parameter setStringValue:@""];
-            [_parameterLabel setHidden:NO];
+            parameterLabelHidden = NO;
             [_parameterLabel setStringValue:@"Modifier remapping disabled: type the actual key combo you want to affect."];
-            [_profilePopup setHidden:YES];
-            [_selectionMovementUnit setHidden:YES];
-            [_profileLabel setHidden:YES];
-            [_menuToSelectPopup setHidden:YES];
-            [_colorPresetsLabel setHidden:YES];
-            [_colorPresetsPopup setHidden:YES];
-            [self setPasteSpecialHidden:YES];
             break;
 
         case KEY_ACTION_FIND_REGEX:
-            [_parameter setHidden:NO];
+            parameterHidden = NO;
             [[_parameter cell] setPlaceholderString:@"Regular Expression"];
-            [_parameterLabel setHidden:YES];
-            [_profilePopup setHidden:YES];
-            [_selectionMovementUnit setHidden:YES];
-            [_profileLabel setHidden:YES];
-            [_menuToSelectPopup setHidden:YES];
-            _shortcutField.disableKeyRemapping = NO;
-            [_colorPresetsLabel setHidden:YES];
-            [_colorPresetsPopup setHidden:YES];
-            [self setPasteSpecialHidden:YES];
+            break;
+
+        case KEY_ACTION_INVOKE_SCRIPT_FUNCTION:
+            parameterHidden = NO;
+            [[_parameter cell] setPlaceholderString:@"Function Call"];
+            if (!_functionCallDelegate) {
+                _functionCallDelegate = [[iTermFunctionCallTextFieldDelegate alloc] initWithPaths:iTermVariablesGetAll()
+                                                                                      passthrough:nil];
+            }
+            parameterDelegate = _functionCallDelegate;
             break;
 
         case KEY_ACTION_PASTE_SPECIAL_FROM_SELECTION:
         case KEY_ACTION_PASTE_SPECIAL:
-            [_parameter setHidden:YES];
-            [_parameterLabel setHidden:YES];
-            [_profilePopup setHidden:YES];
-            [_selectionMovementUnit setHidden:YES];
-            [_profileLabel setHidden:YES];
-            [_menuToSelectPopup setHidden:YES];
-            _shortcutField.disableKeyRemapping = NO;
-            [_colorPresetsLabel setHidden:YES];
-            [_colorPresetsPopup setHidden:YES];
-            [self setPasteSpecialHidden:NO];
+            pasteSpecialHidden = NO;
             break;
 
         case KEY_ACTION_MOVE_END_OF_SELECTION_LEFT:
         case KEY_ACTION_MOVE_END_OF_SELECTION_RIGHT:
         case KEY_ACTION_MOVE_START_OF_SELECTION_LEFT:
         case KEY_ACTION_MOVE_START_OF_SELECTION_RIGHT:
-            [_parameter setHidden:YES];
             [_parameter setStringValue:@""];
-            [_parameterLabel setHidden:YES];
-            [_profilePopup setHidden:YES];
-            [_selectionMovementUnit setHidden:NO];
-            [_profileLabel setHidden:YES];
-            [_menuToSelectPopup setHidden:YES];
-            _shortcutField.disableKeyRemapping = NO;
-            [_colorPresetsLabel setHidden:YES];
-            [_colorPresetsPopup setHidden:YES];
-            [self setPasteSpecialHidden:YES];
+            selectionMovementUnitHidden = NO;
             break;
 
         default:
-            [_parameter setHidden:YES];
             [_parameter setStringValue:@""];
-            [_parameterLabel setHidden:YES];
-            [_profilePopup setHidden:YES];
-            [_selectionMovementUnit setHidden:YES];
-            [_profileLabel setHidden:YES];
-            [_menuToSelectPopup setHidden:YES];
-            _shortcutField.disableKeyRemapping = NO;
-            [_colorPresetsLabel setHidden:YES];
-            [_colorPresetsPopup setHidden:YES];
-            [self setPasteSpecialHidden:YES];
             break;
+    }
+
+    [_parameter setHidden:parameterHidden];
+    [_parameterLabel setHidden:parameterLabelHidden];
+    [_profilePopup setHidden:profilePopupHidden];
+    [_selectionMovementUnit setHidden:selectionMovementUnitHidden];
+    [_profileLabel setHidden:profileLabelHidden];
+    [_menuToSelectPopup setHidden:menuToSelectPopupHidden];
+    _shortcutField.disableKeyRemapping = shortcutFieldDisableKeyRemapping;
+    [_colorPresetsLabel setHidden:colorPresetsLabelHidden];
+    [_colorPresetsPopup setHidden:colorPresetsPopupHidden];
+    [self setPasteSpecialHidden:pasteSpecialHidden];
+    _parameter.delegate = parameterDelegate;
+    if (!parameterDelegate && _functionCallDelegate) {
+        _functionCallDelegate = nil;
     }
 
     [self updateFrameAnimated:animated];
@@ -396,13 +326,8 @@
                                heightExcludingAccessory);
     }
     if (animated) {
-        [self retain];
-
-        [self.window retain];  // Ignore analyzer warning on this line (autorelaesed in block)
         dispatch_async(dispatch_get_main_queue(), ^{
             [self.window setFrame:rect display:YES animate:YES];
-            [self autorelease];
-            [self.window autorelease];  // Ignore analyzer warning on this line (retained before block)
         });
     } else {
         [self.window setFrame:rect display:YES animate:NO];
@@ -445,7 +370,7 @@
             [self item:item isWindowInWindowsMenu:menu]) {  // exclude windows in window menu
             continue;
         }
-        NSMenuItem *theItem = [[[NSMenuItem alloc] init] autorelease];
+        NSMenuItem *theItem = [[NSMenuItem alloc] init];
         [theItem setTitle:[item title]];
         theItem.identifier = item.identifier;
         [theItem setIndentationLevel:depth];

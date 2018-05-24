@@ -26,11 +26,14 @@
  */
 
 #import "DebugLogging.h"
+#import "iTermTuple.h"
 #import "NSData+iTerm.h"
 #import "NSLocale+iTerm.h"
 #import "NSMutableAttributedString+iTerm.h"
 #import "NSStringITerm.h"
 #import "NSCharacterSet+iTerm.h"
+#import "NSJSONSerialization+iTerm.h"
+#import "NSObject+iTerm.h"
 #import "RegexKitLite.h"
 #import "ScreenChar.h"
 #import <apr-1/apr_base64.h>
@@ -1303,13 +1306,13 @@ static TECObjectRef CreateTECConverterForUTF8Variants(TextEncodingVariant varian
     return [attributedString heightForWidth:maxWidth];
 }
 
-- (NSArray *)keyValuePair {
+- (iTermTuple *)keyValuePair {
     NSRange range = [self rangeOfString:@"="];
     if (range.location == NSNotFound) {
-        return @[ self, @"" ];
+        return nil;
     } else {
-        return @[ [self substringToIndex:range.location],
-                  [self substringFromIndex:range.location + 1] ];
+        return [iTermTuple tupleWithObject:[self substringToIndex:range.location]
+                                 andObject:[self substringFromIndex:range.location + 1]];
     }
 }
 
@@ -1327,6 +1330,15 @@ static TECObjectRef CreateTECConverterForUTF8Variants(TextEncodingVariant varian
 
 // Replace substrings like \(foo) or \1...\9 with the value of vars[@"foo"] or vars[@"1"].
 - (NSString *)stringByReplacingVariableReferencesWithVariables:(NSDictionary *)vars {
+    NSString *(^stringify)(id) = ^NSString *(id x) {
+        if ([NSString castFrom:x]) {
+            return x;
+        } else if ([NSNumber castFrom:x]) {
+            return [x stringValue];
+        } else {
+            return [NSJSONSerialization it_jsonStringForObject:x];
+        }
+    };
     unichar *chars = (unichar *)malloc(self.length * sizeof(unichar));
     [self getCharacters:chars];
     enum {
@@ -1355,7 +1367,7 @@ static TECObjectRef CreateTECConverterForUTF8Variants(TextEncodingVariant varian
                     // \1...\9 also work as subs.
                     NSString *singleCharVar = [NSString stringWithFormat:@"%C", c];
                     if (singleCharVar.integerValue > 0 && vars[singleCharVar]) {
-                        [result appendString:vars[singleCharVar]];
+                        [result appendString:stringify(vars[singleCharVar])];
                     } else {
                         [result appendFormat:@"\\%C", c];
                     }
@@ -1366,7 +1378,7 @@ static TECObjectRef CreateTECConverterForUTF8Variants(TextEncodingVariant varian
             case kInParens:
                 if (c == ')') {
                     state = kLiteral;
-                    NSString *value = vars[varName];
+                    NSString *value = stringify(vars[varName]);
                     if (value) {
                         [result appendString:value];
                     }

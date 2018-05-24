@@ -45,7 +45,6 @@ CF_EXTERN_C_BEGIN
 @class ITMGetBufferResponse;
 @class ITMGetProfilePropertyRequest;
 @class ITMGetProfilePropertyResponse;
-@class ITMGetProfilePropertyResponse_Property;
 @class ITMGetPromptRequest;
 @class ITMGetPromptResponse;
 @class ITMGetPropertyRequest;
@@ -56,6 +55,9 @@ CF_EXTERN_C_BEGIN
 @class ITMLayoutChangedNotification;
 @class ITMLineContents;
 @class ITMLineRange;
+@class ITMListProfilesRequest;
+@class ITMListProfilesResponse;
+@class ITMListProfilesResponse_Profile;
 @class ITMListSessionsRequest;
 @class ITMListSessionsResponse;
 @class ITMListSessionsResponse_SplitTreeNode;
@@ -69,16 +71,27 @@ CF_EXTERN_C_BEGIN
 @class ITMNotificationRequest;
 @class ITMNotificationResponse;
 @class ITMPoint;
+@class ITMProfileProperty;
 @class ITMPromptNotification;
+@class ITMRPCRegistrationRequest;
+@class ITMRPCRegistrationRequest_RPCArgumentSignature;
 @class ITMRange;
 @class ITMRegisterToolRequest;
 @class ITMRegisterToolResponse;
+@class ITMRestartSessionRequest;
+@class ITMRestartSessionResponse;
 @class ITMSavedArrangementRequest;
 @class ITMSavedArrangementResponse;
 @class ITMScreenUpdateNotification;
 @class ITMSendTextRequest;
 @class ITMSendTextResponse;
+@class ITMServerOriginatedRPC;
+@class ITMServerOriginatedRPCNotification;
+@class ITMServerOriginatedRPCResultRequest;
+@class ITMServerOriginatedRPCResultResponse;
+@class ITMServerOriginatedRPC_RPCArgument;
 @class ITMSetProfilePropertyRequest;
+@class ITMSetProfilePropertyRequest_GuidList;
 @class ITMSetProfilePropertyResponse;
 @class ITMSetPropertyRequest;
 @class ITMSetPropertyResponse;
@@ -109,6 +122,7 @@ typedef GPB_ENUM(ITMNotificationType) {
   ITMNotificationType_NotifyOnTerminateSession = 7,
   ITMNotificationType_NotifyOnLayoutChange = 8,
   ITMNotificationType_NotifyOnFocusChange = 9,
+  ITMNotificationType_NotifyOnServerOriginatedRpc = 10,
 };
 
 GPBEnumDescriptor *ITMNotificationType_EnumDescriptor(void);
@@ -118,6 +132,28 @@ GPBEnumDescriptor *ITMNotificationType_EnumDescriptor(void);
  * the time this source was generated.
  **/
 BOOL ITMNotificationType_IsValidValue(int32_t value);
+
+#pragma mark - Enum ITMRestartSessionResponse_Status
+
+typedef GPB_ENUM(ITMRestartSessionResponse_Status) {
+  ITMRestartSessionResponse_Status_Ok = 0,
+  ITMRestartSessionResponse_Status_SessionNotFound = 1,
+
+  /**
+   * Some sessions, such as tmux integration sessions, are not restartable.
+   * Also, when `only_if_exited` is set in the request and the session is still running then this
+   * status will be returned.
+   **/
+  ITMRestartSessionResponse_Status_SessionNotRestartable = 2,
+};
+
+GPBEnumDescriptor *ITMRestartSessionResponse_Status_EnumDescriptor(void);
+
+/**
+ * Checks to see if the given value is defined by the enum or was not known at
+ * the time this source was generated.
+ **/
+BOOL ITMRestartSessionResponse_Status_IsValidValue(int32_t value);
 
 #pragma mark - Enum ITMSavedArrangementRequest_Action
 
@@ -282,6 +318,7 @@ typedef GPB_ENUM(ITMNotificationResponse_Status) {
   ITMNotificationResponse_Status_RequestMalformed = 2,
   ITMNotificationResponse_Status_NotSubscribed = 3,
   ITMNotificationResponse_Status_AlreadySubscribed = 4,
+  ITMNotificationResponse_Status_DuplicateServerOriginatedRpc = 5,
 };
 
 GPBEnumDescriptor *ITMNotificationResponse_Status_EnumDescriptor(void);
@@ -389,6 +426,7 @@ typedef GPB_ENUM(ITMSetProfilePropertyResponse_Status) {
   ITMSetProfilePropertyResponse_Status_Ok = 0,
   ITMSetProfilePropertyResponse_Status_SessionNotFound = 1,
   ITMSetProfilePropertyResponse_Status_RequestMalformed = 2,
+  ITMSetProfilePropertyResponse_Status_BadGuid = 3,
 };
 
 GPBEnumDescriptor *ITMSetProfilePropertyResponse_Status_EnumDescriptor(void);
@@ -546,6 +584,9 @@ typedef GPB_ENUM(ITMClientOriginatedMessage_FieldNumber) {
   ITMClientOriginatedMessage_FieldNumber_VariableRequest = 115,
   ITMClientOriginatedMessage_FieldNumber_SavedArrangementRequest = 116,
   ITMClientOriginatedMessage_FieldNumber_FocusRequest = 117,
+  ITMClientOriginatedMessage_FieldNumber_ListProfilesRequest = 118,
+  ITMClientOriginatedMessage_FieldNumber_ServerOriginatedRpcResultRequest = 119,
+  ITMClientOriginatedMessage_FieldNumber_RestartSessionRequest = 120,
 };
 
 typedef GPB_ENUM(ITMClientOriginatedMessage_Submessage_OneOfCase) {
@@ -568,6 +609,9 @@ typedef GPB_ENUM(ITMClientOriginatedMessage_Submessage_OneOfCase) {
   ITMClientOriginatedMessage_Submessage_OneOfCase_VariableRequest = 115,
   ITMClientOriginatedMessage_Submessage_OneOfCase_SavedArrangementRequest = 116,
   ITMClientOriginatedMessage_Submessage_OneOfCase_FocusRequest = 117,
+  ITMClientOriginatedMessage_Submessage_OneOfCase_ListProfilesRequest = 118,
+  ITMClientOriginatedMessage_Submessage_OneOfCase_ServerOriginatedRpcResultRequest = 119,
+  ITMClientOriginatedMessage_Submessage_OneOfCase_RestartSessionRequest = 120,
 };
 
 /**
@@ -617,6 +661,12 @@ typedef GPB_ENUM(ITMClientOriginatedMessage_Submessage_OneOfCase) {
 
 @property(nonatomic, readwrite, strong, null_resettable) ITMFocusRequest *focusRequest;
 
+@property(nonatomic, readwrite, strong, null_resettable) ITMListProfilesRequest *listProfilesRequest;
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMServerOriginatedRPCResultRequest *serverOriginatedRpcResultRequest;
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMRestartSessionRequest *restartSessionRequest;
+
 @end
 
 /**
@@ -647,6 +697,9 @@ typedef GPB_ENUM(ITMServerOriginatedMessage_FieldNumber) {
   ITMServerOriginatedMessage_FieldNumber_VariableResponse = 115,
   ITMServerOriginatedMessage_FieldNumber_SavedArrangementResponse = 116,
   ITMServerOriginatedMessage_FieldNumber_FocusResponse = 117,
+  ITMServerOriginatedMessage_FieldNumber_ListProfilesResponse = 118,
+  ITMServerOriginatedMessage_FieldNumber_ServerOriginatedRpcResultResponse = 119,
+  ITMServerOriginatedMessage_FieldNumber_RestartSessionResponse = 120,
   ITMServerOriginatedMessage_FieldNumber_Notification = 1000,
 };
 
@@ -671,6 +724,9 @@ typedef GPB_ENUM(ITMServerOriginatedMessage_Submessage_OneOfCase) {
   ITMServerOriginatedMessage_Submessage_OneOfCase_VariableResponse = 115,
   ITMServerOriginatedMessage_Submessage_OneOfCase_SavedArrangementResponse = 116,
   ITMServerOriginatedMessage_Submessage_OneOfCase_FocusResponse = 117,
+  ITMServerOriginatedMessage_Submessage_OneOfCase_ListProfilesResponse = 118,
+  ITMServerOriginatedMessage_Submessage_OneOfCase_ServerOriginatedRpcResultResponse = 119,
+  ITMServerOriginatedMessage_Submessage_OneOfCase_RestartSessionResponse = 120,
   ITMServerOriginatedMessage_Submessage_OneOfCase_Notification = 1000,
 };
 
@@ -725,6 +781,12 @@ typedef GPB_ENUM(ITMServerOriginatedMessage_Submessage_OneOfCase) {
 
 @property(nonatomic, readwrite, strong, null_resettable) ITMFocusResponse *focusResponse;
 
+@property(nonatomic, readwrite, strong, null_resettable) ITMListProfilesResponse *listProfilesResponse;
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMServerOriginatedRPCResultResponse *serverOriginatedRpcResultResponse;
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMRestartSessionResponse *restartSessionResponse;
+
 /** This is the only response that is sent spontaneously. The 'id' field will not be set. */
 @property(nonatomic, readwrite, strong, null_resettable) ITMNotification *notification;
 
@@ -734,6 +796,149 @@ typedef GPB_ENUM(ITMServerOriginatedMessage_Submessage_OneOfCase) {
  * Clears whatever value was set for the oneof 'submessage'.
  **/
 void ITMServerOriginatedMessage_ClearSubmessageOneOfCase(ITMServerOriginatedMessage *message);
+
+#pragma mark - ITMRestartSessionRequest
+
+typedef GPB_ENUM(ITMRestartSessionRequest_FieldNumber) {
+  ITMRestartSessionRequest_FieldNumber_SessionId = 1,
+  ITMRestartSessionRequest_FieldNumber_OnlyIfExited = 2,
+};
+
+@interface ITMRestartSessionRequest : GPBMessage
+
+/** "all" not allowed. */
+@property(nonatomic, readwrite, copy, null_resettable) NSString *sessionId;
+/** Test to see if @c sessionId has been set. */
+@property(nonatomic, readwrite) BOOL hasSessionId;
+
+/**
+ * If set, then still-running sessions will fail to restart with SESSION_NOT_RESTARTABLE.
+ * If not set, then a still-running session gets killed and restarted.
+ **/
+@property(nonatomic, readwrite) BOOL onlyIfExited;
+
+@property(nonatomic, readwrite) BOOL hasOnlyIfExited;
+@end
+
+#pragma mark - ITMRestartSessionResponse
+
+typedef GPB_ENUM(ITMRestartSessionResponse_FieldNumber) {
+  ITMRestartSessionResponse_FieldNumber_Status = 1,
+};
+
+@interface ITMRestartSessionResponse : GPBMessage
+
+@property(nonatomic, readwrite) ITMRestartSessionResponse_Status status;
+
+@property(nonatomic, readwrite) BOOL hasStatus;
+@end
+
+#pragma mark - ITMServerOriginatedRPCResultRequest
+
+typedef GPB_ENUM(ITMServerOriginatedRPCResultRequest_FieldNumber) {
+  ITMServerOriginatedRPCResultRequest_FieldNumber_RequestId = 1,
+  ITMServerOriginatedRPCResultRequest_FieldNumber_JsonException = 2,
+  ITMServerOriginatedRPCResultRequest_FieldNumber_JsonValue = 3,
+};
+
+typedef GPB_ENUM(ITMServerOriginatedRPCResultRequest_Result_OneOfCase) {
+  ITMServerOriginatedRPCResultRequest_Result_OneOfCase_GPBUnsetOneOfCase = 0,
+  ITMServerOriginatedRPCResultRequest_Result_OneOfCase_JsonException = 2,
+  ITMServerOriginatedRPCResultRequest_Result_OneOfCase_JsonValue = 3,
+};
+
+/**
+ * This is the result of an iTerm2-to-script RPC call.
+ **/
+@interface ITMServerOriginatedRPCResultRequest : GPBMessage
+
+@property(nonatomic, readwrite, copy, null_resettable) NSString *requestId;
+/** Test to see if @c requestId has been set. */
+@property(nonatomic, readwrite) BOOL hasRequestId;
+
+@property(nonatomic, readonly) ITMServerOriginatedRPCResultRequest_Result_OneOfCase resultOneOfCase;
+
+/**
+ * Exceptions should be dictionaries with a key of "reason" having a string value describing
+ * what went wrong.
+ **/
+@property(nonatomic, readwrite, copy, null_resettable) NSString *jsonException;
+
+@property(nonatomic, readwrite, copy, null_resettable) NSString *jsonValue;
+
+@end
+
+/**
+ * Clears whatever value was set for the oneof 'result'.
+ **/
+void ITMServerOriginatedRPCResultRequest_ClearResultOneOfCase(ITMServerOriginatedRPCResultRequest *message);
+
+#pragma mark - ITMServerOriginatedRPCResultResponse
+
+/**
+ * This simply acknowledges receipt of ServerOriginatedRPCResultRequest.
+ **/
+@interface ITMServerOriginatedRPCResultResponse : GPBMessage
+
+@end
+
+#pragma mark - ITMListProfilesRequest
+
+typedef GPB_ENUM(ITMListProfilesRequest_FieldNumber) {
+  ITMListProfilesRequest_FieldNumber_PropertiesArray = 1,
+  ITMListProfilesRequest_FieldNumber_GuidsArray = 2,
+};
+
+/**
+ * Requests a list of all profiles.
+ **/
+@interface ITMListProfilesRequest : GPBMessage
+
+/**
+ * The profile properties to respond with. See SetProfilePropertyRequest for a list of values.
+ * If empty, all properties will be returned.
+ **/
+@property(nonatomic, readwrite, strong, null_resettable) NSMutableArray<NSString*> *propertiesArray;
+/** The number of items in @c propertiesArray without causing the array to be created. */
+@property(nonatomic, readonly) NSUInteger propertiesArray_Count;
+
+/**
+ * If empty, all profiles will be returned. Otherwise, only profiles with one of the listed
+ * GUIDs will be returned.
+ **/
+@property(nonatomic, readwrite, strong, null_resettable) NSMutableArray<NSString*> *guidsArray;
+/** The number of items in @c guidsArray without causing the array to be created. */
+@property(nonatomic, readonly) NSUInteger guidsArray_Count;
+
+@end
+
+#pragma mark - ITMListProfilesResponse
+
+typedef GPB_ENUM(ITMListProfilesResponse_FieldNumber) {
+  ITMListProfilesResponse_FieldNumber_ProfilesArray = 1,
+};
+
+@interface ITMListProfilesResponse : GPBMessage
+
+@property(nonatomic, readwrite, strong, null_resettable) NSMutableArray<ITMListProfilesResponse_Profile*> *profilesArray;
+/** The number of items in @c profilesArray without causing the array to be created. */
+@property(nonatomic, readonly) NSUInteger profilesArray_Count;
+
+@end
+
+#pragma mark - ITMListProfilesResponse_Profile
+
+typedef GPB_ENUM(ITMListProfilesResponse_Profile_FieldNumber) {
+  ITMListProfilesResponse_Profile_FieldNumber_PropertiesArray = 1,
+};
+
+@interface ITMListProfilesResponse_Profile : GPBMessage
+
+@property(nonatomic, readwrite, strong, null_resettable) NSMutableArray<ITMProfileProperty*> *propertiesArray;
+/** The number of items in @c propertiesArray without causing the array to be created. */
+@property(nonatomic, readonly) NSUInteger propertiesArray_Count;
+
+@end
 
 #pragma mark - ITMFocusRequest
 
@@ -838,6 +1043,7 @@ typedef GPB_ENUM(ITMVariableRequest_Set_FieldNumber) {
 /** Test to see if @c name has been set. */
 @property(nonatomic, readwrite) BOOL hasName;
 
+/** JSON encoded */
 @property(nonatomic, readwrite, copy, null_resettable) NSString *value;
 /** Test to see if @c value has been set. */
 @property(nonatomic, readwrite) BOOL hasValue;
@@ -856,7 +1062,7 @@ typedef GPB_ENUM(ITMVariableResponse_FieldNumber) {
 @property(nonatomic, readwrite) ITMVariableResponse_Status status;
 
 @property(nonatomic, readwrite) BOOL hasStatus;
-/** 1:1 with get field in request. Empty and undefined are the same. */
+/** 1:1 with get field in request.  JSON encoded, with null for unset variables. */
 @property(nonatomic, readwrite, strong, null_resettable) NSMutableArray<NSString*> *valuesArray;
 /** The number of items in @c valuesArray without causing the array to be created. */
 @property(nonatomic, readonly) NSUInteger valuesArray_Count;
@@ -1148,6 +1354,48 @@ typedef GPB_ENUM(ITMRegisterToolRequest_FieldNumber) {
 
 @end
 
+#pragma mark - ITMRPCRegistrationRequest
+
+typedef GPB_ENUM(ITMRPCRegistrationRequest_FieldNumber) {
+  ITMRPCRegistrationRequest_FieldNumber_Name = 1,
+  ITMRPCRegistrationRequest_FieldNumber_ArgumentsArray = 2,
+  ITMRPCRegistrationRequest_FieldNumber_Timeout = 3,
+};
+
+/**
+ * Describes an RPC from iTerm2 to script. I don't want to invent my own type
+ * system so this is dynamically typed, which matches Python well enough.
+ **/
+@interface ITMRPCRegistrationRequest : GPBMessage
+
+@property(nonatomic, readwrite, copy, null_resettable) NSString *name;
+/** Test to see if @c name has been set. */
+@property(nonatomic, readwrite) BOOL hasName;
+
+@property(nonatomic, readwrite, strong, null_resettable) NSMutableArray<ITMRPCRegistrationRequest_RPCArgumentSignature*> *argumentsArray;
+/** The number of items in @c argumentsArray without causing the array to be created. */
+@property(nonatomic, readonly) NSUInteger argumentsArray_Count;
+
+/** If not specified, iTerm2 decides based on its built-in default. */
+@property(nonatomic, readwrite) float timeout;
+
+@property(nonatomic, readwrite) BOOL hasTimeout;
+@end
+
+#pragma mark - ITMRPCRegistrationRequest_RPCArgumentSignature
+
+typedef GPB_ENUM(ITMRPCRegistrationRequest_RPCArgumentSignature_FieldNumber) {
+  ITMRPCRegistrationRequest_RPCArgumentSignature_FieldNumber_Name = 1,
+};
+
+@interface ITMRPCRegistrationRequest_RPCArgumentSignature : GPBMessage
+
+@property(nonatomic, readwrite, copy, null_resettable) NSString *name;
+/** Test to see if @c name has been set. */
+@property(nonatomic, readwrite) BOOL hasName;
+
+@end
+
 #pragma mark - ITMRegisterToolResponse
 
 typedef GPB_ENUM(ITMRegisterToolResponse_FieldNumber) {
@@ -1167,6 +1415,12 @@ typedef GPB_ENUM(ITMNotificationRequest_FieldNumber) {
   ITMNotificationRequest_FieldNumber_Session = 1,
   ITMNotificationRequest_FieldNumber_Subscribe = 2,
   ITMNotificationRequest_FieldNumber_NotificationType = 3,
+  ITMNotificationRequest_FieldNumber_RpcRegistrationRequest = 4,
+};
+
+typedef GPB_ENUM(ITMNotificationRequest_Arguments_OneOfCase) {
+  ITMNotificationRequest_Arguments_OneOfCase_GPBUnsetOneOfCase = 0,
+  ITMNotificationRequest_Arguments_OneOfCase_RpcRegistrationRequest = 4,
 };
 
 @interface ITMNotificationRequest : GPBMessage
@@ -1187,7 +1441,17 @@ typedef GPB_ENUM(ITMNotificationRequest_FieldNumber) {
 @property(nonatomic, readwrite) ITMNotificationType notificationType;
 
 @property(nonatomic, readwrite) BOOL hasNotificationType;
+@property(nonatomic, readonly) ITMNotificationRequest_Arguments_OneOfCase argumentsOneOfCase;
+
+/** For NOTIFY_ON_SERVER_ORIGINATED_RPC */
+@property(nonatomic, readwrite, strong, null_resettable) ITMRPCRegistrationRequest *rpcRegistrationRequest;
+
 @end
+
+/**
+ * Clears whatever value was set for the oneof 'arguments'.
+ **/
+void ITMNotificationRequest_ClearArgumentsOneOfCase(ITMNotificationRequest *message);
 
 #pragma mark - ITMNotificationResponse
 
@@ -1214,6 +1478,7 @@ typedef GPB_ENUM(ITMNotification_FieldNumber) {
   ITMNotification_FieldNumber_TerminateSessionNotification = 7,
   ITMNotification_FieldNumber_LayoutChangedNotification = 8,
   ITMNotification_FieldNumber_FocusChangedNotification = 9,
+  ITMNotification_FieldNumber_ServerOriginatedRpcNotification = 10,
 };
 
 @interface ITMNotification : GPBMessage
@@ -1253,6 +1518,71 @@ typedef GPB_ENUM(ITMNotification_FieldNumber) {
 @property(nonatomic, readwrite, strong, null_resettable) ITMFocusChangedNotification *focusChangedNotification;
 /** Test to see if @c focusChangedNotification has been set. */
 @property(nonatomic, readwrite) BOOL hasFocusChangedNotification;
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMServerOriginatedRPCNotification *serverOriginatedRpcNotification;
+/** Test to see if @c serverOriginatedRpcNotification has been set. */
+@property(nonatomic, readwrite) BOOL hasServerOriginatedRpcNotification;
+
+@end
+
+#pragma mark - ITMServerOriginatedRPC
+
+typedef GPB_ENUM(ITMServerOriginatedRPC_FieldNumber) {
+  ITMServerOriginatedRPC_FieldNumber_Name = 2,
+  ITMServerOriginatedRPC_FieldNumber_ArgumentsArray = 3,
+};
+
+@interface ITMServerOriginatedRPC : GPBMessage
+
+@property(nonatomic, readwrite, copy, null_resettable) NSString *name;
+/** Test to see if @c name has been set. */
+@property(nonatomic, readwrite) BOOL hasName;
+
+@property(nonatomic, readwrite, strong, null_resettable) NSMutableArray<ITMServerOriginatedRPC_RPCArgument*> *argumentsArray;
+/** The number of items in @c argumentsArray without causing the array to be created. */
+@property(nonatomic, readonly) NSUInteger argumentsArray_Count;
+
+@end
+
+#pragma mark - ITMServerOriginatedRPC_RPCArgument
+
+typedef GPB_ENUM(ITMServerOriginatedRPC_RPCArgument_FieldNumber) {
+  ITMServerOriginatedRPC_RPCArgument_FieldNumber_Name = 1,
+  ITMServerOriginatedRPC_RPCArgument_FieldNumber_JsonValue = 2,
+};
+
+@interface ITMServerOriginatedRPC_RPCArgument : GPBMessage
+
+@property(nonatomic, readwrite, copy, null_resettable) NSString *name;
+/** Test to see if @c name has been set. */
+@property(nonatomic, readwrite) BOOL hasName;
+
+@property(nonatomic, readwrite, copy, null_resettable) NSString *jsonValue;
+/** Test to see if @c jsonValue has been set. */
+@property(nonatomic, readwrite) BOOL hasJsonValue;
+
+@end
+
+#pragma mark - ITMServerOriginatedRPCNotification
+
+typedef GPB_ENUM(ITMServerOriginatedRPCNotification_FieldNumber) {
+  ITMServerOriginatedRPCNotification_FieldNumber_RequestId = 1,
+  ITMServerOriginatedRPCNotification_FieldNumber_Rpc = 2,
+};
+
+/**
+ * This is an iTerm2-to-script RPC call. The script must have registered for
+ * an RPC matching the signature of `rpc`.
+ **/
+@interface ITMServerOriginatedRPCNotification : GPBMessage
+
+@property(nonatomic, readwrite, copy, null_resettable) NSString *requestId;
+/** Test to see if @c requestId has been set. */
+@property(nonatomic, readwrite) BOOL hasRequestId;
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMServerOriginatedRPC *rpc;
+/** Test to see if @c rpc has been set. */
+@property(nonatomic, readwrite) BOOL hasRpc;
 
 @end
 
@@ -1633,6 +1963,25 @@ typedef GPB_ENUM(ITMGetProfilePropertyRequest_FieldNumber) {
 
 @end
 
+#pragma mark - ITMProfileProperty
+
+typedef GPB_ENUM(ITMProfileProperty_FieldNumber) {
+  ITMProfileProperty_FieldNumber_Key = 1,
+  ITMProfileProperty_FieldNumber_JsonValue = 2,
+};
+
+@interface ITMProfileProperty : GPBMessage
+
+@property(nonatomic, readwrite, copy, null_resettable) NSString *key;
+/** Test to see if @c key has been set. */
+@property(nonatomic, readwrite) BOOL hasKey;
+
+@property(nonatomic, readwrite, copy, null_resettable) NSString *jsonValue;
+/** Test to see if @c jsonValue has been set. */
+@property(nonatomic, readwrite) BOOL hasJsonValue;
+
+@end
+
 #pragma mark - ITMGetProfilePropertyResponse
 
 typedef GPB_ENUM(ITMGetProfilePropertyResponse_FieldNumber) {
@@ -1645,28 +1994,9 @@ typedef GPB_ENUM(ITMGetProfilePropertyResponse_FieldNumber) {
 @property(nonatomic, readwrite) ITMGetProfilePropertyResponse_Status status;
 
 @property(nonatomic, readwrite) BOOL hasStatus;
-@property(nonatomic, readwrite, strong, null_resettable) NSMutableArray<ITMGetProfilePropertyResponse_Property*> *propertiesArray;
+@property(nonatomic, readwrite, strong, null_resettable) NSMutableArray<ITMProfileProperty*> *propertiesArray;
 /** The number of items in @c propertiesArray without causing the array to be created. */
 @property(nonatomic, readonly) NSUInteger propertiesArray_Count;
-
-@end
-
-#pragma mark - ITMGetProfilePropertyResponse_Property
-
-typedef GPB_ENUM(ITMGetProfilePropertyResponse_Property_FieldNumber) {
-  ITMGetProfilePropertyResponse_Property_FieldNumber_Key = 1,
-  ITMGetProfilePropertyResponse_Property_FieldNumber_JsonValue = 2,
-};
-
-@interface ITMGetProfilePropertyResponse_Property : GPBMessage
-
-@property(nonatomic, readwrite, copy, null_resettable) NSString *key;
-/** Test to see if @c key has been set. */
-@property(nonatomic, readwrite) BOOL hasKey;
-
-@property(nonatomic, readwrite, copy, null_resettable) NSString *jsonValue;
-/** Test to see if @c jsonValue has been set. */
-@property(nonatomic, readwrite) BOOL hasJsonValue;
 
 @end
 
@@ -1674,8 +2004,15 @@ typedef GPB_ENUM(ITMGetProfilePropertyResponse_Property_FieldNumber) {
 
 typedef GPB_ENUM(ITMSetProfilePropertyRequest_FieldNumber) {
   ITMSetProfilePropertyRequest_FieldNumber_Session = 1,
-  ITMSetProfilePropertyRequest_FieldNumber_Key = 2,
-  ITMSetProfilePropertyRequest_FieldNumber_JsonValue = 3,
+  ITMSetProfilePropertyRequest_FieldNumber_GuidList = 2,
+  ITMSetProfilePropertyRequest_FieldNumber_Key = 3,
+  ITMSetProfilePropertyRequest_FieldNumber_JsonValue = 4,
+};
+
+typedef GPB_ENUM(ITMSetProfilePropertyRequest_Target_OneOfCase) {
+  ITMSetProfilePropertyRequest_Target_OneOfCase_GPBUnsetOneOfCase = 0,
+  ITMSetProfilePropertyRequest_Target_OneOfCase_Session = 1,
+  ITMSetProfilePropertyRequest_Target_OneOfCase_GuidList = 2,
 };
 
 /**
@@ -1683,108 +2020,14 @@ typedef GPB_ENUM(ITMSetProfilePropertyRequest_FieldNumber) {
  **/
 @interface ITMSetProfilePropertyRequest : GPBMessage
 
+@property(nonatomic, readonly) ITMSetProfilePropertyRequest_Target_OneOfCase targetOneOfCase;
+
 /** See documentation on session IDs */
 @property(nonatomic, readwrite, copy, null_resettable) NSString *session;
-/** Test to see if @c session has been set. */
-@property(nonatomic, readwrite) BOOL hasSession;
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMSetProfilePropertyRequest_GuidList *guidList;
 
 /**
- * The following keys are allowed. This table also gives the type that's expected in json_value:
- * Name                                            String
- * Badge Text                                      String
- * Answerback String                               String
- * Foreground Color                                Color Dictionary
- * Background Color                                Color Dictionary
- * Bold Color                                      Color Dictionary
- * Link Color                                      Color Dictionary
- * Selection Color                                 Color Dictionary
- * Selected Text Color                             Color Dictionary
- * Cursor Color                                    Color Dictionary
- * Cursor Text Color                               Color Dictionary
- * Ansi 0 Color                                    Color Dictionary
- * Ansi 1 Color                                    Color Dictionary
- * Ansi 2 Color                                    Color Dictionary
- * Ansi 3 Color                                    Color Dictionary
- * Ansi 4 Color                                    Color Dictionary
- * Ansi 5 Color                                    Color Dictionary
- * Ansi 6 Color                                    Color Dictionary
- * Ansi 7 Color                                    Color Dictionary
- * Ansi 8 Color                                    Color Dictionary
- * Ansi 9 Color                                    Color Dictionary
- * Ansi 10 Color                                   Color Dictionary
- * Ansi 11 Color                                   Color Dictionary
- * Ansi 12 Color                                   Color Dictionary
- * Ansi 13 Color                                   Color Dictionary
- * Ansi 14 Color                                   Color Dictionary
- * Ansi 15 Color                                   Color Dictionary
- * Smart Cursor Color                              Color Dictionary
- * Tab Color                                       Color Dictionary
- * Underline Color                                 Color Dictionary
- * Cursor Guide Color                              Color Dictionary
- * Badge Color                                     Color Dictionary
- * Use Cursor Guide                                Number (boolean)
- * Use Tab Color                                   Number (boolean)
- * Use Underline Color                             Number (boolean)
- * Smart Cursor Color                              Number (boolean)
- * Minimum Contrast                                Number (0-1)
- * Cursor Boost                                    Number (0-1)
- * Cursor Type                                     Number (0=underline, 1=vertical, 2=box)
- * Blinking Cursor                                 Number (boolean)
- * Use Bold Font                                   Number (boolean)
- * Thin Strokes                                    Number (0=no, 1=retina only, 2=always)
- * ASCII Ligatures                                 Number (boolean)
- * Non-ASCII Ligatures                             Number (boolean)
- * Use Bright Bold                                 Number (boolean)
- * Blink Allowed                                   Number (boolean)
- * Use Italic Font                                 Number (boolean)
- * Ambiguous Double Width                          Number (boolean)
- * Unicode Normalization                           Number (0=none, 1=nfc, 2=nfd, 3=hfs+)
- * Horizontal Spacing                              Number (floating point)
- * Vertical Spacing                                Number (floating point)
- * Use Non-ASCII Font                              Number (boolean)
- * Transparency                                    Number (0-1)
- * Blur                                            Number (boolean)
- * Blur Radius                                     Number (0.1-30)
- * Background Image Is Tiled                       Number (boolean)
- * Blend                                           Number (0-1)
- * Sync Title                                      Number (boolean)
- * Disable Window Resizing                         Number (boolean)
- * Only The Default BG Color Uses Transparency     Number (boolean)
- * ASCII Anti Aliased                              Number (boolean)
- * Non-ASCII Anti Aliased                          Number (boolean)
- * Scrollback Lines                                Number (integer)
- * Unlimited Scrollback                            Number (boolean)
- * Scrollback With Status Bar                      Number (boolean)
- * Scrollback in Alternate Screen                  Number (boolean)
- * Character Encoding                              Number (integer, 4=UTF-8)
- * Mouse Reporting                                 Number (boolean)
- * Mouse Reporting allow mouse wheel               Number (boolean)
- * Unicode Version                                 Number (integer, 8 or 9)
- * Allow Title Reporting                           Number (boolean)
- * Allow Title Setting                             Number (boolean)
- * Disable Printing                                Number (boolean)
- * Disable Smcup Rmcup                             Number (boolean)
- * Silence Bell                                    Number (boolean)
- * BM Growl                                        Number (boolean)
- * Send Bell Alert                                 Number (boolean)
- * Send Idle Alert                                 Number (boolean)
- * Send New Output Alert                           Number (boolean)
- * Send Session Ended Alert                        Number (boolean)
- * Send Terminal Generated Alerts                  Number (boolean)
- * Flashing Bell                                   Number (boolean)
- * Visual Bell                                     Number (boolean)
- * Close Sessions On End                           Number (boolean)
- * Prompt Before Closing 2                         Number (boolean)
- * Session Close Undo Timeout                      Number (floating point, number of seconds)
- * Reduce Flicker                                  Number (boolean)
- * Send Code When Idle                             Number (boolean)
- * Idle Code                                       Number (integer, 0-255)
- * Idle Period                                     Number (floating point, number of seconds)
- * Option Key Sends                                Number (0=normal, 1=meta, 2=+esc)
- * Right Option Key Sends                          Number (0=normal, 1=meta, 2=+esc)
- * Application Keypad Allowed                      Number (boolean)
- * Place Prompt at First Column                    Number (boolean)
- * Show Mark Indicators                            Number (boolean)
  *
  * Color dictionaries have these mandatory keys taking numeric values between 0 and 1:
  *   Red Component, Green Component, Blue Component
@@ -1807,6 +2050,25 @@ typedef GPB_ENUM(ITMSetProfilePropertyRequest_FieldNumber) {
 @property(nonatomic, readwrite, copy, null_resettable) NSString *jsonValue;
 /** Test to see if @c jsonValue has been set. */
 @property(nonatomic, readwrite) BOOL hasJsonValue;
+
+@end
+
+/**
+ * Clears whatever value was set for the oneof 'target'.
+ **/
+void ITMSetProfilePropertyRequest_ClearTargetOneOfCase(ITMSetProfilePropertyRequest *message);
+
+#pragma mark - ITMSetProfilePropertyRequest_GuidList
+
+typedef GPB_ENUM(ITMSetProfilePropertyRequest_GuidList_FieldNumber) {
+  ITMSetProfilePropertyRequest_GuidList_FieldNumber_GuidsArray = 1,
+};
+
+@interface ITMSetProfilePropertyRequest_GuidList : GPBMessage
+
+@property(nonatomic, readwrite, strong, null_resettable) NSMutableArray<NSString*> *guidsArray;
+/** The number of items in @c guidsArray without causing the array to be created. */
+@property(nonatomic, readonly) NSUInteger guidsArray_Count;
 
 @end
 
