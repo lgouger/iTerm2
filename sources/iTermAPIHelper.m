@@ -10,6 +10,7 @@
 #import "CVector.h"
 #import "DebugLogging.h"
 #import "iTermAPIAuthorizationController.h"
+#import "iTermBuriedSessions.h"
 #import "iTermController.h"
 #import "iTermDisclosableView.h"
 #import "iTermLSOF.h"
@@ -24,9 +25,11 @@
 #import "PseudoTerminal.h"
 #import "PTYSession.h"
 #import "PTYTab.h"
+#import "WindowControllerInterface.h"
 #import "VT100Parser.h"
 
 NSString *const iTermRemoveAPIServerSubscriptionsNotification = @"iTermRemoveAPIServerSubscriptionsNotification";
+NSString *const iTermAPIRegisteredFunctionsDidChangeNotification = @"iTermAPIRegisteredFunctionsDidChangeNotification";
 
 static NSString *iTermAPIHelperStringRepresentationOfRPC(NSString *name, NSArray<NSString *> *argumentNames) {
     NSString *combinedArguments = [argumentNames componentsJoinedByString:@","];
@@ -163,6 +166,10 @@ static NSString *iTermAPIHelperStringRepresentationOfRPC(NSString *name, NSArray
         [[NSNotificationCenter defaultCenter] addObserver:self
                                                  selector:@selector(layoutChanged:)
                                                      name:iTermTabDidChangePositionInWindowNotification
+                                                   object:nil];
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(layoutChanged:)
+                                                     name:iTermSessionBuriedStateChangeTabNotification
                                                    object:nil];
         [[NSNotificationCenter defaultCenter] addObserver:self
                                                  selector:@selector(applicationDidBecomeActive:)
@@ -331,10 +338,10 @@ static NSString *iTermAPIHelperStringRepresentationOfRPC(NSString *name, NSArray
     }];
 }
 
-// Build a proto buffer and dispatch it.
-- (void)dispatchRPCWithName:(NSString *)name
-                  arguments:(NSDictionary *)arguments
-                 completion:(iTermServerOriginatedRPCCompletionBlock)completion {
+- (ITMServerOriginatedRPC *)serverOriginatedRPCWithName:(NSString *)name
+                                              arguments:(NSDictionary *)arguments
+                                                  error:(out NSError **)error {
+
     ITMServerOriginatedRPC *rpc = [[ITMServerOriginatedRPC alloc] init];
     rpc.name = name;
     for (NSString *argumentName in arguments) {
@@ -346,10 +353,10 @@ static NSString *iTermAPIHelperStringRepresentationOfRPC(NSString *name, NSArray
             jsonValue = [NSJSONSerialization it_jsonStringForObject:argumentValue];
             if (!jsonValue) {
                 NSString *reason = [NSString stringWithFormat:@"Could not JSON encode value “%@”", arguments[argumentName]];
-                completion(nil, [NSError errorWithDomain:@"com.iterm2.api"
-                                                    code:2
-                                                userInfo:@{ NSLocalizedDescriptionKey: reason }]);
-                return;
+                *error = [NSError errorWithDomain:@"com.iterm2.api"
+                                             code:2
+                                         userInfo:@{ NSLocalizedDescriptionKey: reason }];
+                return nil;
             }
         }
         ITMServerOriginatedRPC_RPCArgument *argument = [[ITMServerOriginatedRPC_RPCArgument alloc] init];
@@ -360,7 +367,77 @@ static NSString *iTermAPIHelperStringRepresentationOfRPC(NSString *name, NSArray
 
         [rpc.argumentsArray addObject:argument];
     }
+    return rpc;
+}
+
+// Build a proto buffer and dispatch it.
+- (void)dispatchRPCWithName:(NSString *)name
+                  arguments:(NSDictionary *)arguments
+                 completion:(iTermServerOriginatedRPCCompletionBlock)completion {
+    NSError *error = nil;
+    ITMServerOriginatedRPC *rpc = [self serverOriginatedRPCWithName:name arguments:arguments error:&error];
+    if (error) {
+        completion(nil, error);
+    }
     [self dispatchServerOriginatedRPC:rpc completion:completion];
+}
+
+- (id)synchronousDispatchRPCWithName:(NSString *)name
+                           arguments:(NSDictionary *)arguments
+                             timeout:(NSTimeInterval)timeout
+                               error:(out NSError **)error {
+    NSError *innerError = nil;
+    ITMServerOriginatedRPC *rpc = [self serverOriginatedRPCWithName:name arguments:arguments error:&innerError];
+    if (innerError) {
+        if (error) {
+            *error = innerError;
+        }
+        return nil;
+    }
+    ITMServerOriginatedRPCResultRequest *result = [self synchronousDispatchServerOriginatedRPC:rpc
+                                                                                       timeout:timeout
+                                                                                         error:&innerError];
+    if (innerError) {
+        if (error) {
+            *error = innerError;
+        }
+        return nil;
+    }
+    if (result.jsonException.length > 0) {
+        NSError *internalError;
+        id exception = [NSJSONSerialization JSONObjectWithData:[result.jsonException dataUsingEncoding:NSUTF8StringEncoding]
+                                                    options:NSJSONReadingAllowFragments
+                                                      error:&internalError];
+        if (internalError) {
+            exception = @{ @"reason": [NSString stringWithFormat:@"Undecodable exception: %@", internalError.localizedDescription] };
+        } else {
+            exception = [NSDictionary castFrom:exception] ?: @{ @"reason": @"Malformed exception" };
+        }
+        if (error) {
+            *error = [self rpcDispatchError:exception[@"reason"]
+                                     detail:exception[@"traceback"]];
+        }
+        return nil;
+    }
+    if (result.jsonValue.length == 0) {
+        if (error) {
+            *error = [self rpcDispatchError:@"Malformed response missing json value"
+                                     detail:[result debugDescription]];
+        }
+        return nil;
+    }
+    NSError *internalError;
+    NSData *data = [result.jsonValue dataUsingEncoding:NSUTF8StringEncoding];
+    id returnedObject = [NSJSONSerialization JSONObjectWithData:data
+                                                        options:NSJSONReadingAllowFragments
+                                                          error:&internalError];
+    if (internalError) {
+        if (error) {
+            *error = internalError;
+        }
+        return nil;
+    }
+    return returnedObject;
 }
 
 // Dispatches a well-formed proto buffer or gives an error if not connected.
@@ -368,14 +445,37 @@ static NSString *iTermAPIHelperStringRepresentationOfRPC(NSString *name, NSArray
                          completion:(iTermServerOriginatedRPCCompletionBlock)completion {
     NSString *signature = rpc.it_stringRepresentation;
     NSDictionary<id, ITMNotificationRequest *> *subs = _serverOriginatedRPCSubscriptions[signature];
+
     id connectionKey = subs.allKeys.firstObject;
-    if (connectionKey) {
-        ITMNotificationRequest *notificationRequest = subs[connectionKey];
-        [self dispatchRPC:rpc toHandler:notificationRequest connection:connectionKey completion:completion];
-    } else {
+    if (!connectionKey) {
         NSString *reason = [NSString stringWithFormat:@"No function registered for invocation “%@”", signature];
         completion(nil, [self rpcDispatchError:reason detail:nil]);
+        return;
     }
+
+    ITMNotificationRequest *notificationRequest = subs[connectionKey];
+    [self dispatchRPC:rpc toHandler:notificationRequest connection:connectionKey completion:completion];
+}
+
+- (ITMServerOriginatedRPCResultRequest *)synchronousDispatchServerOriginatedRPC:(ITMServerOriginatedRPC *)rpc
+                                                                        timeout:(NSTimeInterval)timeout
+                                                                          error:(out NSError **)error {
+    NSString *signature = rpc.it_stringRepresentation;
+    NSDictionary<id, ITMNotificationRequest *> *subs = _serverOriginatedRPCSubscriptions[signature];
+
+    id connectionKey = subs.allKeys.firstObject;
+    if (!connectionKey) {
+        NSString *reason = [NSString stringWithFormat:@"No function registered for invocation “%@”", signature];
+        *error = [self rpcDispatchError:reason detail:nil];
+        return nil;
+    }
+
+    ITMNotificationRequest *notificationRequest = subs[connectionKey];
+    return [self synchronousDispatchRPC:rpc
+                              toHandler:notificationRequest
+                             connection:connectionKey
+                                timeout:timeout
+                                  error:error];
 }
 
 // Constructs an error with an optional traceback in `detail`.
@@ -415,6 +515,27 @@ static NSString *iTermAPIHelperStringRepresentationOfRPC(NSString *name, NSArray
     });
 }
 
+- (ITMServerOriginatedRPCResultRequest *)synchronousDispatchRPC:(ITMServerOriginatedRPC *)rpc
+                                                      toHandler:(ITMNotificationRequest * _Nonnull)handler
+                                                     connection:(id)connection
+                                                        timeout:(NSTimeInterval)callerTimeout
+                                                          error:(out NSError **)error {
+    ITMNotification *notification = [[ITMNotification alloc] init];
+    notification.serverOriginatedRpcNotification.requestId = [self nextServerOriginatedRPCRequestIDWithCompletion:nil];
+    NSMutableSet *outstanding = _outstandingRPCs[connection];
+    if (!outstanding) {
+        outstanding = [NSMutableSet set];
+        _outstandingRPCs[connection] = outstanding;
+    }
+    [outstanding addObject:notification.serverOriginatedRpcNotification.requestId];
+    notification.serverOriginatedRpcNotification.rpc = rpc;
+    const NSTimeInterval timeoutSeconds = handler.rpcRegistrationRequest.hasTimeout ? handler.rpcRegistrationRequest.timeout : 5;
+    return [_apiServer sendAndWaitForSynchronousRPC:notification
+                                       toConnection:connection
+                                            timeout:MIN(callerTimeout, timeoutSeconds)
+                                              error:error];
+}
+
 // Calls the completion block if RPC timed out.
 - (void)checkForRPCTimeout:(NSString *)requestID {
     iTermServerOriginatedRPCCompletionBlock completion = _serverOriginatedRPCCompletionBlocks[requestID];
@@ -430,7 +551,9 @@ static NSString *iTermAPIHelperStringRepresentationOfRPC(NSString *name, NSArray
     static NSInteger nextID;
     NSString *requestID = [NSString stringWithFormat:@"rpc-%@", @(nextID)];
     nextID++;
-    _serverOriginatedRPCCompletionBlocks[requestID] = [completion copy];
+    if (completion) {
+        _serverOriginatedRPCCompletionBlocks[requestID] = [completion copy];
+    }
     return requestID;
 }
 
@@ -453,6 +576,40 @@ static NSString *iTermAPIHelperStringRepresentationOfRPC(NSString *name, NSArray
 }
 
 #pragma mark - iTermAPIServerDelegate
+
+- (NSMenuItem *)menuItemWithTitleParts:(NSArray<NSString *> *)titleParts
+                                inMenu:(NSMenu *)menu NS_DEPRECATED_MAC(10_10, 10_11, "Use menuItemWithIdentifier:") {
+    NSString *head = titleParts.firstObject;
+    NSArray<NSString *> *remainingTitleParts = [titleParts subarrayFromIndex:1];
+    for (NSMenuItem *item in [menu itemArray]) {
+        if ([item.title isEqualToString:head]) {
+            if ([item hasSubmenu]) {
+                return [self menuItemWithTitleParts:remainingTitleParts
+                                             inMenu:item.submenu];
+            } else if (remainingTitleParts.count == 0) {
+                return item;
+            }
+        }
+    }
+    return nil;
+}
+
+- (NSMenuItem *)menuItemWithIdentifier:(NSString *)identifier
+                                inMenu:(NSMenu *)menu NS_AVAILABLE_MAC(10_12) {
+    for (NSMenuItem *item in [menu itemArray]) {
+        if ([item hasSubmenu]) {
+            NSMenuItem *result = [self menuItemWithIdentifier:identifier inMenu:item.submenu];
+            if (result) {
+                return result;
+            }
+        } else if (item.identifier && [identifier isEqualToString:item.identifier]) {
+            NSLog(@"Found it");
+            return item;
+        }
+    }
+    NSLog(@"Didn't find it");
+    return nil;
+}
 
 - (BOOL)askUserToGrantAuthForController:(iTermAPIAuthorizationController *)controller
                       isReauthorization:(BOOL)reauth
@@ -563,6 +720,26 @@ static NSString *iTermAPIHelperStringRepresentationOfRPC(NSString *name, NSArray
     return nil;
 }
 
+- (PTYTab *)tabWithID:(NSString *)tabID {
+    if (tabID.length == 0) {
+        return nil;
+    }
+    NSCharacterSet *nonNumericCharacterSet = [[NSCharacterSet decimalDigitCharacterSet] invertedSet];
+    if ([tabID rangeOfCharacterFromSet:nonNumericCharacterSet].location != NSNotFound) {
+        return nil;
+    }
+
+    int numericID = tabID.intValue;
+    for (PseudoTerminal *term in [[iTermController sharedInstance] terminals]) {
+        for (PTYTab *tab in term.tabs) {
+            if (tab.uniqueId == numericID) {
+                return tab;
+            }
+        }
+    }
+    return nil;
+}
+
 - (void)apiServerGetBuffer:(ITMGetBufferRequest *)request
                    handler:(void (^)(ITMGetBufferResponse *))handler {
     PTYSession *session = [self sessionForAPIIdentifier:request.session];
@@ -637,6 +814,8 @@ static NSString *iTermAPIHelperStringRepresentationOfRPC(NSString *name, NSArray
         } else if (!subscriptions) {
             subscriptions = [NSMutableDictionary dictionary];
             _serverOriginatedRPCSubscriptions[signatureString] = subscriptions;
+            [[NSNotificationCenter defaultCenter] postNotificationName:iTermAPIRegisteredFunctionsDidChangeNotification
+                                                                object:nil];
         }
     } else {
         assert(false);
@@ -722,6 +901,10 @@ static NSString *iTermAPIHelperStringRepresentationOfRPC(NSString *name, NSArray
     [_allSessionsSubscriptions removeObjectsPassingTest:^BOOL(iTermAllSessionsSubscription *sub) {
         return [sub.connection isEqual:connectionKey];
     }];
+    if (rpcSubs.count) {
+        [[NSNotificationCenter defaultCenter] postNotificationName:iTermAPIRegisteredFunctionsDidChangeNotification
+                                                            object:nil];
+    }
 }
 
 - (void)apiServerDidCloseConnection:(id)connection {
@@ -880,10 +1063,17 @@ static NSString *iTermAPIHelperStringRepresentationOfRPC(NSString *name, NSArray
             ITMListSessionsResponse_Tab *tabMessage = [[ITMListSessionsResponse_Tab alloc] init];
             tabMessage.tabId = [@(tab.uniqueId) stringValue];
             tabMessage.root = [tab rootSplitTreeNode];
+
             [windowMessage.tabsArray addObject:tabMessage];
         }
 
         [response.windowsArray addObject:windowMessage];
+    }
+    for (PTYSession *session in [[iTermBuriedSessions sharedInstance] buriedSessions]) {
+        ITMSessionSummary *sessionSummary = [[ITMSessionSummary alloc] init];
+        sessionSummary.uniqueIdentifier = session.guid;
+        sessionSummary.title = session.name;
+        [response.buriedSessionsArray addObject:sessionSummary];
     }
     return response;
 }
@@ -1027,6 +1217,16 @@ static NSString *iTermAPIHelperStringRepresentationOfRPC(NSString *name, NSArray
 
 - (void)apiServerSetProperty:(ITMSetPropertyRequest *)request handler:(void (^)(ITMSetPropertyResponse *))handler {
     ITMSetPropertyResponse *response = [[ITMSetPropertyResponse alloc] init];
+    NSError *error = nil;
+    id value = [NSJSONSerialization JSONObjectWithData:[request.jsonValue dataUsingEncoding:NSUTF8StringEncoding]
+                                               options:NSJSONReadingAllowFragments
+                                                 error:&error];
+    if (!value || error) {
+        XLog(@"JSON parsing error %@ for value in request %@", error, request);
+        ITMSetPropertyResponse *response = [[ITMSetPropertyResponse alloc] init];
+        response.status = ITMSetPropertyResponse_Status_InvalidValue;
+        handler(response);
+    }
     switch (request.identifierOneOfCase) {
         case ITMSetPropertyRequest_Identifier_OneOfCase_GPBUnsetOneOfCase:
             response.status = ITMSetPropertyResponse_Status_InvalidTarget;
@@ -1040,18 +1240,26 @@ static NSString *iTermAPIHelperStringRepresentationOfRPC(NSString *name, NSArray
                 handler(response);
                 return;
             }
-            NSError *error = nil;
-            id value = [NSJSONSerialization JSONObjectWithData:[request.jsonValue dataUsingEncoding:NSUTF8StringEncoding]
-                                                       options:NSJSONReadingAllowFragments
-                                                         error:&error];
-            if (!value || error) {
-                XLog(@"JSON parsing error %@ for value in request %@", error, request);
-                ITMSetPropertyResponse *response = [[ITMSetPropertyResponse alloc] init];
-                response.status = ITMSetPropertyResponse_Status_InvalidValue;
-                handler(response);
-            }
             response.status = [self setPropertyInWindow:term name:request.name value:value];
             handler(response);
+        }
+
+        case ITMSetPropertyRequest_Identifier_OneOfCase_SessionId: {
+            if ([request.sessionId isEqualToString:@"all"]) {
+                for (PTYSession *session in [self allSessions]) {
+                    response.status = [self setPropertyInSession:session name:request.name value:value];
+                    handler(response);
+                }
+            } else {
+                PTYSession *session = [self sessionForAPIIdentifier:request.sessionId];
+                if (!session) {
+                    response.status = ITMSetPropertyResponse_Status_InvalidTarget;
+                    handler(response);
+                    return;
+                }
+                response.status = [self setPropertyInSession:session name:request.name value:value];
+                handler(response);
+            }
         }
     }
 }
@@ -1098,6 +1306,37 @@ static NSString *iTermAPIHelperStringRepresentationOfRPC(NSString *name, NSArray
     }
 }
 
+- (ITMSetPropertyResponse_Status)setPropertyInSession:(PTYSession *)session name:(NSString *)name value:(id)value {
+    typedef ITMSetPropertyResponse_Status (^SetSessionPropertyBlock)(void);
+    SetSessionPropertyBlock setGridSize = ^ITMSetPropertyResponse_Status {
+        NSDictionary *size = [NSDictionary castFrom:value];
+        NSNumber *width = size[@"width"];
+        NSNumber *height = size[@"height"];
+        if (!width || !height) {
+            return ITMSetPropertyResponse_Status_InvalidValue;
+        }
+        id<WindowControllerInterface> controller = session.delegate.parentWindow;
+        BOOL ok = [controller sessionInitiatedResize:session width:width.integerValue height:height.integerValue];
+        if (ok) {
+            if ([controller isKindOfClass:[PseudoTerminal class]]) {
+                return ITMSetPropertyResponse_Status_Ok;
+            } else {
+                return ITMSetPropertyResponse_Status_Deferred;
+            }
+        } else {
+            return ITMSetPropertyResponse_Status_Impossible;
+        }
+    };
+    NSDictionary<NSString *, SetSessionPropertyBlock> *handlers =
+        @{ @"grid_size": setGridSize };
+    SetSessionPropertyBlock block = handlers[name];
+    if (block) {
+        return block();
+    } else {
+        return ITMSetPropertyResponse_Status_UnrecognizedName;
+    }
+}
+
 - (void)apiServerGetProperty:(ITMGetPropertyRequest *)request handler:(void (^)(ITMGetPropertyResponse *))handler {
     ITMGetPropertyResponse *response = [[ITMGetPropertyResponse alloc] init];
     switch (request.identifierOneOfCase) {
@@ -1114,6 +1353,23 @@ static NSString *iTermAPIHelperStringRepresentationOfRPC(NSString *name, NSArray
                 return;
             }
             NSString *jsonValue = [self getPropertyFromWindow:term name:request.name];
+            if (jsonValue) {
+                response.jsonValue = jsonValue;
+                response.status = ITMGetPropertyResponse_Status_Ok;
+            } else {
+                response.status = ITMGetPropertyResponse_Status_UnrecognizedName;
+            }
+            handler(response);
+        }
+
+        case ITMGetPropertyRequest_Identifier_OneOfCase_SessionId: {
+            PTYSession *session = [self sessionForAPIIdentifier:request.sessionId];
+            if (!session) {
+                response.status = ITMGetPropertyResponse_Status_InvalidTarget;
+                handler(response);
+                return;
+            }
+            NSString *jsonValue = [self getPropertyFromSession:session name:request.name];
             if (jsonValue) {
                 response.jsonValue = jsonValue;
                 response.status = ITMGetPropertyResponse_Status_Ok;
@@ -1147,6 +1403,27 @@ static NSString *iTermAPIHelperStringRepresentationOfRPC(NSString *name, NSArray
            @"fullscreen": getFullScreen };
 
     GetWindowPropertyBlock block = handlers[name];
+    if (block) {
+        return block();
+    } else {
+        return nil;
+    }
+}
+
+- (NSString *)getPropertyFromSession:(PTYSession *)session name:(NSString *)name {
+    typedef NSString * (^GetSessionPropertyBlock)(void);
+
+    GetSessionPropertyBlock getGridSize = ^NSString * {
+        NSDictionary *dict =
+            @{ @"width": @(session.screen.width - 1),
+               @"height": @(session.screen.height - 1) };
+        return [NSJSONSerialization it_jsonStringForObject:dict];
+    };
+
+    NSDictionary<NSString *, GetSessionPropertyBlock> *handlers =
+        @{ @"grid_size": getGridSize };
+
+    GetSessionPropertyBlock block = handlers[name];
     if (block) {
         return block();
     } else {
@@ -1317,7 +1594,7 @@ static NSString *iTermAPIHelperStringRepresentationOfRPC(NSString *name, NSArray
     }];
     [request.getArray enumerateObjectsUsingBlock:^(NSString * _Nonnull name, NSUInteger idx, BOOL * _Nonnull stop) {
         if ([name isEqualToString:@"*"]) {
-            [response.valuesArray addObject:[session.variables.allKeys componentsJoinedByString:@"\n"]];
+            [response.valuesArray addObject:[NSJSONSerialization it_jsonStringForObject:session.variables.allKeys]];
         } else {
             id obj = [NSJSONSerialization it_jsonStringForObject:session.variables[name]];
             NSString *value = obj ?: @"null";
@@ -1551,6 +1828,84 @@ static NSString *iTermAPIHelperStringRepresentationOfRPC(NSString *name, NSArray
     response.status = ITMRestartSessionResponse_Status_Ok;
     handler(response);
     return;
+}
+
+- (void)apiServerMenuItem:(ITMMenuItemRequest *)request handler:(void (^)(ITMMenuItemResponse *))handler {
+    ITMMenuItemResponse *response = [[ITMMenuItemResponse alloc] init];
+    NSMenuItem *menuItem = nil;
+    if (@available(macOS 10.12, *)) {
+        menuItem = [self menuItemWithIdentifier:request.identifier inMenu:[NSApp mainMenu]];
+    } else {
+        menuItem = [self menuItemWithTitleParts:[request.identifier componentsSeparatedByString:@"."]
+                                         inMenu:[NSApp mainMenu]];
+    }
+    if (!menuItem) {
+        response.status = ITMMenuItemResponse_Status_BadIdentifier;
+        handler(response);
+        return;
+    }
+    if (!menuItem.enabled && !request.queryOnly) {
+        response.status = ITMMenuItemResponse_Status_Disabled;
+        handler(response);
+        return;
+    }
+    response.checked = menuItem.state == NSOnState;
+    response.enabled = menuItem.isEnabled;
+    if (!request.queryOnly) {
+        [NSApp sendAction:menuItem.action
+                       to:menuItem.target
+                     from:menuItem];
+    }
+    response.status = ITMMenuItemResponse_Status_Ok;
+    handler(response);
+}
+
+static BOOL iTermCheckSplitTreesIsomorphic(ITMSplitTreeNode *node1, ITMSplitTreeNode *node2) {
+    if (node1.vertical != node2.vertical) {
+        return NO;
+    }
+    if (node1.linksArray_Count != node2.linksArray_Count) {
+        return NO;
+    }
+    for (NSInteger i = 0; i < node1.linksArray_Count; i++) {
+        ITMSplitTreeNode_SplitTreeLink *link1 = node1.linksArray[i];
+        ITMSplitTreeNode_SplitTreeLink *link2 = node2.linksArray[i];
+        if (link1.childOneOfCase == ITMSplitTreeNode_SplitTreeLink_Child_OneOfCase_GPBUnsetOneOfCase) {
+            return NO;
+        }
+        if (link1.childOneOfCase != link2.childOneOfCase) {
+            return NO;
+        }
+        if (link1.childOneOfCase == ITMSplitTreeNode_SplitTreeLink_Child_OneOfCase_Node) {
+            if (!iTermCheckSplitTreesIsomorphic(link1.node, link2.node)) {
+                return NO;
+            }
+        }
+    }
+    return YES;
+}
+
+- (void)apiServerSetTabLayout:(ITMSetTabLayoutRequest *)request handler:(void (^)(ITMSetTabLayoutResponse *))handler {
+    ITMSetTabLayoutResponse *response = [[ITMSetTabLayoutResponse alloc] init];
+    PTYTab *tab = [self tabWithID:request.tabId];
+    if (!tab) {
+        response.status = ITMSetTabLayoutResponse_Status_BadTabId;
+        handler(response);
+        return;
+    }
+
+    ITMSplitTreeNode *before = [tab rootSplitTreeNode];
+    ITMSplitTreeNode *requested = request.root;
+
+    if (!iTermCheckSplitTreesIsomorphic(before, requested)) {
+        response.status = ITMSetTabLayoutResponse_Status_WrongTree;
+        handler(response);
+        return;
+    }
+    [tab setSizesFromSplitTreeNode:requested];
+
+    response.status = ITMSetTabLayoutResponse_Status_Ok;
+    handler(response);
 }
 
 @end

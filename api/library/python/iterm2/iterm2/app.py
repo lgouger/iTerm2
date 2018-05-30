@@ -29,6 +29,10 @@ class SavedArrangementException(Exception):
     """A problem was encountered while saving or restoring an arrangement."""
     pass
 
+class MenuItemException(Exception):
+    """A problem was encountered while selecting a menu item."""
+    pass
+
 class App:
     """Represents the application.
 
@@ -50,15 +54,17 @@ class App:
         response = await iterm2.rpc.async_list_sessions(connection)
         list_sessions_response = response.list_sessions_response
         windows = App._windows_from_list_sessions_response(connection, list_sessions_response)
-        app = App(connection, windows)
-        await app.async_listen()
+        buried_sessions = App._buried_sessions_from_list_sessions_response(connection, list_sessions_response)
+        app = App(connection, windows, buried_sessions)
+        await app._async_listen()
         await app.async_refresh_focus()
         return app
 
-    def __init__(self, connection, windows):
+    def __init__(self, connection, windows, buried_sessions):
         """Do not call this directly. Use App.construct() instead."""
         self.connection = connection
         self.__terminal_windows = windows
+        self.__buried_sessions = buried_sessions
         self.tokens = []
 
         # None in these fields means unknown. Notifications will update them.
@@ -125,6 +131,12 @@ class App:
                 tabs.append(iterm2.tab.Tab(connection, tab.tab_id, root))
             windows.append(iterm2.window.Window(connection, window.window_id, tabs, window.frame))
         return windows
+
+    @staticmethod
+    def _buried_sessions_from_list_sessions_response(connection, response):
+        mf = map(lambda summary: iterm2.session.Session(connection, None, summary),
+                 response.buried_sessions)
+        return list(mf)
 
     def pretty_str(self):
         """Returns the hierarchy as a human-readable string"""
@@ -224,6 +236,15 @@ class App:
         new_windows = App._windows_from_list_sessions_response(
             self.connection,
             response.list_sessions_response)
+
+        def all_sessions(windows):
+            for w in windows:
+                for t in w.tabs:
+                    for s in t.sessions:
+                        yield s
+
+        old_sessions = list(all_sessions(self.terminal_windows))
+
         windows = []
         new_ids = []
         for new_window in new_windows:
@@ -252,6 +273,25 @@ class App:
                         else:
                             windows.append(new_window)
 
+        new_sessions = list(all_sessions(self.terminal_windows))
+
+        def find_session(id_wanted, sessions):
+            """Finds a session by ID."""
+            for session in sessions:
+                if session.session_id == id_wanted:
+                    return session
+            return None
+
+        def get_buried_session(session_summary):
+            """Takes a session summary and returns an existing Session if one exists, or else creates a new one."""
+            s = find_session(session_summary.unique_identifier, new_sessions)
+            if s is None:
+                s = find_session(session_summary.unique_identifier, old_sessions)
+            if s is None:
+                s = iterm2.session.Session(self.connection, None, session_summary)
+            return s
+
+        self.__buried_sessions = list(map(get_buried_session, response.list_sessions_response.buried_sessions))
         self.__terminal_windows = windows
         await self.async_refresh_focus()
 
@@ -297,6 +337,14 @@ class App:
         """
         return self.__terminal_windows
 
+    @property
+    def buried_sessions(self):
+        """Returns a list of buried sessions.
+
+        :returns: A list of buried :class:`Session`s.
+        """
+        return self.__buried_sessions
+
     def get_tab_and_window_for_session(self, session):
         """Finds the tab and window that own a session.
 
@@ -335,7 +383,7 @@ class App:
                 iterm2.api_pb2.CreateTabResponse.Status.Name(
                     result.create_tab_response.status))
 
-    async def async_listen(self):
+    async def _async_listen(self):
         """Subscribe to various notifications that keep this object's state current."""
         connection = self.connection
         self.tokens.append(
@@ -412,3 +460,42 @@ class App:
 
         args = inspect.signature(coro).parameters.keys()
         await iterm2.notifications.async_subscribe_to_server_originated_rpc_notification(self.connection, handle_rpc, name, args, timeout)
+
+    async def async_select_menu_item(self, identifier):
+        """Selects a menu item.
+
+        :param identifier: A string. See list of identifiers in :doc:`menu_ids`
+
+        :throws MenuItemException: if something goes wrong.
+        """
+        response = await iterm2.rpc.async_menu_item(self.connection, identifier, False)
+        status = response.menu_item_response.status
+        if status != iterm2.api_pb2.MenuItemResponse.Status.Value("OK"):
+            raise MenuItemException(iterm2.api_pb2.MenuItemResponse.Status.Name(status))
+
+    class MenuItemState:
+        """Describes the current state of a menu item.
+
+        There are two properties:
+
+        `checked`: Is there a check mark next to the menu item?
+        `enabled`: Is the menu item selectable?
+        """
+        def __init__(self, checked, enabled):
+            self.checked = checked
+            self.enabled = enabled
+
+    async def async_get_menu_item_state(self, identifier):
+        """Queries a menu item for its state.
+
+        :param identifier: A string. See list of identifiers in :doc:`menu_ids`
+        :returns: :class:`App.MenuItemState`
+
+        :throws MenuItemException: if something goes wrong.
+        """
+        response = await iterm2.rpc.async_menu_item(self.connection, identifier, True)
+        status = response.menu_item_response.status
+        if status != iterm2.api_pb2.MenuItemResponse.Status.Value("OK"):
+            raise MenuItemException(iterm2.api_pb2.MenuItemResponse.Status.Name(status))
+        return iterm2.App.MenuItemState(response.menu_item_response.checked,
+                                        response.menu_item_response.enabled)

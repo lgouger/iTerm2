@@ -840,9 +840,9 @@ ITERM_WEAKLY_REFERENCEABLE
 
 - (void)updateVariables {
     if (_name) {
-        _variables[iTermVariableKeySessionPID] = [[_name copy] autorelease];
+        _variables[iTermVariableKeySessionName] = [[_name copy] autorelease];
     } else {
-        [_variables removeObjectForKey:iTermVariableKeySessionPID];
+        [_variables removeObjectForKey:iTermVariableKeySessionName];
     }
 
     _variables[iTermVariableKeySessionColumns] = @(_screen.width);
@@ -3687,7 +3687,7 @@ ITERM_WEAKLY_REFERENCEABLE
                                                             object:[_delegate parentWindow]
                                                           userInfo:nil];
     }
-    _variables[iTermVariableKeySessionPID] = [self name];
+    _variables[iTermVariableKeySessionName] = [self name];
     [_textview setBadgeLabel:[self badgeLabel]];
 }
 
@@ -4792,7 +4792,11 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (BOOL)metalAllowed {
-    if (@available(macOS 10.11, *)) {
+    // While Metal is supported on macOS 10.11, it crashes a lot. It seems to have a memory stomping
+    // bug (lots of crashes in dtoa during printf formatting) and assertions in -[MTKView initCommon].
+    // All metal code except this is available on macOS 10.11, so this is the one place that
+    // restricts it to 10.12+.
+    if (@available(macOS 10.12, *)) {
         static dispatch_once_t onceToken;
         static BOOL machineSupportsMetal;
         dispatch_once(&onceToken, ^{
@@ -4835,7 +4839,8 @@ ITERM_WEAKLY_REFERENCEABLE
 - (BOOL)metalViewSizeIsLegal NS_AVAILABLE_MAC(10_11) {
     NSSize size = _view.frame.size;
     // When closing a session I once got an insane height that caused an assertion.
-    return size.width > 0 && size.width < 16384 && size.height > 0 && size.height < 16384;
+    const CGFloat maxScale = 2;
+    return size.width > 0 && size.width < (16384 / maxScale) && size.height > 0 && size.height < (16384 / maxScale);
 }
 
 - (BOOL)idleForMetal {

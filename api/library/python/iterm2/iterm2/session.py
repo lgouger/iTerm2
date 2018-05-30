@@ -1,6 +1,7 @@
 """Provides classes for interacting with iTerm2 sessions."""
 import asyncio
 
+import iterm2.api_pb2
 import iterm2.app
 import iterm2.connection
 import iterm2.notifications
@@ -34,7 +35,7 @@ class Splitter:
     def from_node(node, connection):
         """Creates a new Splitter from a node.
 
-        node: iterm2.api_pb2.ListSessionsResponse.SplitTreeNode
+        node: iterm2.api_pb2.SplitTreeNode
         connection: :class:`Connection`
 
         :returns: A new Splitter.
@@ -64,7 +65,7 @@ class Splitter:
     @property
     def children(self):
         """
-        :returns: This splitter's children. A list of :class:`Session` objects.
+        :returns: This splitter's children. A list of :class:`Session` or :class:`Splitter` objects.
         """
         return self.__children
 
@@ -111,6 +112,20 @@ class Splitter:
             i += 1
         return False
 
+    def to_protobuf(self):
+        node = iterm2.api_pb2.SplitTreeNode()
+        node.vertical = self.vertical
+        def make_link(obj):
+            link = iterm2.api_pb2.SplitTreeNode.SplitTreeLink()
+            if isinstance(obj, Session):
+                link.session.CopyFrom(obj.to_session_summary_protobuf())
+            else:
+                link.node.CopyFrom(obj.to_protobuf())
+            return link
+        links = list(map(make_link, self.children))
+        node.links.extend(links)
+        return node
+
 class Session:
     """
     Represents an iTerm2 session.
@@ -135,10 +150,10 @@ class Session:
         """
         return ProxySession(connection, "all")
 
-    def __init__(self, connection, link):
+    def __init__(self, connection, link, summary=None):
         """
         connection: :class:`Connection`
-        link: iterm2.api_pb2.ListSessionsResponse.SplitTreeNode.SplitTreeLink
+        link: iterm2.api_pb2.SplitTreeNode.SplitTreeLink
         """
         self.connection = connection
 
@@ -147,9 +162,24 @@ class Session:
             self.frame = link.session.frame
             self.grid_size = link.session.grid_size
             self.name = link.session.title
+            self.buried = False
+        elif summary is not None:
+            self.__session_id = summary.unique_identifier
+            self.name = summary.title
+            self.buried = True
+            self.grid_size = None
+            self.frame = None
+        self.preferred_size = self.grid_size
 
     def __repr__(self):
         return "<Session name=%s id=%s>" % (self.name, self.__session_id)
+
+    def to_session_summary_protobuf(self):
+        summary = iterm2.api_pb2.SessionSummary()
+        summary.unique_identifier = self.session_id
+        summary.grid_size.width = self.preferred_size.width
+        summary.grid_size.height = self.preferred_size.height
+        return summary
 
     def update_from(self, session):
         """Replace internal state with that of another session."""
@@ -455,6 +485,19 @@ class Session:
         status = result.restart_session_response.status
         if status != iterm2.api_pb2.RestartSessionResponse.Status.Value("OK"):
             raise iterm2.rpc.RPCException(iterm2.api_pb2.RestartSessionResponse.Status.Name(status))
+
+    async def async_set_grid_size(self, size):
+      """Sets the visible size of a session.
+
+      :param size: A :class:`Size`.
+
+      :throws: :class:`RPCException` if something goes wrong.
+
+      Note: This will fail on fullscreen windows."""
+      response = await iterm2.rpc.async_set_property(self.connection, "grid_size", size.json, session_id=self.session_id)
+      status = response.set_property_response.status
+      if status != iterm2.api_pb2.SetPropertyResponse.Status.Value("OK"):
+            raise iterm2.rpc.RPCException(iterm2.api_pb2.SetPropertyResponse.Status.Name(status))
 
     class KeystrokeReader:
         """An asyncio context manager for reading keystrokes.

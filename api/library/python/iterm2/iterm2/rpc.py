@@ -248,14 +248,17 @@ async def async_get_profile(connection, session=None, keys=None):
             request.get_profile_property_request.keys.append(key)
     return await _async_call(connection, request)
 
-async def async_set_property(connection, name, json_value, window_id=None):
+async def async_set_property(connection, name, json_value, window_id=None, session_id=None):
     """
     Sets a property of an object (currently only of a window).
     """
-    assert window_id is not None
+    assert (window_id is not None) or (session_id is not None)
     request = _alloc_request()
     request.set_property_request.SetInParent()
-    request.set_property_request.window_id = window_id
+    if window_id is not None:
+      request.set_property_request.window_id = window_id
+    elif session_id is not None:
+      request.set_property_request.session_id = session_id
     request.set_property_request.name = name
     request.set_property_request.json_value = json_value
     return await _async_call(connection, request)
@@ -388,6 +391,25 @@ async def async_restart_session(connection, session_id, only_if_exited):
     request.restart_session_request.SetInParent()
     request.restart_session_request.session_id = session_id
     request.restart_session_request.only_if_exited = only_if_exited
+    return await _async_call(connection, request)
+
+async def async_menu_item(connection, identifier, query_only):
+    """Selects or queries a menu item."""
+    request = _alloc_request()
+    request.menu_item_request.SetInParent()
+    request.menu_item_request.identifier = identifier;
+    request.menu_item_request.query_only = query_only;
+    return await _async_call(connection, request)
+
+async def async_set_tab_layout(connection, tab_id, tree):
+    """Adjusts the layout of split panes in a tab.
+
+    :param tree: a `iterm2.api_pb2.SplitTreeNode` forming the root of the tree.
+    """
+    request = _alloc_request()
+    request.set_tab_layout_request.SetInParent()
+    request.set_tab_layout_request.tab_id = tab_id
+    request.set_tab_layout_request.root.CopyFrom(tree)
     return await _async_call(connection, request)
 
 ## Private --------------------------------------------------------------------

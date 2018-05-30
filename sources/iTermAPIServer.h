@@ -59,6 +59,11 @@ extern NSString *const iTermAPIServerConnectionClosed;
                                    handler:(void (^)(ITMServerOriginatedRPCResultResponse *))response;
 - (void)apiServerRestartSession:(ITMRestartSessionRequest *)request
                         handler:(void (^)(ITMRestartSessionResponse *))response;
+- (void)apiServerMenuItem:(ITMMenuItemRequest *)request
+                  handler:(void (^)(ITMMenuItemResponse *))response;
+- (void)apiServerSetTabLayout:(ITMSetTabLayoutRequest *)request
+                      handler:(void (^)(ITMSetTabLayoutResponse *))response;
+
 @end
 
 @interface iTermAPIServer : NSObject
@@ -67,4 +72,9 @@ extern NSString *const iTermAPIServerConnectionClosed;
 
 - (void)postAPINotification:(ITMNotification *)notification toConnection:(id)connection;
 
+// Blocks. Call this on the main thread.
+- (id)sendAndWaitForSynchronousRPC:(ITMNotification *)notification
+                      toConnection:(id)connection
+                           timeout:(NSTimeInterval)timeoutSeconds
+                             error:(out NSError **)error;
 @end
