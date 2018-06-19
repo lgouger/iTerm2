@@ -37,28 +37,32 @@
 #define KEY_DEPRECATED_BOOKMARKS        @"Bookmarks"  // Deprecated
 #define KEY_NEW_BOOKMARKS               @"New Bookmarks"
 
-// Bookmark-level keys
-#define KEY_CHILDREN                    @"Children"
+#pragma mark - Profile-level keys
+// IMPORATANT: If you add keys, also modify doCopyFrom in PreferencePanel.m.
+
+#define KEY_CHILDREN                    @"Children"  // Deprecated
 #define KEY_NAME                        @"Name"
-#define KEY_DESCRIPTION                 @"Description"
+#define KEY_DESCRIPTION                 @"Description"  // Deprecated
 #define KEY_CUSTOM_COMMAND              @"Custom Command"
 #define KEY_COMMAND_LINE                @"Command"
 #define KEY_INITIAL_TEXT                @"Initial Text"
 #define KEY_CUSTOM_DIRECTORY            @"Custom Directory"  // values are Yes, No, Recycle
 #define KEY_WORKING_DIRECTORY           @"Working Directory"
 #define KEY_BADGE_FORMAT                @"Badge Text"
-#define KEY_TERMINAL_PROFILE            @"Terminal Profile"
-#define KEY_KEYBOARD_PROFILE            @"Keyboard Profile"
-#define KEY_DISPLAY_PROFILE             @"Display Profile"
+#define KEY_TERMINAL_PROFILE            @"Terminal Profile"  // Deprecated
+#define KEY_KEYBOARD_PROFILE            @"Keyboard Profile"  // Deprecated
+#define KEY_DISPLAY_PROFILE             @"Display Profile"  // Deprecated
 #define KEY_SHORTCUT                    @"Shortcut"
-#define KEY_BONJOUR_GROUP               @"Bonjour Group"
-#define KEY_BONJOUR_SERVICE             @"Bonjour Service"
-#define KEY_BONJOUR_SERVICE_ADDRESS     @"Bonjour Service Address"
+#define KEY_BONJOUR_GROUP               @"Bonjour Group"  // Deprecated
+#define KEY_BONJOUR_SERVICE             @"Bonjour Service"  // Deprecated
+#define KEY_BONJOUR_SERVICE_ADDRESS     @"Bonjour Service Address"  // Deprecated
 #define KEY_TAGS                        @"Tags"
 #define KEY_GUID                        @"Guid"
 #define KEY_ORIGINAL_GUID               @"Original Guid"  // GUID before divorce. Not saved to preferences plist.
 #define KEY_DEFAULT_BOOKMARK            @"Default Bookmark"  // deprecated
 #define KEY_ASK_ABOUT_OUTDATED_KEYMAPS  @"Ask About Outdated Keymaps"
+#define KEY_TITLE_COMPONENTS            @"Title Components"
+#define KEY_TITLE_FUNC                  @"Title Function"  // Value is iTermTuple.plistValue of (display name, invocation); e.g. ("Hello world", "hello_world()")
 
 // Advanced working directory settings
 #define KEY_AWDS_WIN_OPTION             @"AWDS Window Option"
@@ -67,9 +71,6 @@
 #define KEY_AWDS_TAB_DIRECTORY          @"AWDS Tab Directory"
 #define KEY_AWDS_PANE_OPTION            @"AWDS Pane Option"
 #define KEY_AWDS_PANE_DIRECTORY         @"AWDS Pane Directory"
-
-// Per-bookmark keys ----------------------------------------------------------
-// IMPORATANT: If you add keys, also modify doCopyFrom in PreferencePanel.m.
 
 // Colors
 #define KEY_FOREGROUND_COLOR       @"Foreground Color"
@@ -146,7 +147,7 @@
 #define KEY_TRANSPARENCY_AFFECTS_ONLY_DEFAULT_BACKGROUND_COLOR @"Only The Default BG Color Uses Transparency"
 #define KEY_OPEN_TOOLBELT                     @"Open Toolbelt"
 #define KEY_HIDE_AFTER_OPENING                @"Hide After Opening"
-#define KEY_SYNC_TITLE                        @"Sync Title"
+#define KEY_SYNC_TITLE_DEPRECATED             @"Sync Title"  // DEPRECATED
 #define KEY_CLOSE_SESSIONS_ON_END             @"Close Sessions On End"
 #define KEY_TREAT_NON_ASCII_AS_DOUBLE_WIDTH   @"Non Ascii Double Width"  // DEPRECATED
 #define KEY_AMBIGUOUS_DOUBLE_WIDTH            @"Ambiguous Double Width"
@@ -178,7 +179,7 @@
 #define KEY_UNLIMITED_SCROLLBACK              @"Unlimited Scrollback"
 #define KEY_TERMINAL_TYPE                     @"Terminal Type"
 #define KEY_ANSWERBACK_STRING                 @"Answerback String"
-#define KEY_USE_CANONICAL_PARSER              @"Use Canonical Parser"
+#define KEY_USE_CANONICAL_PARSER              @"Use Canonical Parser"  // Deprecated
 #define KEY_PLACE_PROMPT_AT_FIRST_COLUMN      @"Place Prompt at First Column"
 #define KEY_SHOW_MARK_INDICATORS              @"Show Mark Indicators"
 
@@ -300,6 +301,18 @@ typedef NS_ENUM(NSUInteger, iTermUnicodeNormalization) {
     iTermUnicodeNormalizationNFC = 1,
     iTermUnicodeNormalizationNFD = 2,
     iTermUnicodeNormalizationHFSPlus = 3,
+};
+
+typedef NS_OPTIONS(NSUInteger, iTermTitleComponents) {
+    iTermTitleComponentsSessionName = 1 << 0,
+    iTermTitleComponentsJob = 1 << 1,
+    iTermTitleComponentsWorkingDirectory = 1 << 2,
+    iTermTitleComponentsTTY = 1 << 3,
+    iTermTitleComponentsCustom = 1 << 4,  // Mutually exclusive with all other options.
+    iTermTitleComponentsProfileName = 1 << 5,
+    iTermTitleComponentsProfileAndSessionName = 1 << 6,
+    iTermTitleComponentsUser = 1 << 7,
+    iTermTitleComponentsHost = 1 << 8
 };
 
 @interface ITAddressBookMgr : NSObject <NSNetServiceBrowserDelegate, NSNetServiceDelegate>

@@ -26,11 +26,16 @@
  */
 
 #import "DebugLogging.h"
+#import "iTermSwiftyStringParser.h"
+#import "iTermTuple.h"
+#import "iTermVariables.h"
 #import "NSData+iTerm.h"
 #import "NSLocale+iTerm.h"
 #import "NSMutableAttributedString+iTerm.h"
 #import "NSStringITerm.h"
 #import "NSCharacterSet+iTerm.h"
+#import "NSJSONSerialization+iTerm.h"
+#import "NSObject+iTerm.h"
 #import "RegexKitLite.h"
 #import "ScreenChar.h"
 #import <apr-1/apr_base64.h>
@@ -152,6 +157,33 @@
                                                                               @'a': @"\x07",
                                                                               @'t': @"\t",
                                                                               @'r': @"\r" } ];
+}
+
+- (NSString *)it_stringByExpandingBackslashEscapedCharacters {
+    NSDictionary *escapes = @{ @'n': @('\n'),
+                               @'a': @('\x07'),
+                               @'t': @('\t'),
+                               @'r': @('\r'),
+                               @'\\': @('\\') };
+    NSMutableString *result = [NSMutableString string];
+    NSInteger start = 0;
+    BOOL escape = NO;
+    for (NSInteger i = 0; i < self.length; i++) {
+        unichar c = [self characterAtIndex:i];
+        if (escape) {
+            NSNumber *replacement = escapes[@(c)] ?: @(c);
+            [result appendString:[self substringWithRange:NSMakeRange(start, i - start - 1)]];
+            [result appendCharacter:replacement.shortValue];
+            start = i + 1;
+            escape = NO;
+        } else if (c == '\\') {
+            escape = YES;
+        }
+    }
+    if (self.length > start) {
+        [result appendString:[self substringWithRange:NSMakeRange(start, self.length - start)]];
+    }
+    return result;
 }
 
 - (NSArray *)componentsBySplittingStringWithQuotesAndBackslashEscaping:(NSDictionary *)escapes {
@@ -1159,7 +1191,7 @@ static TECObjectRef CreateTECConverterForUTF8Variants(TextEncodingVariant varian
 
 - (NSString *)controlCharacter {
     unichar c = [[self lowercaseString] characterAtIndex:0];
-    if (c < 'a' || c >= 'z') {
+    if (c < 'a' || c > 'z') {
         return @"";
     }
     c -= 'a' - 1;
@@ -1303,13 +1335,13 @@ static TECObjectRef CreateTECConverterForUTF8Variants(TextEncodingVariant varian
     return [attributedString heightForWidth:maxWidth];
 }
 
-- (NSArray *)keyValuePair {
+- (iTermTuple *)keyValuePair {
     NSRange range = [self rangeOfString:@"="];
     if (range.location == NSNotFound) {
-        return @[ self, @"" ];
+        return nil;
     } else {
-        return @[ [self substringToIndex:range.location],
-                  [self substringFromIndex:range.location + 1] ];
+        return [iTermTuple tupleWithObject:[self substringToIndex:range.location]
+                                 andObject:[self substringFromIndex:range.location + 1]];
     }
 }
 
@@ -1325,8 +1357,39 @@ static TECObjectRef CreateTECConverterForUTF8Variants(TextEncodingVariant varian
     return temp;
 }
 
+- (void)enumerateSwiftySubstrings:(void (^)(NSUInteger index, NSString *substring, BOOL isLiteral, BOOL *stop))block {
+    iTermSwiftyStringParser *parser = [[[iTermSwiftyStringParser alloc] initWithString:self] autorelease];
+    [parser enumerateSwiftySubstringsWithBlock:block];
+}
+
+- (NSString *)stringByReplacingVariableReferencesWithVariablesFromScope:(iTermVariableScope *)scope
+                                                nonVariableReplacements:(NSDictionary *)nonvars {
+    return [self replaceVariableReferencesWithBlock:^NSString *(NSString *name) {
+        if (nonvars[name]) {
+            return nonvars[name];
+        } else {
+            return [scope stringValueForVariableName:name];
+        }
+    }];
+}
+
 // Replace substrings like \(foo) or \1...\9 with the value of vars[@"foo"] or vars[@"1"].
 - (NSString *)stringByReplacingVariableReferencesWithVariables:(NSDictionary *)vars {
+    NSString *(^stringify)(id) = ^NSString *(id x) {
+        if ([NSString castFrom:x]) {
+            return x;
+        } else if ([NSNumber castFrom:x]) {
+            return [x stringValue];
+        } else {
+            return [NSJSONSerialization it_jsonStringForObject:x] ?: @"";
+        }
+    };
+    return [self replaceVariableReferencesWithBlock:^NSString *(NSString *name) {
+        return stringify(vars[name]);
+    }];
+}
+
+- (NSString *)replaceVariableReferencesWithBlock:(NSString *(^ NS_NOESCAPE)(NSString *name))block {
     unichar *chars = (unichar *)malloc(self.length * sizeof(unichar));
     [self getCharacters:chars];
     enum {
@@ -1354,8 +1417,9 @@ static TECObjectRef CreateTECConverterForUTF8Variants(TextEncodingVariant varian
                 } else {
                     // \1...\9 also work as subs.
                     NSString *singleCharVar = [NSString stringWithFormat:@"%C", c];
-                    if (singleCharVar.integerValue > 0 && vars[singleCharVar]) {
-                        [result appendString:vars[singleCharVar]];
+                    NSString *replacement = block(singleCharVar);
+                    if (singleCharVar.integerValue > 0 && replacement) {
+                        [result appendString:replacement];
                     } else {
                         [result appendFormat:@"\\%C", c];
                     }
@@ -1366,7 +1430,7 @@ static TECObjectRef CreateTECConverterForUTF8Variants(TextEncodingVariant varian
             case kInParens:
                 if (c == ')') {
                     state = kLiteral;
-                    NSString *value = vars[varName];
+                    NSString *value = block(varName);
                     if (value) {
                         [result appendString:value];
                     }

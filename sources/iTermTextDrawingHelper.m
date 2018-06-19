@@ -623,7 +623,7 @@ typedef struct iTermTextColorContext {
 }
 
 - (void)drawMarginsAndMarkForLine:(int)line y:(CGFloat)y {
-    NSRect leftMargin = NSMakeRect(0, y, [iTermAdvancedSettingsModel terminalMargin], _cellSize.height);
+    NSRect leftMargin = NSMakeRect(0, y, MAX(0, [iTermAdvancedSettingsModel terminalMargin]), _cellSize.height);
     NSRect rightMargin;
     NSRect visibleRect = _visibleRect;
     rightMargin.origin.x = _cellSize.width * _gridSize.width + [iTermAdvancedSettingsModel terminalMargin];
@@ -768,23 +768,31 @@ typedef struct iTermTextColorContext {
         [path setLineWidth:1.0];
         [path stroke];
 
+        NSColor *color = nil;
         if (mark.code == 0) {
             // Success
-            [[iTermTextDrawingHelper successMarkColor] set];
+            color = [iTermTextDrawingHelper successMarkColor];
         } else if ([iTermAdvancedSettingsModel showYellowMarkForJobStoppedBySignal] &&
                    mark.code >= 128 && mark.code <= 128 + 32) {
             // Stopped by a signal (or an error, but we can't tell which)
-            [[iTermTextDrawingHelper otherMarkColor] set];
+            color = [iTermTextDrawingHelper otherMarkColor];
         } else {
             // Failure
-            [[iTermTextDrawingHelper errorMarkColor] set];
+            color = [iTermTextDrawingHelper errorMarkColor];
         }
 
-        [path moveToPoint:top];
-        [path lineToPoint:right];
-        [path lineToPoint:bottom];
-        [path lineToPoint:top];
-        [path fill];
+        if (leftMargin.size.width == 1) {
+            NSRect rect = NSInsetRect(leftMargin, 0, leftMargin.size.height * 0.25);
+            [[color colorWithAlphaComponent:0.75] set];
+            NSRectFillUsingOperation(rect, NSCompositeSourceOver);
+        } else {
+            [color set];
+            [path moveToPoint:top];
+            [path lineToPoint:right];
+            [path lineToPoint:bottom];
+            [path lineToPoint:top];
+            [path fill];
+        }
     }
 }
 
@@ -2126,11 +2134,13 @@ static BOOL iTermTextDrawingHelperShouldAntiAlias(screen_char_t *c,
     CGFloat preferredOffset = [self retinaRound:yOffset + _cellSize.height + underlineOffset] - 1.0 / (2 * scaleFactor);
 
     const CGFloat thickness = [self underlineThicknessForFont:font];
-    return MIN(preferredOffset, yOffset + cellHeight - thickness);
+    const CGFloat roundedPreferredOffset = [self retinaRound:preferredOffset];
+    const CGFloat maximumOffset = [self retinaFloor:yOffset + cellHeight - thickness];
+    return MIN(roundedPreferredOffset, maximumOffset);
 }
 
 - (CGFloat)underlineThicknessForFont:(NSFont *)font {
-    return MAX(0.75, [self retinaRound:font.underlineThickness]);
+    return MAX(0.5, [self retinaRound:font.underlineThickness]);
 }
 
 - (void)drawUnderlineOfColor:(NSColor *)color
@@ -2145,6 +2155,7 @@ static BOOL iTermTextDrawingHelperShouldAntiAlias(screen_char_t *c,
                                  [self yOriginForUnderlineForFont:font
                                                           yOffset:startPoint.y
                                                        cellHeight:_cellSize.height]);
+    origin.y += self.isRetina ? 0.25 : 0.5;
     CGFloat dashPattern[] = { 4, 3 };
     CGFloat phase = fmod(startPoint.x, dashPattern[0] + dashPattern[1]);
 
@@ -2194,6 +2205,11 @@ static BOOL iTermTextDrawingHelperShouldAntiAlias(screen_char_t *c,
 - (CGFloat)retinaRound:(CGFloat)value {
     CGFloat scaleFactor = self.isRetina ? 2.0 : 1.0;
     return round(scaleFactor * value) / scaleFactor;
+}
+
+- (CGFloat)retinaFloor:(CGFloat)value {
+    CGFloat scaleFactor = self.isRetina ? 2.0 : 1.0;
+    return floor(scaleFactor * value) / scaleFactor;
 }
 
 // origin is the first location onscreen

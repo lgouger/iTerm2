@@ -100,6 +100,8 @@ Other Sections
     * :doc:`example`
     * Running a Script
     * :doc:`daemons`
+    * :doc:`rpcs`
+    * :doc:`hooks`
 
 Indices and tables
 ==================

@@ -23,6 +23,7 @@ NSString *kTextmate2Identifier = @"com.macromates.TextMate.preview";
 NSString *kBBEditIdentifier = @"com.barebones.bbedit";
 NSString *kAtomIdentifier = @"com.github.atom";
 NSString *kVSCodeIdentifier = @"com.microsoft.VSCode";
+NSString *kVSCodeInsidersIdentifier = @"com.microsoft.VSCodeInsiders";
 NSString *kSemanticHistoryBestEditorAction = @"best editor";
 NSString *kSemanticHistoryUrlAction = @"url";
 NSString *kSemanticHistoryEditorAction = @"editor";
@@ -32,10 +33,10 @@ NSString *kSemanticHistoryCoprocessAction = @"coprocess";
 
 @implementation iTermSemanticHistoryPrefsController {
     NSString *guid_;
-    __weak IBOutlet NSPopUpButton *action_;
-    __weak IBOutlet NSTextField *text_;
-    __weak IBOutlet NSPopUpButton *editors_;
-    __weak IBOutlet NSTextField *caveat_;
+    IBOutlet NSPopUpButton *action_;
+    IBOutlet NSTextField *text_;
+    IBOutlet NSPopUpButton *editors_;
+    IBOutlet NSTextField *caveat_;
 }
 
 enum {
@@ -47,6 +48,7 @@ enum {
     kAtomTag,
     kTextmate2Tag,
     kVSCodeTag,
+    kVSCodeInsidersTag
     // Only append to the end of the list; never delete or change.
 };
 
@@ -56,14 +58,8 @@ enum {
     return @{ kSemanticHistoryActionKey: kSemanticHistoryBestEditorAction };
 }
 
-- (void)dealloc
-{
-    [guid_ release];
-    [super dealloc];
-}
-
 + (BOOL)applicationExists:(NSString *)bundleId {
-    CFArrayRef appURLs = LSCopyApplicationURLsForBundleIdentifier((CFStringRef)bundleId, nil);
+    CFArrayRef appURLs = LSCopyApplicationURLsForBundleIdentifier((__bridge CFStringRef)bundleId, nil);
     NSInteger count = appURLs ? CFArrayGetCount(appURLs) : 0;
     if (appURLs) {
         CFRelease(appURLs);
@@ -94,7 +90,8 @@ enum {
                                kTextmate2Identifier: @"txmt",
                                kBBEditIdentifier: @"txmt",
                                kAtomIdentifier: @"atom",
-                               kVSCodeIdentifier: @"vscode" };
+                               kVSCodeIdentifier: @"vscode",
+                               kVSCodeInsidersIdentifier: @"vscode" };
     return schemes[editor];
 }
 
@@ -107,7 +104,8 @@ enum {
               kTextmate2Identifier,
               kBBEditIdentifier,
               kAtomIdentifier,
-              kVSCodeIdentifier ];
+              kVSCodeIdentifier,
+              kVSCodeInsidersIdentifier ];
 }
 
 + (NSString *)bestEditor {
@@ -127,7 +125,8 @@ enum {
                                   kTextmate2Identifier,
                                   kBBEditIdentifier,
                                   kAtomIdentifier,
-                                  kVSCodeIdentifier ];
+                                  kVSCodeIdentifier,
+                                  kVSCodeInsidersIdentifier ];
     return [editorBundleIds containsObject:bundleId];
 }
 
@@ -139,7 +138,8 @@ enum {
                                kTextmate2Identifier: @(kTextmate2Tag),
                                   kBBEditIdentifier: @(kBBEditTag),
                                     kAtomIdentifier: @(kAtomTag),
-                                  kVSCodeIdentifier: @(kVSCodeTag) };
+                                  kVSCodeIdentifier: @(kVSCodeTag),
+                          kVSCodeInsidersIdentifier: @(kVSCodeInsidersTag) };
     return tags;
 }
 
@@ -151,7 +151,8 @@ enum {
                                 kTextmate2Identifier: @"Textmate Preview",
                                    kBBEditIdentifier: @"BBEdit",
                                      kAtomIdentifier: @"Atom",
-                                   kVSCodeIdentifier: @"VSCode" };
+                                   kVSCodeIdentifier: @"VS Code",
+                           kVSCodeInsidersIdentifier: @"VS Code Insiders" };
 
     NSDictionary *tags = [[self class] identifierToTagMap];
 
@@ -160,8 +161,7 @@ enum {
     for (NSString *identifier in [[self class] editorsInPreferenceOrder]) {
         NSMenuItem *item = items[names[identifier]];
         if (!item) {
-            [editors_ addItemWithTitle:names[identifier]];
-            item = (NSMenuItem *)[[[editors_ menu] itemArray] lastObject];
+            item = [[NSMenuItem alloc] initWithTitle:names[identifier] action:nil keyEquivalent:@""];
             int tag = [tags[identifier] integerValue];
             [item setTag:tag];
             [item setEnabled:NO];
@@ -170,6 +170,11 @@ enum {
         if ([iTermSemanticHistoryPrefsController applicationExists:identifier]) {
             [item setEnabled:YES];
         }
+    }
+    NSArray *sortedNames = [items.allKeys sortedArrayUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
+    for (NSString *name in sortedNames) {
+        NSMenuItem *item = items[name];
+        [editors_.menu addItem:item];
     }
 
     [self actionChanged:nil];
@@ -286,7 +291,6 @@ enum {
 
 - (void)setGuid:(NSString *)guid
 {
-    [guid_ autorelease];
     guid_ = [guid copy];
     Profile* bookmark = [[ProfileModel sharedInstance] bookmarkWithGuid:self.guid];
     if (!bookmark) {

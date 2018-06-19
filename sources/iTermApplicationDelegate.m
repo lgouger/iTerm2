@@ -47,6 +47,7 @@
 #import "iTermIntegerNumberFormatter.h"
 #import "iTermLaunchServices.h"
 #import "iTermLSOF.h"
+#import "iTermMigrationHelper.h"
 #import "iTermModifierRemapper.h"
 #import "iTermPreferences.h"
 #import "iTermPythonRuntimeDownloader.h"
@@ -61,6 +62,7 @@
 #import "iTermProfilePreferences.h"
 #import "iTermProfilesWindowController.h"
 #import "iTermScriptConsole.h"
+#import "iTermScriptFunctionCall.h"
 #import "iTermServiceProvider.h"
 #import "iTermQuickLookController.h"
 #import "iTermRemotePreferences.h"
@@ -71,7 +73,9 @@
 #import "iTermTipWindowController.h"
 #import "iTermToolbeltView.h"
 #import "iTermURLStore.h"
+#import "iTermVariables.h"
 #import "iTermWarning.h"
+#import "iTermWebSocketCookieJar.h"
 #import "MovePaneController.h"
 #import "NSApplication+iTerm.h"
 #import "NSArray+iTerm.h"
@@ -944,7 +948,10 @@ static BOOL hasBecomeActive = NO;
         DLog(@"applicationWillFinishLaunching:");
     }
 
-    [[iTermController sharedInstance] migrateApplicationSupportDirectoryIfNeeded];
+    [[iTermVariableScope globalsScope] setValue:@(getpid()) forVariableNamed:iTermVariableKeyApplicationPID];
+    [PTYSession registerBuiltInFunctions];
+    
+    [iTermMigrationHelper migrateApplicationSupportDirectoryIfNeeded];
     [self buildScriptMenu:nil];
 
     // Fix up various user defaults settings.
@@ -962,9 +969,6 @@ static BOOL hasBecomeActive = NO;
     // Start tracking windows entering/exiting full screen.
     [iTermFullScreenWindowManager sharedInstance];
 
-    // Users used to be opted into the beta by default. Make sure the user is cool with that.
-    [self promptAboutRemainingInBetaIfNeeded];
-
     [self complainIfNightlyBuildIsTooOld];
 
     // Set the Appcast URL and when it changes update it.
@@ -978,13 +982,9 @@ static BOOL hasBecomeActive = NO;
 - (void)applicationDidFinishLaunching:(NSNotification *)aNotification {
     [self warnAboutChangeToDefaultPasteBehavior];
     if (IsTouchBarAvailable()) {
-        ITERM_IGNORE_PARTIAL_BEGIN
-        NSApp.automaticCustomizeTouchBarMenuItemEnabled = YES;
-        ITERM_IGNORE_PARTIAL_END
-    }
-
-    if ([iTermAdvancedSettingsModel enableAPIServer]) {
-        _apiHelper = [[iTermAPIHelper alloc] init];
+        if (@available(macOS 10.12.2, *)) {
+            NSApp.automaticCustomizeTouchBarMenuItemEnabled = YES;
+        }
     }
 
     if ([self shouldNotifyAboutIncompatibleSoftware]) {
@@ -1004,7 +1004,7 @@ static BOOL hasBecomeActive = NO;
     [self createVersionFile];
 
     // Prevent the input manager from swallowing control-q. See explanation here:
-    // http://b4winckler.wordpress.com/2009/07/19/coercing-the-cocoa-text-system/
+    // https://web.archive.org/web/20111102073237/https://b4winckler.wordpress.com/2009/07/19/coercing-the-cocoa-text-system
     CFPreferencesSetAppValue(CFSTR("NSQuotedKeystrokeBinding"),
                              CFSTR(""),
                              kCFPreferencesCurrentApplication);
@@ -1263,49 +1263,6 @@ static BOOL hasBecomeActive = NO;
     }
 }
 
-- (void)promptAboutRemainingInBetaIfNeeded {
-    // For a long time—too long—users were opted into the beta program. There are too many of them
-    // and they don't know it and some of them feel bad feelings. So we'll help them get out. I
-    // don't like spamming you with crap so let's just do this for a few weeks and that'll fix
-    // almost all of the problem.
-    if ([NSDate timeIntervalSinceReferenceDate] > 489542400) {  // Midnight GMT July 7 2016
-        return;
-    }
-    static NSString *kHaveAskedAboutBetaKey = @"NoSyncConfirmBeta";
-    const BOOL haveAsked = [[NSUserDefaults standardUserDefaults] boolForKey:kHaveAskedAboutBetaKey];
-    if (haveAsked) {
-        return;
-    }
-    [[NSUserDefaults standardUserDefaults] setBool:YES forKey:kHaveAskedAboutBetaKey];
-
-    if ([NSBundle it_isNightlyBuild]) {
-        return;
-    }
-
-    const BOOL inBeta = [iTermPreferences boolForKey:kPreferenceKeyCheckForTestReleases];
-    if (!inBeta) {
-        return;
-    }
-
-    const BOOL isEarlyAdopter = [NSBundle it_isEarlyAdopter];
-    if (isEarlyAdopter) {
-        // Early adopters who are already beta testers won't get prompted.
-        // They are the new "real" beta testers.
-        return;
-    }
-
-    NSAlert *alert = [[[NSAlert alloc] init] autorelease];
-    alert.messageText = @"Beta Test Program";
-    alert.informativeText = @"Would you like to beta test versions of iTerm2 when it updates?";
-    [alert addButtonWithTitle:@"Yes, I Want Beta Test Versions"];
-    [alert addButtonWithTitle:@"No, Release Versions Only"];
-    const NSModalResponse response = [alert runModal];
-
-    const BOOL wantBeta = (response == NSAlertFirstButtonReturn);
-    [[NSUserDefaults standardUserDefaults] setBool:wantBeta
-                                            forKey:kPreferenceKeyCheckForTestReleases];
-}
-
 // This performs startup activities as long as they haven't been run before.
 - (void)performStartupActivities {
     if (gStartupActivitiesPerformed) {
@@ -1319,7 +1276,11 @@ static BOOL hasBecomeActive = NO;
     [[iTermController sharedInstance] setStartingUp:YES];
 
     // Check if we have an autolaunch script to execute. Do it only once, i.e. at application launch.
-    BOOL ranAutoLaunchScripts = [self.scriptsMenuController runAutoLaunchScriptsIfNeeded];
+    BOOL ranAutoLaunchScripts = NO;
+    if (![self isApplescriptTestApp] &&
+        ![[NSApplication sharedApplication] isRunningUnitTests]) {
+        ranAutoLaunchScripts = [self.scriptsMenuController runAutoLaunchScriptsIfNeeded];
+    }
 
     if ([WindowArrangements defaultArrangementName] == nil &&
         [WindowArrangements arrangementWithName:LEGACY_DEFAULT_ARRANGEMENT_NAME] != nil) {
@@ -1967,8 +1928,8 @@ static BOOL hasBecomeActive = NO;
     return _scriptsMenuController;
 }
 
-- (IBAction)installPythonRuntime:(id)sender {
-    [[iTermPythonRuntimeDownloader sharedInstance] downloadOptionalComponentsIfNeededWithCompletion:^{}];
+- (IBAction)installPythonRuntime:(id)sender {  // Explicit request from menu item
+    [[iTermPythonRuntimeDownloader sharedInstance] downloadOptionalComponentsIfNeededWithConfirmation:NO withCompletion:^(BOOL ok) {}];
 }
 
 - (IBAction)buildScriptMenu:(id)sender {
@@ -1977,12 +1938,18 @@ static BOOL hasBecomeActive = NO;
 }
 
 - (IBAction)openREPL:(id)sender {
-    [[iTermPythonRuntimeDownloader sharedInstance] downloadOptionalComponentsIfNeededWithCompletion:^{
-        NSString *command = [[[[iTermPythonRuntimeDownloader sharedInstance] pathToStandardPyenvPython] stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"apython"];
-        NSURL *injectionURL = [[NSBundle mainBundle] URLForResource:@"repl_banner" withExtension:@"txt"];
-        NSData *injection = [NSData dataWithContentsOfURL:injectionURL];
+    [[iTermPythonRuntimeDownloader sharedInstance] downloadOptionalComponentsIfNeededWithConfirmation:YES withCompletion:^(BOOL ok) {
+        if (!ok) {
+            return;
+        }
+        NSString *command = [[[[[iTermPythonRuntimeDownloader sharedInstance] pathToStandardPyenvPython] stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"apython"] stringWithEscapedShellCharactersIncludingNewlines:YES];
+        NSURL *bannerURL = [[NSBundle mainBundle] URLForResource:@"repl_banner" withExtension:@"txt"];
+        command = [command stringByAppendingFormat:@" --banner=\"`cat %@`\"", bannerURL.path];
+        NSString *cookie = [[iTermWebSocketCookieJar sharedInstance] newCookie];
+        NSDictionary *environment = @{ @"ITERM2_COOKIE": cookie };
         [[iTermController sharedInstance] openSingleUseWindowWithCommand:command
-                                                                  inject:injection];
+                                                                  inject:nil
+                                                             environment:environment];
     }];
 }
 

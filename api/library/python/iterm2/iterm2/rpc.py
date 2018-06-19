@@ -25,7 +25,7 @@ async def async_list_sessions(connection):
     request.list_sessions_request.SetInParent()
     return await _async_call(connection, request)
 
-async def async_notification_request(connection, subscribe, notification_type, session=None):
+async def async_notification_request(connection, subscribe, notification_type, session=None, rpc_registration_request=None, keystroke_monitor_request=None):
     """
     Requests a change to a notification subscription.
 
@@ -33,12 +33,20 @@ async def async_notification_request(connection, subscribe, notification_type, s
     subscribe: True to subscribe, False to unsubscribe
     notification_type: iterm2.api_pb2.NotificationType
     session: The unique ID of the session or None.
+    rpc_registration_request: The RPC registration request (only for registering an RPC handler) or None.
+    keystroke_monitor_request: The keyboard monitor request (only for registering a keystroke handler) or None.
 
     Returns: iterm2.api_pb2.ServerOriginatedMessage
     """
     request = _alloc_request()
+
+    request.notification_request.SetInParent()
     if session is not None:
         request.notification_request.session = session
+    if rpc_registration_request is not None:
+        request.notification_request.rpc_registration_request.CopyFrom(rpc_registration_request)
+    if keystroke_monitor_request:
+        request.notification_request.keystroke_monitor_request.CopyFrom(keystroke_monitor_request)
     request.notification_request.subscribe = subscribe
     request.notification_request.notification_type = notification_type
     return await _async_call(connection, request)
@@ -58,7 +66,7 @@ async def async_send_text(connection, session, text):
     request.send_text_request.text = text
     return await _async_call(connection, request)
 
-async def async_split_pane(connection, session, vertical, before, profile=None):
+async def async_split_pane(connection, session, vertical, before, profile=None, profile_customizations=None):
     """
     Splits a session into two.
 
@@ -67,6 +75,7 @@ async def async_split_pane(connection, session, vertical, before, profile=None):
     vertical: Bool, whether the divider should be vertical
     before: Bool, whether the new session should be left/above the existing one.
     profile: The profile name to use. None for the default profile.
+    profile_customizations: None, or a dictionary of overrides.
 
     Returns: iterm2.api_pb2.ServerOriginatedMessage
     """
@@ -81,9 +90,22 @@ async def async_split_pane(connection, session, vertical, before, profile=None):
     request.split_pane_request.before = before
     if profile is not None:
         request.split_pane_request.profile_name = profile
+    if profile_customizations is not None:
+        request.split_pane_request.custom_profile_properties.extend(_profile_properties_from_dict(profile_customizations))
+
     return await _async_call(connection, request)
 
-async def async_create_tab(connection, profile=None, window=None, index=None, command=None):
+def _profile_properties_from_dict(profile_customizations):
+    l = []
+    for key in profile_customizations:
+        value = profile_customizations[key]
+        entry = iterm2.api_pb2.ProfileProperty()
+        entry.key = key
+        entry.json_value = value
+        l.append(entry)
+    return l
+
+async def async_create_tab(connection, profile=None, window=None, index=None, command=None, profile_customizations=None):
     """
     Creates a new tab or window.
 
@@ -92,6 +114,7 @@ async def async_create_tab(connection, profile=None, window=None, index=None, co
     window: The window ID in which to add a tab, or None to create a new window.
     index: The index within the window, from 0 to (num tabs)-1
     command: The command to run in the new session, or None for its default behavior.
+    profile_customizations: None, or a dictionary of overrides.
 
     Returns: iterm2.api_pb2.ServerOriginatedMessage
     """
@@ -104,7 +127,11 @@ async def async_create_tab(connection, profile=None, window=None, index=None, co
     if index is not None:
         request.create_tab_request.tab_index = index
     if command is not None:
-        request.create_tab_request.command = command
+        profile_customizations = iterm2.LocalWriteOnlyProfile()
+        profile_customizations.set_use_custom_command("Yes")
+        profile_customizations.set_command(command)
+    if profile_customizations is not None:
+        request.create_tab_request.custom_profile_properties.extend(_profile_properties_from_dict(profile_customizations))
     return await _async_call(connection, request)
 
 async def async_get_buffer_with_screen_contents(connection, session=None):
@@ -201,19 +228,23 @@ async def async_register_web_view_tool(connection,
     request.register_tool_request.URL = url
     return await _async_call(connection, request)
 
-async def async_set_profile_property(connection, session_id, key, value):
+async def async_set_profile_property(connection, session_id, key, value, guids=None):
     """
     Sets a property of a session's profile.
 
-    connection: A connected iterm2.Connection.
-    session_id: Session ID
-    key: The key to set
-    value: a Python object, whose type depends on the key
+    :param connection: A connected iterm2.Connection.
+    :param session_id: Session ID to modify or None. If None, guids must be set.
+    :param key: The key to set
+    :param value: a Python object, whose type depends on the key
+    :param guids: List of GUIDs of the profile to modify or None. If None, session_id must be set.
 
     Returns: iterm2.api_pb2.ServerOriginatedMessage
     """
     request = _alloc_request()
-    request.set_profile_property_request.session = session_id
+    if session_id is None:
+        request.set_profile_property_request.guid_list.guids.extend(guids);
+    else:
+        request.set_profile_property_request.session = session_id
     request.set_profile_property_request.key = key
     request.set_profile_property_request.json_value = json.dumps(value)
     return await _async_call(connection, request)
@@ -237,14 +268,17 @@ async def async_get_profile(connection, session=None, keys=None):
             request.get_profile_property_request.keys.append(key)
     return await _async_call(connection, request)
 
-async def async_set_property(connection, name, json_value, window_id=None):
+async def async_set_property(connection, name, json_value, window_id=None, session_id=None):
     """
     Sets a property of an object (currently only of a window).
     """
-    assert window_id is not None
+    assert (window_id is not None) or (session_id is not None)
     request = _alloc_request()
     request.set_property_request.SetInParent()
-    request.set_property_request.window_id = window_id
+    if window_id is not None:
+      request.set_property_request.window_id = window_id
+    elif session_id is not None:
+      request.set_property_request.session_id = session_id
     request.set_property_request.name = name
     request.set_property_request.json_value = json_value
     return await _async_call(connection, request)
@@ -301,6 +335,8 @@ async def async_activate(connection,
 async def async_variable(connection, session_id, sets, gets):
     """
     Gets or sets session variables.
+
+    `sets` are JSON encoded. The resulting gets will be JSON encoded.
     """
     request = _alloc_request()
     request.variable_request.session_id = session_id
@@ -342,6 +378,58 @@ async def async_get_focus_info(connection):
     """
     request = _alloc_request()
     request.focus_request.SetInParent()
+    return await _async_call(connection, request)
+
+async def async_list_profiles(connection, guids, properties):
+    """
+    Gets a list of all profiles.
+
+    :param guid: If None, get all profiles. Otherwise, a list of GUIDs (strings) to fetch.
+    "param properties: If None, get all properties. Otherwise, a list of strings giving property keys to fetch.
+    """
+    request = _alloc_request()
+    request.list_profiles_request.SetInParent()
+    if guids is not None:
+        request.list_profiles_request.guids.extend(guids)
+    if properties is not None:
+        request.list_profiles_request.properties.extend(properties)
+    return await _async_call(connection, request)
+
+async def async_send_rpc_result(connection, request_id, is_exception, value):
+    """Sends an RPC response."""
+    request = _alloc_request()
+    request.server_originated_rpc_result_request.request_id = request_id
+    if is_exception:
+        request.server_originated_rpc_result_request.json_exception = json.dumps(value)
+    else:
+        request.server_originated_rpc_result_request.json_value = json.dumps(value)
+    return await _async_call(connection, request)
+
+async def async_restart_session(connection, session_id, only_if_exited):
+    """Restarts a session."""
+    request = _alloc_request()
+    request.restart_session_request.SetInParent()
+    request.restart_session_request.session_id = session_id
+    request.restart_session_request.only_if_exited = only_if_exited
+    return await _async_call(connection, request)
+
+async def async_menu_item(connection, identifier, query_only):
+    """Selects or queries a menu item."""
+    request = _alloc_request()
+    request.menu_item_request.SetInParent()
+    request.menu_item_request.identifier = identifier;
+    request.menu_item_request.query_only = query_only;
+    return await _async_call(connection, request)
+
+async def async_set_tab_layout(connection, tab_id, tree):
+    """Adjusts the layout of split panes in a tab.
+
+    :param tree: a `iterm2.api_pb2.SplitTreeNode` forming the root of the tree.
+    """
+    request = _alloc_request()
+    request.set_tab_layout_request.SetInParent()
+    request.set_tab_layout_request.tab_id = tab_id
+    request.set_tab_layout_request.root.CopyFrom(tree)
     return await _async_call(connection, request)
 
 ## Private --------------------------------------------------------------------

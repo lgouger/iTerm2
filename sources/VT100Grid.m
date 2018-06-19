@@ -623,6 +623,20 @@ static NSString *const kGridSizeKey = @"Size";
     }
 }
 
+- (void)setURLCode:(unsigned short)code
+        inRectFrom:(VT100GridCoord)from
+                to:(VT100GridCoord)to {
+    for (int y = from.y; y <= to.y; y++) {
+        screen_char_t *line = [self screenCharsAtLineNumber:y];
+        for (int x = from.x; x <= to.x; x++) {
+            line[x].urlCode = code;
+        }
+        [self markCharsDirty:YES
+                  inRectFrom:VT100GridCoordMake(from.x, y)
+                          to:VT100GridCoordMake(to.x, y)];
+    }
+}
+
 - (void)copyCharsFromGrid:(VT100Grid *)otherGrid {
     if (otherGrid == self) {
         return;
@@ -1962,49 +1976,6 @@ static void DumpBuf(screen_char_t* p, int n) {
         default:
             return @"[?]";
     }
-}
-
-// Find all the lines starting at startScreenY that have non-hard EOLs. Combine them into a string and return it.
-// Store the number of screen lines in *numLines
-// Store an array of UTF-16 codes in backingStorePtr, which the caller must free
-// Store an array of offsets between chars in the string and screen_char_t indices in deltasPtr, which the caller must free.
-- (NSString *)joinedLineBeginningAtLineNumber:(int)startScreenY
-                                  numLinesPtr:(int *)numLines
-                              backingStorePtr:(unichar **)backingStorePtr  // caller must free
-                                    deltasPtr:(int **)deltasPtr            // caller must free
-{
-    // Count the number of screen lines that have soft/dwc newlines beginning at
-    // line startScreenY.
-    int limitY;
-    for (limitY = startScreenY; limitY < size_.height; limitY++) {
-        screen_char_t *screenLine = [self screenCharsAtLineNumber:limitY];
-        if (screenLine[size_.width].code == EOL_HARD) {
-            break;
-        }
-    }
-    *numLines = limitY - startScreenY + 1;
-
-    // Create a single array of screen_char_t's that has those screen lines
-    // concatenated together in "temp".
-    NSMutableData *tempData = [NSMutableData dataWithLength:sizeof(screen_char_t) * size_.width * *numLines];
-    screen_char_t *temp = (screen_char_t *)[tempData mutableBytes];
-    int i = 0;
-    for (int y = startScreenY; y <= limitY; y++, i++) {
-        screen_char_t *screenLine = [self screenCharsAtLineNumber:y];
-        memcpy(temp + size_.width * i,
-               screenLine,
-               size_.width * sizeof(screen_char_t));
-    }
-
-    // Convert "temp" into an NSString. backingStorePtr and deltasPtr are filled
-    // in with malloc'ed pointers that the caller must free.
-    NSString *screenLine = ScreenCharArrayToString(temp,
-                                                   0,
-                                                   size_.width * *numLines,
-                                                   backingStorePtr,
-                                                   deltasPtr);
-
-    return screenLine;
 }
 
 // Number of cells between two coords, including both endpoints For example, with a grid of

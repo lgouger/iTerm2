@@ -562,6 +562,12 @@ exit:
         case KEY_ACTION_TOGGLE_MOUSE_REPORTING:
             actionString = @"Toggle Mouse Reporting";
             break;
+        case KEY_ACTION_INVOKE_SCRIPT_FUNCTION:
+            actionString = [NSString stringWithFormat:@"Call %@", auxText];
+            break;
+        case KEY_ACTION_DUPLICATE_TAB:
+            actionString = @"Duplicate Tab";
+            break;
         default:
             actionString = [NSString stringWithFormat: @"%@ %d", @"Unknown Action ID", action];
             break;

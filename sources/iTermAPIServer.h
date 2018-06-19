@@ -21,9 +21,9 @@ extern NSString *const iTermAPIServerConnectionClosed;
 - (void)apiServerGetBuffer:(ITMGetBufferRequest *)request handler:(void (^)(ITMGetBufferResponse *))handler;
 - (void)apiServerGetPrompt:(ITMGetPromptRequest *)request handler:(void (^)(ITMGetPromptResponse *))handler;
 - (void)apiServerNotification:(ITMNotificationRequest *)request
-                   connection:(id)connection
+                connectionKey:(NSString *)connectionKey
                       handler:(void (^)(ITMNotificationResponse *))handler;
-- (void)apiServerDidCloseConnection:(id)connection;
+- (void)apiServerDidCloseConnectionWithKey:(NSString *)connectionKey;
 - (void)apiServerRegisterTool:(ITMRegisterToolRequest *)request
                  peerIdentity:(NSDictionary *)peerIdentity
                       handler:(void (^)(ITMRegisterToolResponse *))handler;
@@ -53,6 +53,17 @@ extern NSString *const iTermAPIServerConnectionClosed;
                           handler:(void (^)(ITMSavedArrangementResponse *))response;
 - (void)apiServerFocus:(ITMFocusRequest *)request
                handler:(void (^)(ITMFocusResponse *))response;
+- (void)apiServerListProfiles:(ITMListProfilesRequest *)request
+                      handler:(void (^)(ITMListProfilesResponse *))response;
+- (void)apiServerServerOriginatedRPCResult:(ITMServerOriginatedRPCResultRequest *)request
+                             connectionKey:(NSString *)connectionKey
+                                   handler:(void (^)(ITMServerOriginatedRPCResultResponse *))response;
+- (void)apiServerRestartSession:(ITMRestartSessionRequest *)request
+                        handler:(void (^)(ITMRestartSessionResponse *))response;
+- (void)apiServerMenuItem:(ITMMenuItemRequest *)request
+                  handler:(void (^)(ITMMenuItemResponse *))response;
+- (void)apiServerSetTabLayout:(ITMSetTabLayoutRequest *)request
+                      handler:(void (^)(ITMSetTabLayoutResponse *))response;
 
 @end
 
@@ -60,6 +71,6 @@ extern NSString *const iTermAPIServerConnectionClosed;
 
 @property (nonatomic, weak) id<iTermAPIServerDelegate> delegate;
 
-- (void)postAPINotification:(ITMNotification *)notification toConnection:(id)connection;
+- (void)postAPINotification:(ITMNotification *)notification toConnectionKey:(NSString *)connectionKey;
 
 @end

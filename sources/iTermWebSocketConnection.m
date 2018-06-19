@@ -107,7 +107,7 @@ typedef NS_ENUM(NSUInteger, iTermWebSocketConnectionState) {
             authenticated = YES;
         } else {
             *reason = [NSString stringWithFormat:@"x-iterm2-cookie of %@ not recognized", cookie];
-            return nil;
+            cookie = nil;
         }
     }
 
@@ -142,6 +142,7 @@ typedef NS_ENUM(NSUInteger, iTermWebSocketConnectionState) {
     if (self) {
         _connection = connection;
         _queue = dispatch_queue_create("com.iterm2.websocket", NULL);
+        _guid = [[NSUUID UUID] UUIDString];
     }
     return self;
 }

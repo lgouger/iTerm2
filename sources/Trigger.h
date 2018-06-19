@@ -32,6 +32,7 @@ extern NSString * const kTriggerPartialLineKey;
 // Subclasses should implement:
 - (NSString *)title;
 - (NSString *)paramPlaceholder;
+- (NSString *)paramDefault;
 // Returns true if this kind of action takes a parameter.
 - (BOOL)takesParameter;
 // Returns true if the parameter this action takes is a popupbutton.
@@ -81,5 +82,7 @@ extern NSString * const kTriggerPartialLineKey;
 
 // Called before a trigger window opens.
 - (void)reloadData;
+
+- (id<NSTextFieldDelegate>)newParameterDelegateWithPassthrough:(id<NSTextFieldDelegate>)passthrough;
 
 @end

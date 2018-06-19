@@ -7,13 +7,17 @@
 //
 
 #import "iTermProfilePreferences.h"
+
+#import "DebugLogging.h"
 #import "ITAddressBookMgr.h"
 #import "iTermCursor.h"
+#import "iTermPreferences.h"
 #import "NSColor+iTerm.h"
 #import "NSDictionary+iTerm.h"
+#import "NSJSONSerialization+iTerm.h"
 #import "PreferencePanel.h"
 
-#define PROFILE_BLOCK(x) [[^id(Profile *profile) { return [self x:profile]; } copy] autorelease]
+#define PROFILE_BLOCK(x) [^id(Profile *profile) { return [self x:profile]; } copy]
 
 NSString *const kProfilePreferenceCommandTypeCustomValue = @"Yes";
 NSString *const kProfilePreferenceCommandTypeLoginShellValue = @"No";
@@ -134,6 +138,8 @@ NSString *const kProfilePreferenceInitialDirectoryAdvancedValue = @"Advanced";
                     [defaultValue isKindOfClass:[NSArray class]]);
         case kPreferenceInfoTypeMatrix:
             return [defaultValue isKindOfClass:[NSString class]];
+        case kPreferenceInfoTypeRadioButton:
+            return [defaultValue isKindOfClass:[NSString class]];
         case kPreferenceInfoTypeColorWell:
             return ([defaultValue isKindOfClass:[NSNull class]] ||
                     [defaultValue isKindOfClass:[NSDictionary class]]);
@@ -143,7 +149,22 @@ NSString *const kProfilePreferenceInitialDirectoryAdvancedValue = @"Advanced";
 }
 
 + (NSArray<NSString *> *)allKeys {
-    return self.defaultValueMap.allKeys;
+    // KEY_ASK_ABOUT_OUTDATED_KEYMAPS excluded because it should be deprecated.
+    NSArray<NSString *> *keysWithoutDefaultValues =
+        @[ KEY_GUID, KEY_TRIGGERS, KEY_SMART_SELECTION_RULES, KEY_SEMANTIC_HISTORY, KEY_BOUND_HOSTS,
+           KEY_ORIGINAL_GUID, KEY_AWDS_WIN_OPTION, KEY_AWDS_WIN_DIRECTORY, KEY_AWDS_TAB_OPTION,
+           KEY_AWDS_TAB_DIRECTORY, KEY_AWDS_PANE_OPTION, KEY_AWDS_PANE_DIRECTORY,
+           KEY_NORMAL_FONT, KEY_NON_ASCII_FONT, KEY_BACKGROUND_IMAGE_LOCATION, KEY_KEYBOARD_MAP,
+           KEY_TOUCHBAR_MAP, KEY_DYNAMIC_PROFILE_PARENT_NAME, KEY_DYNAMIC_PROFILE_FILENAME ];
+    return [self.defaultValueMap.allKeys arrayByAddingObjectsFromArray:keysWithoutDefaultValues];
+}
+
++ (NSString *)jsonEncodedValueForKey:(NSString *)key inProfile:(Profile *)profile {
+    id value = [self objectForKey:key inProfile:profile];
+    if (!value) {
+        return nil;
+    }
+    return [NSJSONSerialization it_jsonStringForObject:value];
 }
 
 #pragma mark - Private
@@ -168,7 +189,7 @@ NSString *const kProfilePreferenceInitialDirectoryAdvancedValue = @"Advanced";
                          KEY_BLINK_ALLOWED, KEY_USE_ITALIC_FONT, KEY_AMBIGUOUS_DOUBLE_WIDTH,
                          KEY_UNICODE_NORMALIZATION, KEY_HORIZONTAL_SPACING, KEY_VERTICAL_SPACING,
                          KEY_USE_NONASCII_FONT, KEY_TRANSPARENCY, KEY_BLUR, KEY_BLUR_RADIUS,
-                         KEY_BACKGROUND_IMAGE_TILED, KEY_BLEND, KEY_SYNC_TITLE,
+                         KEY_BACKGROUND_IMAGE_TILED, KEY_BLEND, KEY_SYNC_TITLE_DEPRECATED,
                          KEY_DISABLE_WINDOW_RESIZING,
                          KEY_TRANSPARENCY_AFFECTS_ONLY_DEFAULT_BACKGROUND_COLOR,
                          KEY_ASCII_ANTI_ALIASED, KEY_NONASCII_ANTI_ALIASED, KEY_SCROLLBACK_LINES,
@@ -270,7 +291,7 @@ NSString *const kProfilePreferenceInitialDirectoryAdvancedValue = @"Advanced";
                   KEY_WINDOW_TYPE: @(WINDOW_TYPE_NORMAL),
                   KEY_SCREEN: @-1,
                   KEY_SPACE: @(iTermProfileOpenInCurrentSpace),
-                  KEY_SYNC_TITLE: @NO,
+                  KEY_SYNC_TITLE_DEPRECATED: @NO,
                   KEY_DISABLE_WINDOW_RESIZING: @NO,
                   KEY_PREVENT_TAB: @NO,
                   KEY_TRANSPARENCY_AFFECTS_ONLY_DEFAULT_BACKGROUND_COLOR: @NO,
@@ -330,11 +351,12 @@ NSString *const kProfilePreferenceInitialDirectoryAdvancedValue = @"Advanced";
                   KEY_HOTKEY_ACTIVATE_WITH_MODIFIER: @NO,
                   KEY_HOTKEY_ALTERNATE_SHORTCUTS: @[],
                   KEY_SESSION_HOTKEY: @{},
+                  KEY_TITLE_COMPONENTS : @(iTermTitleComponentsProfileName),
+                  KEY_TITLE_FUNC: [NSNull null]
                   // Remember to update valueIsLegal:forKey: and the websocket
                   // README.md when adding a new value that should be
                   // API-settable.
                 };
-        [dict retain];
     }
     return dict;
 }
@@ -388,8 +410,8 @@ NSString *const kProfilePreferenceInitialDirectoryAdvancedValue = @"Advanced";
         dict = @{ KEY_IDLE_PERIOD: PROFILE_BLOCK(antiIdlePeriodWithLegacyDefaultInProfile),
                   KEY_UNICODE_NORMALIZATION: PROFILE_BLOCK(unicodeNormalizationForm),
                   KEY_UNICODE_VERSION: PROFILE_BLOCK(unicodeVersion),
+                  KEY_TITLE_COMPONENTS: PROFILE_BLOCK(titleComponents)
                 };
-        [dict retain];
     }
     return dict;
 }
@@ -466,6 +488,51 @@ NSString *const kProfilePreferenceInitialDirectoryAdvancedValue = @"Advanced";
         // Fall back to the default from the dictionary.
         return [self defaultObjectForKey:key];
     }
+}
+
++ (id)titleComponents:(Profile *)profile {
+    NSString *const key = KEY_TITLE_COMPONENTS;
+    if (profile[key]) {
+        // A value is explicitly set. No migration needed.
+        return profile[key];
+    }
+
+    // Respect any existing now-deprecated settings.
+    NSNumber *stickyNumber = [[NSUserDefaults standardUserDefaults] objectForKey:KEY_SYNC_TITLE_DEPRECATED];
+    NSNumber *showJobNumber = [[NSUserDefaults standardUserDefaults] objectForKey:kPreferenceKeyShowJobName_Deprecated];
+    NSNumber *showProfileNameNumber = [[NSUserDefaults standardUserDefaults] objectForKey:kPreferenceKeyShowProfileName_Deprecated];
+
+    if (!stickyNumber && !showJobNumber && !showProfileNameNumber) {
+        // No deprecated settings; use the modern default.
+        return nil;
+    }
+
+    if (!stickyNumber) {
+        stickyNumber = @NO;
+    }
+    if (!showJobNumber) {
+        showJobNumber = @YES;
+    }
+    if (!showProfileNameNumber) {
+        showProfileNameNumber = @NO;
+    }
+
+    const BOOL sticky = stickyNumber.boolValue;
+    const BOOL showJob = showJobNumber.boolValue;
+    const BOOL showProfileName = showProfileNameNumber.boolValue;
+    NSUInteger titleComponents = 0;
+    if (showJob) {
+        titleComponents |= iTermTitleComponentsJob;
+    }
+    if (showProfileName) {
+        if (sticky) {
+            titleComponents |= iTermTitleComponentsProfileAndSessionName;
+        } else {
+            titleComponents |= iTermTitleComponentsSessionName;
+        }
+    }
+
+    return @(titleComponents);
 }
 
 @end

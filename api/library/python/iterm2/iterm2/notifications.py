@@ -8,6 +8,16 @@ import iterm2.api_pb2
 import iterm2.connection
 import iterm2.rpc
 
+RPC_ROLE_GENERIC = iterm2.api_pb2.RPCRegistrationRequest.Role.Value("GENERIC")
+RPC_ROLE_SESSION_TITLE = iterm2.api_pb2.RPCRegistrationRequest.Role.Value("SESSION_TITLE")
+
+MODIFIER_CONTROL = iterm2.api_pb2.Modifiers.Value("CONTROL")
+MODIFIER_OPTION = iterm2.api_pb2.Modifiers.Value("OPTION")
+MODIFIER_COMMAND = iterm2.api_pb2.Modifiers.Value("COMMAND")
+MODIFIER_SHIFT = iterm2.api_pb2.Modifiers.Value("SHIFT")
+MODIFIER_FUNCTION = iterm2.api_pb2.Modifiers.Value("FUNCTION")
+MODIFIER_NUMPAD = iterm2.api_pb2.Modifiers.Value("NUMPAD")
+
 def _get_handlers():
     """Returns the registered notification handlers.
 
@@ -52,7 +62,7 @@ async def async_subscribe_to_new_session_notification(connection, callback):
     """
     return await _async_subscribe(connection, True, iterm2.api_pb2.NOTIFY_ON_NEW_SESSION, callback)
 
-async def async_subscribe_to_keystroke_notification(connection, callback, session=None):
+async def async_subscribe_to_keystroke_notification(connection, callback, session=None, patterns_to_ignore=[]):
     """
     Registers a callback to be run when a key is pressed.
 
@@ -60,15 +70,21 @@ async def async_subscribe_to_keystroke_notification(connection, callback, sessio
     :param callback: A coroutine taking two arguments: an :class:`Connection` and
       iterm2.api_pb2.KeystrokeNotification.
     :param session: The session to monitor, or None.
+    :param patterns_to_ignore: A list of keystroke patterns that iTerm2 should not handle, expecting the script will handle it alone. Objects are class :class:`KeystrokePattern`.
 
     Returns: A token that can be passed to unsubscribe.
     """
+    kmr = None
+    if patterns_to_ignore:
+        kmr = iterm2.api_pb2.KeystrokeMonitorRequest()
+        kmr.patterns_to_ignore.extend(list(map(lambda x: x.to_proto(), patterns_to_ignore)))
     return await _async_subscribe(
         connection,
         True,
         iterm2.api_pb2.NOTIFY_ON_KEYSTROKE,
         callback,
-        session=session)
+        session=session,
+        keystroke_monitor_request=kmr)
 
 async def async_subscribe_to_screen_update_notification(connection, callback, session=None):
     """
@@ -198,23 +214,82 @@ async def async_subscribe_to_focus_change_notification(connection, callback):
         callback,
         session=None)
 
+async def async_subscribe_to_server_originated_rpc_notification(connection, callback, name, arguments=[], timeout_seconds=5, defaults={}, role=RPC_ROLE_GENERIC, display_name=None):
+    """
+    Registers a callback to be run when the server wants to invoke an RPC.
+
+    You probably want to use :meth:`iterm2.App.async_register_rpc_handler`
+    instead of this. It's a much higher level API.
+
+    :param connection: A connected :class:`Connection`.
+    :param callback: A coroutine taking two arguments: an :class:`Connection` and iterm2.api_pb2.ServerOriginatedRPCNotification.
+    :param timeout_seconds: How long iTerm2 should wait for this function to return or `None` to use the default timeout.
+    :param defaults: Gives default values. Names correspond to argument names in `arguments`. Values are in-scope variables at the callsite.
+    :param role: Defines the special purpose of this RPC. If none, use `RPC_ROLE_GENERIC`.
+    :param display_name: Used by the `RPC_ROLE_SESSION_TITLE` role to give the name of the function to show in preferences.
+
+    :returns: A token that can be passed to unsubscribe.
+    """
+    rpc_registration_request = iterm2.api_pb2.RPCRegistrationRequest()
+    rpc_registration_request.name = name
+    if timeout_seconds is not None:
+        rpc_registration_request.timeout = timeout_seconds
+    args = []
+    for arg_name in arguments:
+        arg = iterm2.api_pb2.RPCRegistrationRequest.RPCArgumentSignature()
+        arg.name = arg_name
+        args.append(arg)
+    rpc_registration_request.arguments.extend(args)
+    rpc_registration_request.role = role
+
+    if len(defaults) > 0:
+        d = []
+        for name in defaults:
+            assert name in arguments, "Name for default '{}' not in arguments {}".format(name, arguments)
+            path = defaults[name]
+            argd = iterm2.api_pb2.RPCRegistrationRequest.RPCArgument()
+            argd.name = name
+            argd.path = path
+            d.append(argd)
+
+        rpc_registration_request.defaults.extend(d)
+
+    if display_name is not None:
+        rpc_registration_request.display_name = display_name
+
+    return await _async_subscribe(
+        connection,
+        True,
+        iterm2.api_pb2.NOTIFY_ON_SERVER_ORIGINATED_RPC,
+        callback,
+        rpc_registration_request=rpc_registration_request)
+
 ## Private --------------------------------------------------------------------
 
-async def _async_subscribe(connection, subscribe, notification_type, callback, session=None):
+def _string_rpc_registration_request(rpc):
+    """Converts ServerOriginatedRPC or RPCSignature to a string."""
+    if rpc is None:
+        return None
+    args = sorted(map(lambda x: x.name, rpc.arguments))
+    return rpc.name + "(" + ",".join(args) + ")"
+
+async def _async_subscribe(connection, subscribe, notification_type, callback, session=None, rpc_registration_request=None, keystroke_monitor_request=None):
     _register_helper_if_needed()
     transformed_session = session if session is not None else "all"
     response = await iterm2.rpc.async_notification_request(
         connection,
         subscribe,
         notification_type,
-        transformed_session)
+        transformed_session,
+        rpc_registration_request,
+        keystroke_monitor_request)
     status = response.notification_response.status
     status_ok = (status == iterm2.api_pb2.NotificationResponse.Status.Value("OK"))
 
     if subscribe:
         already = (status == iterm2.api_pb2.NotificationResponse.Status.Value("ALREADY_SUBSCRIBED"))
         if status_ok or already:
-            _register_notification_handler(session, notification_type, callback)
+            _register_notification_handler(session, _string_rpc_registration_request(rpc_registration_request), notification_type, callback)
             return ((session, notification_type), callback)
     else:
         # Unsubscribe
@@ -233,6 +308,13 @@ async def _async_dispatch_helper(connection, message):
     for handler in handlers:
         assert handler is not None
         await handler(connection, sub_notification)
+
+    if not handlers and message.notification.HasField('server_originated_rpc_notification'):
+        # If we get an RPC we haven't registered for handle the error because
+        # otherwise it has to time out. If you get here there is probably a bug.
+        exception = { "reason": "No such function: {}".format(_string_rpc_registration_request(message.notification.server_originated_rpc_notification.rpc)) }
+        await iterm2.rpc.async_send_rpc_result(connection, rpc_notif.request_id, True, exception)
+
     return bool(handlers)
 
 def _get_handler_key_from_notification(notification):
@@ -268,7 +350,8 @@ def _get_handler_key_from_notification(notification):
     elif notification.HasField('focus_changed_notification'):
         key = (None, iterm2.api_pb2.NOTIFY_ON_FOCUS_CHANGE)
         notification = notification.focus_changed_notification
-
+    elif notification.HasField('server_originated_rpc_notification'):
+        key = (None, iterm2.api_pb2.NOTIFY_ON_SERVER_ORIGINATED_RPC, _string_rpc_registration_request(notification.server_originated_rpc_notification.rpc))
     return key, notification
 
 def _get_notification_handlers(message):
@@ -284,10 +367,74 @@ def _get_notification_handlers(message):
         return (_get_handlers()[fallback], sub_notification)
     return ([], None)
 
-def _register_notification_handler(session, notification_type, coro):
+def _register_notification_handler(session, rpc_registration_request, notification_type, coro):
     assert coro is not None
-    key = (session, notification_type)
+
+    if rpc_registration_request is None:
+        key = (session, notification_type)
+    else:
+        key = (session, notification_type, rpc_registration_request)
+
     if key in _get_handlers():
         _get_handlers()[key].append(coro)
     else:
         _get_handlers()[key] = [coro]
+
+class KeystrokePattern:
+    """Describes attributes that select keystrokes.
+
+    Keystrokes contain modifiers (e.g., command or option), characters (what
+    characters are generated by the keypress), and characters ignoring
+    modifiers (what characters would be generated if no modifiers were pressed,
+    excpeting the shift key).
+    """
+    def __init__(self):
+        self.__required_modifiers = []
+        self.__forbidden_modifiers = []
+        self.__keycodes = []
+        self.__characters = []
+        self.__characters_ignoring_modifiers = []
+
+    @property
+    def required_modifiers(self):
+        """List of modifiers that are required to match the pattern.
+
+        Allowed values are: `MODIFIER_CONTROL`, `MODIFIER_OPTION`, `MODIFIER_COMMAND`, `MODIFIER_SHIFT`, `MODIFIER_FUNCTION`, `MODIFIER_NUMPAD`
+        """
+        return self.__required_modifiers
+
+    @property
+    def forbidden_modifiers(self):
+        """List of modifiers whose presence prevents the pattern from being matched.
+
+        Allowed values are: `MODIFIER_CONTROL`, `MODIFIER_OPTION`, `MODIFIER_COMMAND`, `MODIFIER_SHIFT`, `MODIFIER_FUNCTION`, `MODIFIER_NUMPAD`
+        """
+        return self.__forbidden_modifiers
+
+    @property
+    def keycodes(self):
+        """List of numeric keycodes that match the pattern. Values are numbers."""
+        return self.__keycodes
+
+    @property
+    def characters(self):
+        """List of characters that match the pattern. Values are strings (typically one character-long strings)."""
+        return self.__characters
+
+    @property
+    def characters_ignoring_modifiers(self):
+        """List of characters "ignoring modifiers" that match the pattern.
+
+        "Ignoring modifiers" mostly means ignoring modifiers other than Shift. It has a lot of surprising edge cases which Apple did not document, so experiment to find how it works.
+
+        Values are strings (typically one character-long strings)."""
+        return self.__characters_ignoring_modifiers
+
+    def to_proto(self):
+        proto = iterm2.api_pb2.KeystrokePattern()
+        proto.required_modifiers.extend(self.__required_modifiers)
+        proto.forbidden_modifiers.extend(self.__forbidden_modifiers)
+        proto.keycodes.extend(self.__keycodes)
+        proto.characters.extend(self.__characters)
+        proto.characters_ignoring_modifiers.extend(self.__characters_ignoring_modifiers)
+        return proto

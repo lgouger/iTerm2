@@ -11,7 +11,18 @@
 
 @property (nonatomic, strong) T1 firstObject;
 @property (nonatomic, strong) T2 secondObject;
+@property (nonatomic, readonly) id plistValue;
 
 + (instancetype)tupleWithObject:(T1)firstObject andObject:(T2)secondObject;
++ (instancetype)fromPlistValue:(id)plistValue;
+
+@end
+
+@interface iTermTriple<T1, T2, T3> : iTermTuple<NSCoding, NSCopying>
+
+@property (nonatomic, strong) T3 thirdObject;
+
++ (instancetype)tupleWithObject:(T1)firstObject andObject:(T2)secondObject NS_UNAVAILABLE;
++ (instancetype)tripleWithObject:(T1)firstObject andObject:(T2)secondObject object:(T3)thirdObject;
 
 @end

@@ -7,8 +7,12 @@
 //
 
 #import <Cocoa/Cocoa.h>
+
 #import "ITAddressBookMgr.h"
+#import "iTermTuple.h"
 #import "VT100GridTypes.h"
+
+@class iTermTuple;
 
 @interface NSDictionary<__covariant KeyType, __covariant ObjectType> (iTerm)
 
@@ -47,6 +51,14 @@
 - (NSData *)propertyListData;
 - (NSString *)sizeInfo;
 
+// Returns a dictionary with changed values. If the block returns nil the
+// entry is omitted.
+- (NSDictionary *)mapValuesWithBlock:(id (^)(KeyType key, ObjectType object))block;
+- (NSDictionary *)mapKeysWithBlock:(KeyType (^)(KeyType key, ObjectType object))block;
+// tuple is iTermTuple<KeyType, ObjectType>. Compiler won't let me write this.
+- (NSDictionary *)mapWithBlock:(iTermTuple * (^)(KeyType key, ObjectType object))block;
+- (NSDictionary<id, NSDictionary<KeyType, ObjectType> *> *)classifyWithBlock:(id (^NS_NOESCAPE)(KeyType key, ObjectType object))block;
+
 @end
 
 // A handy way of describing the essential parts of a hotkey, as far as being a uniquely registered
@@ -71,3 +83,10 @@ typedef NSDictionary iTermHotKeyDescriptor;
 - (BOOL)isExactlyEqualToDictionary:(NSDictionary *)other;
 
 @end
+
+@interface NSMutableDictionary<KeyType, ObjectType> (iTerm)
+- (NSInteger)removeObjectsPassingTest:(BOOL (^)(KeyType key, ObjectType obj))block;
+- (void)it_mergeFrom:(NSDictionary<KeyType, ObjectType> *)other;
+
+@end
+

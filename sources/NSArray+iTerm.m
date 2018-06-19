@@ -341,6 +341,36 @@
     }
 }
 
+- (NSArray<iTermTuple *> *)tuplesWithFirstObjectEqualTo:(id)firstObject {
+    return [self filteredArrayUsingBlock:^BOOL(id anObject) {
+        return [anObject isEqual:firstObject];
+    }];
+}
+
+- (NSDictionary<id, NSArray *> *)classifyWithBlock:(id (^)(id))block {
+    NSMutableDictionary *dict = [NSMutableDictionary dictionary];
+    [self enumerateObjectsUsingBlock:^(id  _Nonnull obj, NSUInteger idx, BOOL * _Nonnull stop) {
+        id theClass = block(obj);
+        if (theClass) {
+            NSMutableArray *array = dict[theClass];
+            if (!array) {
+                array = [NSMutableArray array];
+                dict[theClass] = array;
+            }
+            [array addObject:obj];
+        }
+    }];
+    return dict;
+}
+
+- (id)uncheckedObjectAtIndex:(NSInteger)index {
+    if (index < 0 || index >= self.count) {
+        return nil;
+    } else {
+        return [self objectAtIndex:index];
+    }
+}
+
 @end
 
 @implementation NSMutableArray (iTerm)

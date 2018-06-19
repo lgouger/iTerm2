@@ -8,6 +8,7 @@ extern NSString *kCoprocessStatusChangeNotification;
 
 @class Coprocess;
 @class PTYTab;
+@class PTYTask;
 
 @protocol PTYTaskDelegate <NSObject>
 // Runs in a background thread. Should do as much work as possible in this
@@ -22,6 +23,9 @@ extern NSString *kCoprocessStatusChangeNotification;
 
 // Called on main thread from within launchWithPath:arguments:environment:width:height:isUTF8:.
 - (void)taskDiedImmediately;
+
+// Main thread
+- (void)taskDidChangeTTY:(PTYTask *)task;
 @end
 
 @interface PTYTask : NSObject
@@ -46,7 +50,6 @@ extern NSString *kCoprocessStatusChangeNotification;
 @property(atomic, copy) NSString *tty;
 @property(atomic, readonly) NSString *path;
 @property(atomic, readonly) NSString *getWorkingDirectory;
-@property(atomic, readonly) NSString *description;
 @property(atomic, readonly) BOOL logging;
 @property(atomic, readonly) BOOL hasOutput;
 @property(atomic, readonly) BOOL wantsRead;
@@ -59,17 +62,23 @@ extern NSString *kCoprocessStatusChangeNotification;
 + (NSString *)userShell;
 
 - (instancetype)init;
+
 - (BOOL)hasBrokenPipe;
+
 // Command the profile was created with. nil for login shell or whatever's in the command field of the profile otherwise.
 - (NSString *)originalCommand;
+
 - (void)launchWithPath:(NSString*)progpath
              arguments:(NSArray*)args
            environment:(NSDictionary*)env
                  width:(int)width
                 height:(int)height
-                isUTF8:(BOOL)isUTF8;
+                isUTF8:(BOOL)isUTF8
+           autologPath:(NSString *)autologPath
+           synchronous:(BOOL)synchronous
+            completion:(void (^)(void))completion;
 
-- (NSString*)currentJob:(BOOL)forceRefresh;
+- (NSString *)currentJob:(BOOL)forceRefresh;
 
 - (void)writeTask:(NSData*)data;
 
@@ -80,7 +89,6 @@ extern NSString *kCoprocessStatusChangeNotification;
 - (void)setSize:(VT100GridSize)size;
 
 - (void)stop;
-
 
 - (BOOL)startLoggingToFileWithPath:(NSString*)path shouldAppend:(BOOL)shouldAppend;
 - (void)stopLogging;

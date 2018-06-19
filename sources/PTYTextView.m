@@ -83,19 +83,6 @@
 
 static const int kMaxSelectedTextLengthForCustomActions = 400;
 
-// This defines the fraction of a character's width on its right side that is used to
-// select the NEXT character.
-//        |   A rightward drag beginning left of the bar selects G.
-//        <-> kCharWidthFractionOffset * charWidth
-//  <-------> Character width
-//   .-----.  .      :
-//  ;         :      :
-//  :         :      :
-//  :    ---- :------:
-//  '       : :      :
-//   `-----'  :      :
-static const double kCharWidthFractionOffset = 0.35;
-
 static const NSUInteger kDragPaneModifiers = (NSAlternateKeyMask | NSCommandKeyMask | NSShiftKeyMask);
 static const NSUInteger kRectangularSelectionModifiers = (NSCommandKeyMask | NSAlternateKeyMask);
 static const NSUInteger kRectangularSelectionModifierMask = (kRectangularSelectionModifiers | NSControlKeyMask);
@@ -1239,83 +1226,6 @@ static const int kDragThreshold = 3;
     return rect;
 }
 
-- (NSString*)_getTextInWindowAroundX:(int)x
-                                   y:(int)y
-                            numLines:(int)numLines
-                        targetOffset:(int*)targetOffset
-                              coords:(NSMutableArray*)coords
-                    ignoringNewlines:(BOOL)ignoringNewlines
-{
-    const int width = [_dataSource width];
-    NSMutableString* joinedLines = [NSMutableString stringWithCapacity:numLines * width];
-
-    *targetOffset = -1;
-
-    // If rejectAtHardEol is true, then stop when you hit a hard EOL.
-    // If false, stop when you hit a hard EOL that has an unused cell before it,
-    // otherwise keep going.
-    BOOL rejectAtHardEol = !ignoringNewlines;
-    int xMin, xMax;
-    xMin = 0;
-    xMax = width;
-
-    // Any text preceding a hard line break on a line before |y| should not be considered.
-    int j = 0;
-    int firstLine = y - numLines;
-    for (int i = y - numLines; i < y; i++) {
-        if (i < 0 || i >= [_dataSource numberOfLines]) {
-            continue;
-        }
-        screen_char_t* theLine = [_dataSource getLineAtIndex:i];
-        if (i < y && theLine[width].code == EOL_HARD) {
-            if (rejectAtHardEol || theLine[width - 1].code == 0) {
-                firstLine = i + 1;
-            }
-        }
-    }
-
-    for (int i = firstLine; i <= y + numLines; i++) {
-        if (i < 0 || i >= [_dataSource numberOfLines]) {
-            continue;
-        }
-        screen_char_t* theLine = [_dataSource getLineAtIndex:i];
-        if (i < y && theLine[width].code == EOL_HARD) {
-            if (rejectAtHardEol || theLine[width - 1].code == 0) {
-                continue;
-            }
-        }
-        unichar* backingStore;
-        int* deltas;
-        NSString* string = ScreenCharArrayToString(theLine,
-                                                   xMin,
-                                                   MIN(EffectiveLineLength(theLine, width), xMax),
-                                                   &backingStore,
-                                                   &deltas);
-        int o = 0;
-        for (int k = 0; k < [string length]; k++) {
-            o = k + deltas[k];
-            if (*targetOffset == -1 && i == y && o >= x) {
-                *targetOffset = k + [joinedLines length];
-            }
-            [coords addObject:[NSValue valueWithGridCoord:VT100GridCoordMake(o, i)]];
-        }
-        [joinedLines appendString:string];
-        free(deltas);
-        free(backingStore);
-
-        j++;
-        o++;
-        if (i >= y && theLine[width].code == EOL_HARD) {
-            if (rejectAtHardEol || theLine[width - 1].code == 0) {
-                [coords addObject:[NSValue valueWithGridCoord:VT100GridCoordMake(o, i)]];
-                break;
-            }
-        }
-    }
-    // TODO: What if it's multiple lines ending in a soft eol and the selection goes to the end?
-    return joinedLines;
-}
-
 - (SmartMatch *)smartSelectAtX:(int)x
                              y:(int)y
                             to:(VT100GridWindowedRange *)rangePtr
@@ -2010,7 +1920,7 @@ static const int kDragThreshold = 3;
     int x, y;
     int width = [_dataSource width];
 
-    x = (locationInTextView.x - [iTermAdvancedSettingsModel terminalMargin] + _charWidth * kCharWidthFractionOffset) / _charWidth;
+    x = (locationInTextView.x - [iTermAdvancedSettingsModel terminalMargin] + _charWidth * [iTermAdvancedSettingsModel fractionOfCharacterSelectingNextNeighbor]) / _charWidth;
     if (x < 0) {
         x = 0;
     }
@@ -2639,8 +2549,11 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
                                                     continuationChars:nil
                                                   convertNullsToSpace:YES
                                                                coords:nil];
-                if (![self openSemanticHistoryPath:action.string
+                if (![self openSemanticHistoryPath:action.fullPath
+                                     orRawFilename:action.rawFilename
                                   workingDirectory:action.workingDirectory
+                                        lineNumber:action.lineNumber
+                                      columnNumber:action.columnNumber
                                             prefix:extendedPrefix
                                             suffix:extendedSuffix]) {
                     [self findUrlInString:action.string andOpenInBackground:openInBackground];
@@ -2688,7 +2601,10 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
 }
 
 - (BOOL)openSemanticHistoryPath:(NSString *)path
+                  orRawFilename:(NSString *)rawFileName
                workingDirectory:(NSString *)workingDirectory
+                     lineNumber:(NSString *)lineNumber
+                   columnNumber:(NSString *)columnNumber
                          prefix:(NSString *)prefix
                          suffix:(NSString *)suffix {
     NSDictionary *subs = [self semanticHistorySubstitutionsWithPrefix:prefix
@@ -2696,8 +2612,10 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
                                                                  path:path
                                                      workingDirectory:workingDirectory];
     return [self.semanticHistoryController openPath:path
-                                   workingDirectory:workingDirectory
-                                      substitutions:subs];
+                                      orRawFilename:rawFileName
+                                      substitutions:subs
+                                         lineNumber:lineNumber
+                                       columnNumber:columnNumber];
 }
 
 - (NSDictionary *)semanticHistorySubstitutionsWithPrefix:(NSString *)prefix
@@ -6927,6 +6845,9 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
         return NO;
     }
     if ((event.type == NSLeftMouseDown || event.type == NSLeftMouseUp) && _mouseDownWasFirstMouse) {
+        return NO;
+    }
+    if ((event.type == NSLeftMouseDown || event.type == NSLeftMouseUp) && self.window.firstResponder != self) {
         return NO;
     }
     if (event.type == NSScrollWheel) {

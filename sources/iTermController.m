@@ -34,6 +34,7 @@
 #import "iTermApplication.h"
 #import "iTermBuriedSessions.h"
 #import "iTermHotKeyController.h"
+#import "iTermSessionFactory.h"
 #import "iTermWebSocketCookieJar.h"
 #import "NSArray+iTerm.h"
 #import "NSFileManager+iTerm.h"
@@ -140,59 +141,6 @@ static iTermController *gSharedInstance;
     }
 
     return (self);
-}
-
-- (void)migrateApplicationSupportDirectoryIfNeeded {
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    NSString *modern = [fileManager applicationSupportDirectory];
-    NSString *legacy = [fileManager legacyApplicationSupportDirectory];
-
-    if ([fileManager itemIsSymlink:legacy]) {
-        // Looks migrated, or crazy and impossible to reason about.
-        return;
-    }
-
-    if ([fileManager itemIsDirectory:modern] && [fileManager itemIsDirectory:legacy]) {
-        // This is the normal code path for migrating users.
-        const BOOL legacyEmpty = [fileManager directoryEmpty:legacy];
-
-        if (legacyEmpty) {
-            [fileManager removeItemAtPath:legacy error:nil];
-            [fileManager createSymbolicLinkAtPath:legacy withDestinationPath:modern error:nil];
-            return;
-        }
-
-        const BOOL modernEmpty = [fileManager directoryEmpty:modern];
-        if (modernEmpty) {
-            [fileManager removeItemAtPath:modern error:nil];
-            [fileManager moveItemAtPath:legacy toPath:modern error:nil];
-            [fileManager createSymbolicLinkAtPath:legacy withDestinationPath:modern error:nil];
-            return;
-        }
-
-        NSAlert *alert = [[NSAlert alloc] init];
-        alert.messageText = @"Manual Update Needed";
-        alert.informativeText = @"iTerm2's Application Support directory has changed.\n\n"
-            @"Previously, both ~/Library/Application Support/iTerm and ~/Library/Application Support/iTerm2 were supported.\n\n"
-            @"Now, only the iTerm2 version is supported. But you have files in both so please move everything from iTerm to iTerm2.";
-        [alert addButtonWithTitle:@"Open in Finder"];
-        [alert addButtonWithTitle:@"I Fixed It"];
-        [alert addButtonWithTitle:@"Not Now"];
-        switch ([alert runModal]) {
-            case NSAlertFirstButtonReturn:
-                [[NSWorkspace sharedWorkspace] activateFileViewerSelectingURLs:@[ [NSURL fileURLWithPath:legacy],
-                                                                              [NSURL fileURLWithPath:modern] ]];
-                [self migrateApplicationSupportDirectoryIfNeeded];
-                break;
-
-            case NSAlertThirdButtonReturn:
-                return;
-
-            default:
-                [self migrateApplicationSupportDirectoryIfNeeded];
-                break;
-        }
-    }
 }
 
 - (BOOL)willRestoreWindowsAtNextLaunch {
@@ -1214,12 +1162,27 @@ static iTermController *gSharedInstance;
         session = block(aDict, term);
     } else if (url) {
         DLog(@"Creating a new session");
-        session = [term createSessionWithProfile:aDict
-                                         withURL:url
-                                   forObjectType:objectType
-                                serverConnection:NULL];
+        session = [term.sessionFactory newSessionWithProfile:aDict];
+        [term addSessionInNewTab:session];
+        const BOOL ok = [term.sessionFactory attachOrLaunchCommandInSession:session
+                                                                  canPrompt:YES
+                                                                 objectType:objectType
+                                                           serverConnection:nil
+                                                                  urlString:url
+                                                               allowURLSubs:YES
+                                                                environment:@{}
+                                                                     oldCWD:nil
+                                                             forceUseOldCWD:NO
+                                                                    command:nil
+                                                                     isUTF8:nil
+                                                              substitutions:nil
+                                                           windowController:term
+                                                                 completion:nil];
+        if (!ok) {
+            session = nil;
+        }
     } else {
-        session = [term createTabWithProfile:aDict withCommand:command];
+        session = [term createTabWithProfile:aDict withCommand:command environment:nil];
     }
     if (!session && term.numberOfTabs == 0) {
         [[term window] close];
@@ -1485,6 +1448,17 @@ static iTermController *gSharedInstance;
     [self updateWindowTitles];
 }
 
+- (PTYSession *)sessionWithGUID:(NSString *)identifier {
+    for (PseudoTerminal *term in [[iTermController sharedInstance] terminals]) {
+        for (PTYSession *session in term.allSessions) {
+            if ([session.guid isEqualToString:identifier]) {
+                return session;
+            }
+        }
+    }
+    return nil;
+}
+
 - (void)workspaceWillPowerOff:(NSNotification *)notification {
     _willPowerOff = YES;
     if ([iTermAdvancedSettingsModel killSessionsOnLogout] && [iTermAdvancedSettingsModel runJobsInServers]) {
@@ -1499,10 +1473,12 @@ static iTermController *gSharedInstance;
 }
 
 - (void)openSingleUseWindowWithCommand:(NSString *)command {
-    [self openSingleUseWindowWithCommand:command inject:nil];
+    [self openSingleUseWindowWithCommand:command inject:nil environment:nil];
 }
 
-- (void)openSingleUseWindowWithCommand:(NSString *)command inject:(NSData *)injection {
+- (void)openSingleUseWindowWithCommand:(NSString *)command
+                                inject:(NSData *)injection
+                           environment:(NSDictionary *)environment {
     if ([command hasSuffix:@"&"] && command.length > 1) {
         command = [command substringToIndex:command.length - 1];
         system(command.UTF8String);
@@ -1527,7 +1503,7 @@ static iTermController *gSharedInstance;
                        profile = [profile dictionaryBySettingObject:@"" forKey:KEY_INITIAL_TEXT];
                        profile = [profile dictionaryBySettingObject:@NO forKey:KEY_CLOSE_SESSIONS_ON_END];
                        term.window.collectionBehavior = NSWindowCollectionBehaviorFullScreenNone;
-                       PTYSession *session = [term createTabWithProfile:profile withCommand:command];
+                       PTYSession *session = [term createTabWithProfile:profile withCommand:command environment:environment];
                        session.isSingleUseSession = YES;
                        if (injection) {
                            [session injectData:injection];

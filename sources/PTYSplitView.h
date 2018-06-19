@@ -17,6 +17,7 @@
                     pixels:(NSSize)changePx;
 
 - (void)splitView:(PTYSplitView *)splitView draggingWillBeginOfSplit:(int)splitterIndex;
+- (void)splitViewDidChangeSubviews:(PTYSplitView *)splitView;
 
 @end
 
@@ -24,6 +25,6 @@
  * dragging a splitter finishes. */
 @interface PTYSplitView : NSSplitView
 
-@property(assign) id<PTYSplitViewDelegate> delegate;
+@property (weak) id<PTYSplitViewDelegate> delegate;
 
 @end

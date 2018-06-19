@@ -1,5 +1,8 @@
 #import "PTYSession+Scripting.h"
+
+#import "iTermVariables.h"
 #import "NSColor+iTerm.h"
+#import "NSObject+iTerm.h"
 #import "ProfilesColorsPreferencesViewController.h"
 #import "PTYTab.h"
 #import "WindowControllerInterface.h"
@@ -34,7 +37,8 @@
     [self startProgram:args[@"command"]
            environment:@{}
                 isUTF8:[args[@"isUTF8"] boolValue]
-         substitutions:nil];
+         substitutions:nil
+            completion:nil];
 
     return;
 }
@@ -108,7 +112,14 @@
         [command setScriptErrorString:@"No name given"];
     }
 
-    return self.variables[name];
+    id value = [self.variablesScope valueForVariableName:name];
+    if ([NSString castFrom:value]) {
+        return value;
+    } else if ([value respondsToSelector:@selector(stringValue)]) {
+        return [value stringValue];
+    } else {
+        return nil;
+    }
 }
 
 - (id)handleSetVariableNamedCommand:(NSScriptCommand *)command {
@@ -130,8 +141,7 @@
         [command setScriptErrorString:@"Only user variables may be set. Name must start with “user.”."];
         return nil;
     }
-    self.variables[name] = value;
-    [self.textview setBadgeLabel:[self badgeLabel]];
+    [self.variablesScope setValue:value forVariableNamed:name];
     return value;
 }
 

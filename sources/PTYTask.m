@@ -36,13 +36,27 @@ const int kNumFileDescriptorsToDup = NUM_FILE_DESCRIPTORS_TO_PASS_TO_SERVER;
 
 NSString *kCoprocessStatusChangeNotification = @"kCoprocessStatusChangeNotification";
 
+typedef struct {
+    pid_t pid;
+    int connectionFd;
+    int deadMansPipe[2];
+    int numFileDescriptorsToPreserve;
+} iTermForkState;
+
+typedef struct {
+    struct termios term;
+    struct winsize win;
+    char tty[PATH_MAX];
+} iTermTTYState;
+
 static void
-setup_tty_param(struct termios* term,
-                struct winsize* win,
+setup_tty_param(iTermTTYState *ttyState,
                 int width,
                 int height,
-                BOOL isUTF8)
-{
+                BOOL isUTF8) {
+    struct termios *term = &ttyState->term;
+    struct winsize *win = &ttyState->win;
+
     memset(term, 0, sizeof(struct termios));
     memset(win, 0, sizeof(struct winsize));
 
@@ -80,196 +94,84 @@ setup_tty_param(struct termios* term,
     win->ws_ypixel = 0;
 }
 
-@interface PTYTask ()
-@property(atomic, assign) BOOL hasMuteCoprocess;
-@property(atomic, assign) BOOL coprocessOnlyTaskIsDead;
-@property(atomic, retain) NSFileHandle *logHandle;
-@property(nonatomic, copy) NSString *logPath;
-@end
-
-@implementation PTYTask {
-    pid_t _serverPid;  // -1 when servers are not in use.
-    pid_t _serverChildPid;  // -1 when servers are not in use.
-    pid_t _childPid;  // -1 when servers are in use; otherwise is pid of child.
-    int fd;
-    int status;
-    NSString* path;
-    BOOL hasOutput;
-
-    NSLock* writeLock;  // protects writeBuffer
-    NSMutableData* writeBuffer;
-
-
-    Coprocess *coprocess_;  // synchronized (self)
-    BOOL brokenPipe_;
-    NSString *command_;  // Command that was run if launchWithPath:arguments:etc was called
-
-    // Number of spins of the select loop left before we tell the delegate we were deregistered.
-    int _spinsNeeded;
-    BOOL _paused;
-
-    int _socketFd;  // File descriptor for unix domain socket connected to server. Only safe to close after server is dead.
-
-    VT100GridSize _desiredSize;
-    NSTimeInterval _timeOfLastSizeChange;
-    BOOL _rateLimitedSetSizeToDesiredSizePending;
-}
-
-- (instancetype)init {
-    self = [super init];
-    if (self) {
-        _serverPid = (pid_t)-1;
-        _socketFd = -1;
-        _childPid = (pid_t)-1;
-        fd = -1;
-        _serverChildPid = -1;
-        writeBuffer = [[NSMutableData alloc] init];
-        writeLock = [[NSLock alloc] init];
+static void iTermSignalSafeWrite(int fd, const char *message) {
+    int len = 0;
+    for (int i = 0; message[i]; i++) {
+        len++;
     }
-    return self;
+    int rc;
+    do {
+        rc = write(fd, message, len);
+    } while (rc < 0 && (errno == EAGAIN || errno == EINTR));
 }
 
-- (void)dealloc {
-    [[TaskNotifier sharedInstance] deregisterTask:self];
-
-    // TODO: The use of killpg seems pretty sketchy. It takes a pgid_t, not a
-    // pid_t. Are they guaranteed to always be the same for process group
-    // leaders?
-    if (_childPid > 0) {
-        // Terminate an owned child.
-        killpg(_childPid, SIGHUP);
-    } else if (_serverChildPid) {
-        // Kill a server-owned child.
-        // TODO: Don't want to do this when Sparkle is upgrading.
-        killpg(_serverChildPid, SIGHUP);
+static void iTermSignalSafeWriteInt(int fd, int n) {
+    if (n == INT_MIN) {
+        iTermSignalSafeWrite(fd, "int_min");
+        return;
     }
-
-    [self closeFileDescriptor];
-    [_logPath release];
-    [_logHandle closeFile];
-    [_logHandle release];
-    [writeLock release];
-    [writeBuffer release];
-    [_tty release];
-    [path release];
-    [command_ release];
-
-    @synchronized (self) {
-        [[self coprocess] mainProcessDidTerminate];
-        [coprocess_ release];
+    if (n < 0) {
+        iTermSignalSafeWrite(fd, "-");
+        n = -n;
     }
-
-    [super dealloc];
-}
-
-- (BOOL)hasBrokenPipe
-{
-    return brokenPipe_;
-}
-
-- (BOOL)paused {
-    @synchronized(self) {
-        return _paused;
+    if (n < 10) {
+        char str[2] = { n + '0', 0 };
+        iTermSignalSafeWrite(fd, str);
+        return;
     }
+    iTermSignalSafeWriteInt(fd, n / 10);
+    iTermSignalSafeWriteInt(fd, n % 10);
 }
 
-- (void)setPaused:(BOOL)paused {
-    @synchronized(self) {
-        _paused = paused;
-    }
-    // Start/stop selecting on our FD
-    [[TaskNotifier sharedInstance] unblock];
-}
+static void iTermDidForkChild(const char *argpath,
+                              const char **argv,
+                              BOOL closeFileDescriptors,
+                              const iTermForkState *forkState,
+                              const char *initialPwd,
+                              char **newEnviron) {
+    // BE CAREFUL WHAT YOU DO HERE!
+    // See man sigaction for the list of legal function calls to make between fork and exec.
+    signal(SIGCHLD, SIG_DFL);
+    signal(SIGPIPE, SIG_DFL);
+    sigset_t signals;
+    sigemptyset(&signals);
+    sigaddset(&signals, SIGPIPE);
+    sigprocmask(SIG_UNBLOCK, &signals, NULL);
 
-static void HandleSigChld(int n) {
-    // This is safe to do because write(2) is listed in the sigaction(2) man page
-    // as allowed in a signal handler. Calling a method is *NOT* safe since something might
-    // be fiddling with the runtime. I saw a lot of crashes where CoreData got interrupted by
-    // a sigchild while doing class_addMethod and that caused a crash because of a method call.
-    UnblockTaskNotifier();
-}
-
-- (NSString *)originalCommand {
-    return command_;
-}
-
-// Returns a NSMutableDictionary containing the key-value pairs defined in the
-// global "environ" variable.
-- (NSMutableDictionary *)mutableEnvironmentDictionary {
-    NSMutableDictionary *result = [NSMutableDictionary dictionary];
-    extern char **environ;
-    if (environ != NULL) {
-        for (int i = 0; environ[i]; i++) {
-            NSString *kvp = [NSString stringWithUTF8String:environ[i]];
-            NSRange equalsRange = [kvp rangeOfString:@"="];
-            if (equalsRange.location != NSNotFound) {
-                NSString *key = [kvp substringToIndex:equalsRange.location];
-                NSString *value = [kvp substringFromIndex:equalsRange.location + 1];
-                result[key] = value;
-            } else {
-                result[kvp] = @"";
-            }
+    // Apple opens files without the close-on-exec flag (e.g., Extras2.rsrc).
+    // See issue 2662.
+    if (closeFileDescriptors) {
+        // If running jobs in servers close file descriptors after exec when it's safe to
+        // enumerate files in /dev/fd. This is the potentially very slow path (issue 5391).
+        for (int j = forkState->numFileDescriptorsToPreserve; j < getdtablesize(); j++) {
+            close(j);
         }
     }
-    return result;
-}
 
-// Returns an array of C strings terminated with a null pointer of the form
-// KEY=VALUE that is based on this process's "environ" variable. Values passed
-// in "env" are added or override existing environment vars. Both the returned
-// array and all string pointers within it are malloced and should be free()d
-// by the caller.
-- (char **)environWithOverrides:(NSDictionary *)env {
-    NSMutableDictionary *environmentDict = [self mutableEnvironmentDictionary];
-    for (NSString *k in env) {
-        environmentDict[k] = env[k];
-    }
-    char **environment = malloc(sizeof(char*) * (environmentDict.count + 1));
-    int i = 0;
-    for (NSString *k in environmentDict) {
-        NSString *temp = [NSString stringWithFormat:@"%@=%@", k, environmentDict[k]];
-        environment[i++] = strdup([temp UTF8String]);
-    }
-    environment[i] = NULL;
-    return environment;
-}
+    chdir(initialPwd);
 
-- (BOOL)tryToAttachToServerWithProcessId:(pid_t)thePid {
-    if (![iTermAdvancedSettingsModel runJobsInServers]) {
-        return NO;
-    }
-    if (_serverChildPid != -1) {
-        return NO;
-    }
+    // Sub in our environ for the existing one. Since Mac OS doesn't have execvpe, this hack
+    // does the job.
+    extern char **environ;
+    environ = newEnviron;
+    execvp(argpath, (char* const*)argv);
 
-    // TODO: This server code is super scary so I'm NSLog'ing it to make it easier to recover
-    // logs. These should eventually become DLog's and the log statements in the server should
-    // become LOG_DEBUG level.
-    NSLog(@"tryToAttachToServerWithProcessId: Attempt to connect to server for pid %d", (int)thePid);
-    iTermFileDescriptorServerConnection serverConnection = iTermFileDescriptorClientRun(thePid);
-    if (!serverConnection.ok) {
-        NSLog(@"Failed with error %s", serverConnection.error);
-        return NO;
+    // NOTE: This won't be visible when jobs run in servers :(
+    // exec error
+    int e = errno;
+    iTermSignalSafeWrite(1, "## exec failed ##\n");
+    iTermSignalSafeWrite(1, "Program: ");
+    iTermSignalSafeWrite(1, argpath);
+    iTermSignalSafeWrite(1, "\nErrno: ");
+    if (e == ENOENT) {
+        iTermSignalSafeWrite(1, "\nNo such file or directory");
     } else {
-        NSLog(@"Succeeded.");
-        [self attachToServer:serverConnection];
-
-        // Prevent any future attempt to connect to this server as an orphan.
-        char buffer[PATH_MAX + 1];
-        iTermFileDescriptorSocketPath(buffer, sizeof(buffer), thePid);
-        [[iTermOrphanServerAdopter sharedInstance] removePath:[NSString stringWithUTF8String:buffer]];
-
-        return YES;
+        iTermSignalSafeWrite(1, "\nErrno: ");
+        iTermSignalSafeWriteInt(1, e);
     }
-}
+    iTermSignalSafeWrite(1, "\n");
 
-- (void)attachToServer:(iTermFileDescriptorServerConnection)serverConnection {
-    assert([iTermAdvancedSettingsModel runJobsInServers]);
-    fd = serverConnection.ptyMasterFd;
-    _serverPid = serverConnection.serverPid;
-    _serverChildPid = serverConnection.childPid;
-    _socketFd = serverConnection.socketFd;
-    [[TaskNotifier sharedInstance] registerTask:self];
+    sleep(1);
 }
 
 // Like login_tty but makes fd 0 the master, fd 1 the slave, fd 2 an open unix-domain socket
@@ -330,9 +232,7 @@ static void MyLoginTTY(int master, int slave, int serverSocketFd, int deadMansPi
 
 // Just like forkpty but fd 0 the master and fd 1 the slave.
 static int MyForkPty(int *amaster,
-                     char *name,
-                     struct termios *termp,
-                     struct winsize *winp,
+                     iTermTTYState *ttyState,
                      int serverSocketFd,
                      int deadMansPipeWriteEnd) {
     assert([iTermAdvancedSettingsModel runJobsInServers]);
@@ -340,7 +240,7 @@ static int MyForkPty(int *amaster,
     int slave;
 
     iTermFileDescriptorServerLog("Calling openpty");
-    if (openpty(&master, &slave, name, termp, winp) == -1) {
+    if (openpty(&master, &slave, ttyState->tty, &ttyState->term, &ttyState->win) == -1) {
         NSLog(@"openpty failed: %s", strerror(errno));
         return -1;
     }
@@ -366,6 +266,109 @@ static int MyForkPty(int *amaster,
             close(deadMansPipeWriteEnd);
             return pid;
     }
+}
+
+static int iTermForkToRunJobInServer(iTermForkState *forkState,
+                                     iTermTTYState *ttyState,
+                                     NSString *tempPath) {
+    int serverSocketFd = iTermFileDescriptorServerSocketBindListen(tempPath.UTF8String);
+
+    // Get ready to run the server in a thread.
+    __block int serverConnectionFd = -1;
+    dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
+
+    // In another thread, accept on the unix domain socket. Since it's
+    // already listening, there's no race here. connect will block until
+    // accept is called if the main thread wins the race. accept will block
+    // til connect is called if the background thread wins the race.
+    iTermFileDescriptorServerLog("Kicking off a background job to accept() in the server");
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        iTermFileDescriptorServerLog("Now running the accept queue block");
+        serverConnectionFd = iTermFileDescriptorServerAccept(serverSocketFd);
+
+        // Let the main thread go. This is necessary to ensure that
+        // serverConnectionFd is written to before the main thread uses it.
+        iTermFileDescriptorServerLog("Signal the semaphore");
+        dispatch_semaphore_signal(semaphore);
+    });
+
+    // Connect to the server running in a thread.
+    forkState->connectionFd = iTermFileDescriptorClientConnect(tempPath.UTF8String);
+    assert(forkState->connectionFd != -1);  // If this happens the block dispatched above never returns. Ran out of FDs, presumably.
+
+    // Wait for serverConnectionFd to be written to.
+    iTermFileDescriptorServerLog("Waiting for the semaphore");
+    dispatch_semaphore_wait(semaphore, DISPATCH_TIME_FOREVER);
+    iTermFileDescriptorServerLog("The semaphore was signaled");
+
+    dispatch_release(semaphore);
+
+    // Remove the temporary file. The server will create a new socket file
+    // if the client dies. That file's name is dependent on its process ID,
+    // which we don't know yet, so that's why this temp file dance has to
+    // be done.
+    unlink(tempPath.UTF8String);
+
+    // Now fork. This variant of forkpty passes through the master, slave,
+    // and serverConnectionFd to the child job.
+    pipe(forkState->deadMansPipe);
+
+    // This closes serverConnectionFd and deadMansPipe[1] in the parent process but not the child.
+    iTermFileDescriptorServerLog("Calling MyForkPty");
+    forkState->numFileDescriptorsToPreserve = kNumFileDescriptorsToDup;
+    int fd;
+    forkState->pid = MyForkPty(&fd, ttyState, serverConnectionFd, forkState->deadMansPipe[1]);
+    return fd;
+}
+
+static void HandleSigChld(int n) {
+    // This is safe to do because write(2) is listed in the sigaction(2) man page
+    // as allowed in a signal handler. Calling a method is *NOT* safe since something might
+    // be fiddling with the runtime. I saw a lot of crashes where CoreData got interrupted by
+    // a sigchild while doing class_addMethod and that caused a crash because of a method call.
+    UnblockTaskNotifier();
+}
+
+@interface PTYTaskLock : NSObject
+@end
+
+@implementation PTYTaskLock
+@end
+
+@interface PTYTask ()
+@property(atomic, assign) BOOL hasMuteCoprocess;
+@property(atomic, assign) BOOL coprocessOnlyTaskIsDead;
+@property(atomic, retain) NSFileHandle *logHandle;
+@property(nonatomic, copy) NSString *logPath;
+@end
+
+@implementation PTYTask {
+    NSString *_tty;
+    pid_t _serverPid;  // -1 when servers are not in use.
+    pid_t _serverChildPid;  // -1 when servers are not in use.
+    pid_t _childPid;  // -1 when servers are in use; otherwise is pid of child.
+    int fd;
+    int status;
+    NSString* path;
+    BOOL hasOutput;
+
+    NSLock* writeLock;  // protects writeBuffer
+    NSMutableData* writeBuffer;
+
+
+    Coprocess *coprocess_;  // synchronized (self)
+    BOOL brokenPipe_;
+    NSString *command_;  // Command that was run if launchWithPath:arguments:etc was called
+
+    // Number of spins of the select loop left before we tell the delegate we were deregistered.
+    int _spinsNeeded;
+    BOOL _paused;
+
+    int _socketFd;  // File descriptor for unix domain socket connected to server. Only safe to close after server is dead.
+
+    VT100GridSize _desiredSize;
+    NSTimeInterval _timeOfLastSizeChange;
+    BOOL _rateLimitedSetSizeToDesiredSizePending;
 }
 
 // This is (I hope) the equivalent of the command "dscl . read /Users/$USER UserShell", which
@@ -412,14 +415,174 @@ static int MyForkPty(int *amaster,
     return shell;
 }
 
-- (NSDictionary *)environmentBySettingShell:(NSDictionary *)originalEnvironment {
-    NSString *shell = [PTYTask userShell];
-    if (!shell) {
-        return originalEnvironment;
+- (instancetype)init {
+    self = [super init];
+    if (self) {
+        _serverPid = (pid_t)-1;
+        _socketFd = -1;
+        _childPid = (pid_t)-1;
+        fd = -1;
+        _serverChildPid = -1;
+        writeBuffer = [[NSMutableData alloc] init];
+        writeLock = [[NSLock alloc] init];
     }
-    NSMutableDictionary *newEnvironment = [[originalEnvironment mutableCopy] autorelease];
-    newEnvironment[@"SHELL"] = [[shell copy] autorelease];
-    return newEnvironment;
+    return self;
+}
+
+- (void)dealloc {
+    [[TaskNotifier sharedInstance] deregisterTask:self];
+
+    // TODO: The use of killpg seems pretty sketchy. It takes a pgid_t, not a
+    // pid_t. Are they guaranteed to always be the same for process group
+    // leaders?
+    if (_childPid > 0) {
+        // Terminate an owned child.
+        killpg(_childPid, SIGHUP);
+    } else if (_serverChildPid) {
+        // Kill a server-owned child.
+        // TODO: Don't want to do this when Sparkle is upgrading.
+        killpg(_serverChildPid, SIGHUP);
+    }
+
+    [self closeFileDescriptor];
+    [_logPath release];
+    [_logHandle closeFile];
+    [_logHandle release];
+    [writeLock release];
+    [writeBuffer release];
+    [_tty release];
+    [path release];
+    [command_ release];
+
+    @synchronized (self) {
+        [[self coprocess] mainProcessDidTerminate];
+        [coprocess_ release];
+    }
+
+    [super dealloc];
+}
+
+- (NSString *)description {
+    return [NSString stringWithFormat:@"PTYTask(child pid %d, server-child pid %d, fildes %d)",
+              _serverChildPid, _serverPid, fd];
+}
+
+#pragma mark - APIs
+
+- (BOOL)paused {
+    @synchronized(self) {
+        return _paused;
+    }
+}
+
+- (void)setPaused:(BOOL)paused {
+    @synchronized(self) {
+        _paused = paused;
+    }
+    // Start/stop selecting on our FD
+    [[TaskNotifier sharedInstance] unblock];
+}
+
+- (BOOL)pidIsChild {
+    return _serverChildPid == -1 && _childPid != -1;
+}
+
+- (pid_t)serverPid {
+    return _serverPid;
+}
+
+- (int)fd {
+    return fd;
+}
+
+- (pid_t)pid {
+    if (_serverChildPid != -1) {
+        return _serverChildPid;
+    } else {
+        return _childPid;
+    }
+}
+
+- (int)status {
+    return status;
+}
+
+- (NSString *)path {
+    return path;
+}
+
+- (NSString *)getWorkingDirectory {
+    if (self.pid == -1) {
+        DLog(@"Want to use the kernel to get the working directory but pid = -1");
+        return nil;
+    }
+    DLog(@"Using OS magic to get the working directory");
+    struct proc_vnodepathinfo vpi;
+    int ret;
+
+    // This only works if the child process is owned by our uid
+    // Notably it seems to work (at least on 10.10) even if the process ID is
+    // not owned by us.
+    ret = iTermProcPidInfoWrapper(self.pid, PROC_PIDVNODEPATHINFO, 0, &vpi, sizeof(vpi));
+    if (ret <= 0) {
+        // The child was probably owned by root (which is expected if it's
+        // a login shell. Use the cwd of its oldest child instead.
+        pid_t childPid = [self getFirstChildOfPid:self.pid];
+        if (childPid > 0) {
+            ret = iTermProcPidInfoWrapper(childPid, PROC_PIDVNODEPATHINFO, 0, &vpi, sizeof(vpi));
+        }
+    }
+    if (ret <= 0) {
+        // An error occurred
+        DLog(@"Failed with error %d", ret);
+        return nil;
+    } else if (ret != sizeof(vpi)) {
+        // Now this is very bad...
+        DLog(@"Got a struct of the wrong size back");
+        return nil;
+    } else {
+        // All is good
+        NSString *dir = [NSString stringWithUTF8String:vpi.pvi_cdir.vip_path];
+        DLog(@"Result: %@", dir);
+        return dir;
+    }
+}
+
+- (BOOL)logging {
+    @synchronized(self) {
+        return (_logHandle != nil);
+    }
+}
+
+- (Coprocess *)coprocess {
+    @synchronized (self) {
+        return coprocess_;
+    }
+    return nil;
+}
+
+- (void)setCoprocess:(Coprocess *)coprocess {
+    @synchronized (self) {
+        [coprocess_ autorelease];
+        coprocess_ = [coprocess retain];
+        self.hasMuteCoprocess = coprocess_.mute;
+    }
+    [[TaskNotifier sharedInstance] unblock];
+}
+
+- (BOOL)writeBufferHasRoom {
+    const int kMaxWriteBufferSize = 1024 * 10;
+    [writeLock lock];
+    BOOL hasRoom = [writeBuffer length] < kMaxWriteBufferSize;
+    [writeLock unlock];
+    return hasRoom;
+}
+
+- (BOOL)hasCoprocess {
+    @synchronized (self) {
+        return coprocess_ != nil;
+    }
+    return NO;
 }
 
 - (BOOL)passwordInput {
@@ -434,375 +597,58 @@ static int MyForkPty(int *amaster,
     }
 }
 
+- (BOOL)hasBrokenPipe {
+    return brokenPipe_;
+}
+
+- (NSString *)originalCommand {
+    return command_;
+}
+
 - (void)launchWithPath:(NSString *)progpath
              arguments:(NSArray *)args
            environment:(NSDictionary *)env
                  width:(int)width
                 height:(int)height
-                isUTF8:(BOOL)isUTF8 {
-    struct termios term;
-    struct winsize win;
-    char theTtyname[PATH_MAX];
-
-    [command_ autorelease];
-    command_ = [progpath copy];
-
-    env = [self environmentBySettingShell:env];
+                isUTF8:(BOOL)isUTF8
+           autologPath:(NSString *)autologPath
+           synchronous:(BOOL)synchronous
+            completion:(void (^)(void))completion {
     if ([iTermAdvancedSettingsModel runJobsInServers]) {
         // We want to run
         //   iTerm2 --server progpath args
-        //  So create a new args array with [ --server, progpath, *args ]
-        NSMutableArray *temp = [NSMutableArray array];
-        [temp addObject:@"--server"];
-        [temp addObject:progpath];
-        [temp addObjectsFromArray:args];
-        args = temp;
-
-        // Now change progpath to run iTerm2.
-        NSString *iterm2Binary = [[NSBundle mainBundle] executablePath];
-        progpath = iterm2Binary;
-    }
-
-    path = [progpath copy];
-
-    setup_tty_param(&term, &win, width, height, isUTF8);
-
-    // Register a handler for the child death signal. There is some history here.
-    // Originally, a do-nothing handler was registered with the following comment:
-    //   We cannot ignore SIGCHLD because Sparkle (the software updater) opens a
-    //   Safari control which uses some buggy Netscape code that calls wait()
-    //   until it succeeds. If we wait() on its pid, that process locks because
-    //   it doesn't check if wait()'s failure is ECHLD. Instead of wait()ing here,
-    //   we reap our children when our select() loop sees that a pipes is broken.
-    // In response to bug 2903, wherein select() fails to return despite the file
-    // descriptor having EOF status, I changed the handler to unblock the task
-    // notifier.
-    signal(SIGCHLD, HandleSigChld);
-    const char* argpath;
-    NSString *commandToExec = [progpath stringByStandardizingPath];
-    argpath = [commandToExec UTF8String];
-
-    int max = (args == nil) ? 0 : [args count];
-    const char* argv[max + 2];
-
-    argv[0] = [[progpath stringByStandardizingPath] UTF8String];
-    if (args != nil) {
-        int i;
-        for (i = 0; i < max; ++i) {
-            argv[i + 1] = [args[i] UTF8String];
-        }
-    }
-    argv[max + 1] = NULL;
-    DLog(@"Preparing to launch a job. Command is %@ and args are %@", commandToExec, args);
-    DLog(@"Environment is\n%@", env);
-    char **newEnviron = [self environWithOverrides:env];
-    int deadMansPipe[2] = { 0, 0 };
-
-    // Note: stringByStandardizingPath will automatically call stringByExpandingTildeInPath.
-    const char *initialPwd = [[[env objectForKey:@"PWD"] stringByStandardizingPath] UTF8String];
-    pid_t pid;
-    int connectionFd = -1;
-    int numFileDescriptorsToPreserve;
-    BOOL closeFileDescriptors = YES;
-    if ([iTermAdvancedSettingsModel runJobsInServers]) {
-        closeFileDescriptors = NO;
-        // Create a temporary filename for the unix domain socket. It'll only exist for a moment.
-        NSString *tempPath = [[NSWorkspace sharedWorkspace] temporaryFileNameWithPrefix:@"iTerm2-temp-socket."
-                                                                                 suffix:@""];
-        if (tempPath == nil) {
-            NSAlert *alert = [[[NSAlert alloc] init] autorelease];
-            alert.messageText = @"Error";
-            alert.informativeText = [NSString stringWithFormat:@"An error was encountered while creating a temporary file with mkstemps. Verify that %@ exists and is writable.", NSTemporaryDirectory()];
-            [alert addButtonWithTitle:@"OK"];
-            [alert runModal];
-            return;
-        }
-
-        // Begin listening on that path as a unix domain socket.
-        int serverSocketFd = iTermFileDescriptorServerSocketBindListen(tempPath.UTF8String);
-
-        // Get ready to run the server in a thread.
-        __block int serverConnectionFd = -1;
-        dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
-
-        // In another thread, accept on the unix domain socket. Since it's
-        // already listening, there's no race here. connect will block until
-        // accept is called if the main thread wins the race. accept will block
-        // til connect is called if the background thread wins the race.
-        iTermFileDescriptorServerLog("Kicking off a background job to accept() in the server");
-        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-            iTermFileDescriptorServerLog("Now running the accept queue block");
-            serverConnectionFd = iTermFileDescriptorServerAccept(serverSocketFd);
-
-            // Let the main thread go. This is necessary to ensure that
-            // serverConnectionFd is written to before the main thread uses it.
-            iTermFileDescriptorServerLog("Signal the semaphore");
-            dispatch_semaphore_signal(semaphore);
-        });
-
-        // Connect to the server running in a thread.
-        connectionFd = iTermFileDescriptorClientConnect(tempPath.UTF8String);
-        assert(connectionFd != -1);  // If this happens the block dispatched above never returns. Ran out of FDs, presumably.
-
-        // Wait for serverConnectionFd to be written to.
-        iTermFileDescriptorServerLog("Waiting for the semaphore");
-        dispatch_semaphore_wait(semaphore, DISPATCH_TIME_FOREVER);
-        iTermFileDescriptorServerLog("The semaphore was signaled");
-
-        dispatch_release(semaphore);
-
-        // Remove the temporary file. The server will create a new socket file
-        // if the client dies. That file's name is dependent on its process ID,
-        // which we don't know yet, so that's why this temp file dance has to
-        // be done.
-        unlink(tempPath.UTF8String);
-
-        // Now fork. This variant of forkpty passes through the master, slave,
-        // and serverConnectionFd to the child job.
-        pipe(deadMansPipe);
-
-        // This closes serverConnectionFd and deadMansPipe[1] in the parent process but not the child.
-        iTermFileDescriptorServerLog("Calling MyForkPty");
-        pid = _serverPid = MyForkPty(&fd, theTtyname, &term, &win, serverConnectionFd, deadMansPipe[1]);
-        numFileDescriptorsToPreserve = kNumFileDescriptorsToDup;
+        NSArray *updatedArgs = [@[ @"--server", progpath ] arrayByAddingObjectsFromArray:args];
+        [self reallyLaunchWithPath:[[NSBundle mainBundle] executablePath]
+                         arguments:updatedArgs
+                       environment:env
+                             width:width
+                            height:height
+                            isUTF8:isUTF8
+                       autologPath:autologPath
+                       synchronous:synchronous
+                        completion:completion];
     } else {
-        pid = _childPid = forkpty(&fd, theTtyname, &term, &win);
-        numFileDescriptorsToPreserve = 3;
-    }
-    if (pid == (pid_t)0) {
-        // Child
-        // Do not start the new process with a signal handler.
-        signal(SIGCHLD, SIG_DFL);
-        signal(SIGPIPE, SIG_DFL);
-        sigset_t signals;
-        sigemptyset(&signals);
-        sigaddset(&signals, SIGPIPE);
-        sigprocmask(SIG_UNBLOCK, &signals, NULL);
-
-        // Apple opens files without the close-on-exec flag (e.g., Extras2.rsrc).
-        // See issue 2662.
-        if (closeFileDescriptors) {
-            // If running jobs in servers close file descriptors after exec when it's safe to
-            // enumerate files in /dev/fd. This is the potentially very slow path (issue 5391).
-            for (int j = numFileDescriptorsToPreserve; j < getdtablesize(); j++) {
-                close(j);
-            }
-        }
-
-        chdir(initialPwd);
-
-        // Sub in our environ for the existing one. Since Mac OS doesn't have execvpe, this hack
-        // does the job.
-        extern char **environ;
-        environ = newEnviron;
-        execvp(argpath, (char* const*)argv);
-
-        /* exec error */
-        fprintf(stdout, "## exec failed ##\n");
-        fprintf(stdout, "argpath=%s error=%s\n", argpath, strerror(errno));
-
-        sleep(1);
-        _exit(-1);
-    } else if (pid < (pid_t)0) {
-        // Error
-        DLog(@"Unable to fork %@: %s", progpath, strerror(errno));
-        [[iTermNotificationController sharedInstance] notify:@"Unable to fork!" withDescription:@"You may have too many processes already running."];
-
-        for (int j = 0; newEnviron[j]; j++) {
-            free(newEnviron[j]);
-        }
-        free(newEnviron);
-        return;
-    }
-    for (int j = 0; newEnviron[j]; j++) {
-        free(newEnviron[j]);
-    }
-    free(newEnviron);
-
-    // Make sure the master side of the pty is closed on future exec() calls.
-    fcntl(fd, F_SETFD, fcntl(fd, F_GETFD) | FD_CLOEXEC);
-
-    if (connectionFd > 0) {
-        // Jobs run in servers. The client and server connected to each other
-        // before forking. The server will send us the child pid now. We don't
-        // really need the rest of the stuff in serverConnection since we already know
-        // it, but that's ok.
-        iTermFileDescriptorServerConnection serverConnection =
-            iTermFileDescriptorClientRead(connectionFd, deadMansPipe[0]);
-        close(deadMansPipe[0]);
-        if (serverConnection.ok) {
-            // We intentionally leave connectionFd open. If iTerm2 stops unexpectedly then its closure
-            // lets the server know it should call accept(). We now have two copies of the master PTY
-            // file descriptor. Let's close the original one because attachToServer: will use the
-            // copy in serverConnection.
-            close(fd);
-            fd = -1;
-
-            // The serverConnection has the wrong server PID because the connection was made prior
-            // to fork(). Update serverConnection with the real server PID.
-            serverConnection.serverPid = pid;
-
-            // Connect this task to the server's PIDs and file descriptor.
-            [self attachToServer:serverConnection];
-
-            self.tty = [NSString stringWithUTF8String:theTtyname];
-            fcntl(fd, F_SETFL, O_NONBLOCK);
-        } else {
-            close(fd);
-            NSLog(@"Server died immediately!");
-            [_delegate taskDiedImmediately];
-        }
-    } else {
-        // Jobs are direct children of iTerm2
-        self.tty = [NSString stringWithUTF8String:theTtyname];
-        fcntl(fd, F_SETFL, O_NONBLOCK);
-        [[TaskNotifier sharedInstance] registerTask:self];
+        [self reallyLaunchWithPath:progpath
+                         arguments:args
+                       environment:env
+                             width:width
+                            height:height
+                            isUTF8:isUTF8
+                       autologPath:autologPath
+                       synchronous:synchronous
+                        completion:completion];
     }
 }
 
-- (void)registerAsCoprocessOnlyTask {
-    self.isCoprocessOnly = YES;
-    [[TaskNotifier sharedInstance] registerTask:self];
+// Get the name of this task's current job. It is quite approximate! Any
+// arbitrary tty-controller in the tty's pgid that has this task as an ancestor
+// may be chosen. This function also implements a chache to avoid doing the
+// potentially expensive system calls too often.
+- (NSString *)currentJob:(BOOL)forceRefresh {
+    return [[ProcessCache sharedInstance] jobNameWithPid:self.pid];
 }
 
-- (void)writeToCoprocessOnlyTask:(NSData *)data {
-    if (self.coprocess) {
-        TaskNotifier *taskNotifier = [TaskNotifier sharedInstance];
-        [taskNotifier lock];
-        @synchronized (self) {
-            [self.coprocess.outputBuffer appendData:data];
-        }
-        [taskNotifier unlock];
-
-        // Wake up the task notifier so the coprocess's output buffer will be sent to its file
-        // descriptor.
-        [taskNotifier unblock];
-    }
-}
-
-- (BOOL)wantsRead {
-    return !self.paused;
-}
-
-- (BOOL)wantsWrite
-{
-    if (self.paused) {
-        return NO;
-    }
-    [writeLock lock];
-    BOOL wantsWrite = [writeBuffer length] > 0;
-    [writeLock unlock];
-    return wantsWrite;
-}
-
-- (BOOL)writeBufferHasRoom
-{
-    const int kMaxWriteBufferSize = 1024 * 10;
-    [writeLock lock];
-    BOOL hasRoom = [writeBuffer length] < kMaxWriteBufferSize;
-    [writeLock unlock];
-    return hasRoom;
-}
-
-- (void)processRead
-{
-    int iterations = 4;
-    int bytesRead = 0;
-
-    char buffer[MAXRW * iterations];
-    for (int i = 0; i < iterations; ++i) {
-        // Only read up to MAXRW*iterations bytes, then release control
-        ssize_t n = read(fd, buffer + bytesRead, MAXRW);
-        if (n < 0) {
-            // There was a read error.
-            if (errno != EAGAIN && errno != EINTR) {
-                // It was a serious error.
-                [self brokenPipe];
-                return;
-            } else {
-                // We could read again in the case of EINTR but it would
-                // complicate the code with little advantage. Just bail out.
-                n = 0;
-            }
-        }
-        bytesRead += n;
-        if (n < MAXRW) {
-            // If we read fewer bytes than expected, return. For some apparently
-            // undocumented reason, read() never returns more than 1024 bytes
-            // (at least on OS 10.6), so that's what MAXRW is set to. If that
-            // ever goes down this'll break.
-            break;
-        }
-    }
-
-    hasOutput = YES;
-
-    // Send data to the terminal
-    [self readTask:buffer length:bytesRead];
-}
-
-- (void)processWrite
-{
-    // Retain to prevent the object from being released during this method
-    // Lock to protect the writeBuffer from the main thread
-    [self retain];
-    [writeLock lock];
-
-    // Only write up to MAXRW bytes, then release control
-    char* ptr = [writeBuffer mutableBytes];
-    unsigned int length = [writeBuffer length];
-    if (length > MAXRW) {
-        length = MAXRW;
-    }
-    ssize_t written = write(fd, [writeBuffer mutableBytes], length);
-
-    // No data?
-    if ((written < 0) && (!(errno == EAGAIN || errno == EINTR))) {
-        [self brokenPipe];
-    } else if (written > 0) {
-        // Shrink the writeBuffer
-        length = [writeBuffer length] - written;
-        memmove(ptr, ptr+written, length);
-        [writeBuffer setLength:length];
-    }
-
-    // Clean up locks
-    [writeLock unlock];
-    [self autorelease];
-}
-
-- (BOOL)hasOutput
-{
-    return hasOutput;
-}
-
-- (void)logData:(const char *)buffer length:(int)length {
-    @synchronized(self) {
-        if ([self logging]) {
-            [_logHandle writeData:[NSData dataWithBytes:buffer
-                                                 length:length]];
-        }
-    }
-}
-
-// The bytes in data were just read from the fd.
-- (void)readTask:(char *)buffer length:(int)length
-{
-    [self logData:buffer length:length];
-
-    // The delegate is responsible for parsing VT100 tokens here and sending them off to the
-    // main thread for execution. If its queues get too large, it can block.
-    [self.delegate threadedReadTask:buffer length:length];
-
-    @synchronized (self) {
-        if (coprocess_) {
-            [coprocess_.outputBuffer appendData:[NSData dataWithBytes:buffer length:length]];
-        }
-    }
-}
-
-- (void)writeTask:(NSData*)data
-{
+- (void)writeTask:(NSData *)data {
     if (self.isCoprocessOnly) {
         // Send keypresses to tmux.
         [_delegate retain];
@@ -822,41 +668,14 @@ static int MyForkPty(int *amaster,
     }
 }
 
-- (void)brokenPipe {
-    brokenPipe_ = YES;
-    [[TaskNotifier sharedInstance] deregisterTask:self];
-    [self.delegate threadedTaskBrokenPipe];
-}
-
 - (void)sendSignal:(int)signo toServer:(BOOL)toServer {
     if (toServer && _serverPid != -1) {
         DLog(@"Sending signal to server %@", @(_serverPid));
         kill(_serverPid, signo);
     } else if (_serverChildPid != -1) {
         kill(_serverChildPid, signo);
-     } else if (_childPid >= 0) {
-         kill(_childPid, signo);
-     }
-}
-
-// Sends a signal to the server. This breaks it out of accept()ing forever when iTerm2 quits.
-- (void)killServerIfRunning {
-    if (_serverPid >= 0) {
-        // This makes the server unlink its socket and exit immediately.
-        kill(_serverPid, SIGUSR1);
-
-        // Mac OS seems to have a bug in waitpid. I've seen a case where the child has exited
-        // (ps shows it in parens) but when the parent calls waitPid it just hangs. Rather than
-        // wait here, I'll add the server to the deadpool. The TaskNotifier thread can wait
-        // on it when it spins. I hope in this weird case that waitpid doesn't take long to run
-        // and that it's rare enough that the zombies don't pile up. Not much else I can do.
-        [[TaskNotifier sharedInstance] waitForPid:_serverPid];
-
-        // Don't want to leak these. They exist to let the server know when iTerm2 crashes, but if
-        // the server is dead it's not needed any more.
-        close(_socketFd);
-        _socketFd = -1;
-        NSLog(@"File descriptor server exited with status %d", status);
+    } else if (_childPid >= 0) {
+        kill(_childPid, signo);
     }
 }
 
@@ -868,67 +687,6 @@ static int MyForkPty(int *amaster,
 
     _desiredSize = size;
     [self rateLimitedSetSizeToDesiredSize];
-}
-
-- (void)rateLimitedSetSizeToDesiredSize {
-    if (_rateLimitedSetSizeToDesiredSizePending) {
-        return;
-    }
-
-    static const NSTimeInterval kDelayBetweenSizeChanges = 0.2;
-    if ([NSDate timeIntervalSinceReferenceDate] - _timeOfLastSizeChange < kDelayBetweenSizeChanges) {
-        // Avoid problems with signal coalescing of SIGWINCH preventing redraw for the second size
-        // change. For example, issue 5096 and 4494.
-        _rateLimitedSetSizeToDesiredSizePending = YES;
-        DLog(@" ** Rate limiting **");
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kDelayBetweenSizeChanges * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            _rateLimitedSetSizeToDesiredSizePending = NO;
-            [self setTerminalSizeToDesiredSize];
-        });
-    } else {
-        [self setTerminalSizeToDesiredSize];
-    }
-}
-
-- (void)setTerminalSizeToDesiredSize {
-    DLog(@"Set size of %@ to %@", _delegate, VT100GridSizeDescription(_desiredSize));
-    _timeOfLastSizeChange = [NSDate timeIntervalSinceReferenceDate];
-
-    struct winsize winsize;
-    ioctl(fd, TIOCGWINSZ, &winsize);
-    if (winsize.ws_col != _desiredSize.width || winsize.ws_row != _desiredSize.height) {
-        DLog(@"Actually setting the size");
-        winsize.ws_col = _desiredSize.width;
-        winsize.ws_row = _desiredSize.height;
-        ioctl(fd, TIOCSWINSZ, &winsize);
-    }
-}
-
-- (int)fd
-{
-    return fd;
-}
-
-- (BOOL)pidIsChild {
-    return _serverChildPid == -1 && _childPid != -1;
-}
-
-- (pid_t)serverPid {
-    return _serverPid;
-}
-
-- (pid_t)pid {
-    if (_serverChildPid != -1) {
-        return _serverChildPid;
-    } else {
-        return _childPid;
-    }
-}
-
-- (void)closeFileDescriptor {
-    if (fd != -1) {
-        close(fd);
-    }
 }
 
 - (void)stop {
@@ -964,33 +722,6 @@ static int MyForkPty(int *amaster,
     }
 }
 
-// This runs in TaskNotifier's thread.
-- (void)notifierDidSpin
-{
-    BOOL unblock = NO;
-    @synchronized(self) {
-        unblock = (--_spinsNeeded) > 0;
-    }
-    if (unblock) {
-        // Force select() to return so we get another spin even if there is no
-        // activity on the file descriptors.
-        [[TaskNotifier sharedInstance] unblock];
-    } else {
-        [[NSNotificationCenter defaultCenter] removeObserver:self];
-        [self.delegate taskWasDeregistered];
-    }
-}
-
-- (int)status
-{
-    return status;
-}
-
-- (NSString*)path
-{
-    return path;
-}
-
 - (BOOL)startLoggingToFileWithPath:(NSString*)aPath shouldAppend:(BOOL)shouldAppend {
     @synchronized(self) {
         self.logPath = [aPath stringByStandardizingPath];
@@ -1020,21 +751,542 @@ static int MyForkPty(int *amaster,
     }
 }
 
-- (BOOL)logging {
+- (void)brokenPipe {
+    brokenPipe_ = YES;
+    [[TaskNotifier sharedInstance] deregisterTask:self];
+    [self.delegate threadedTaskBrokenPipe];
+}
+
+- (void)processRead {
+    int iterations = 4;
+    int bytesRead = 0;
+
+    char buffer[MAXRW * iterations];
+    for (int i = 0; i < iterations; ++i) {
+        // Only read up to MAXRW*iterations bytes, then release control
+        ssize_t n = read(fd, buffer + bytesRead, MAXRW);
+        if (n < 0) {
+            // There was a read error.
+            if (errno != EAGAIN && errno != EINTR) {
+                // It was a serious error.
+                [self brokenPipe];
+                return;
+            } else {
+                // We could read again in the case of EINTR but it would
+                // complicate the code with little advantage. Just bail out.
+                n = 0;
+            }
+        }
+        bytesRead += n;
+        if (n < MAXRW) {
+            // If we read fewer bytes than expected, return. For some apparently
+            // undocumented reason, read() never returns more than 1024 bytes
+            // (at least on OS 10.6), so that's what MAXRW is set to. If that
+            // ever goes down this'll break.
+            break;
+        }
+    }
+
+    hasOutput = YES;
+
+    // Send data to the terminal
+    [self readTask:buffer length:bytesRead];
+}
+
+- (void)processWrite {
+    // Retain to prevent the object from being released during this method
+    // Lock to protect the writeBuffer from the main thread
+    [self retain];
+    [writeLock lock];
+
+    // Only write up to MAXRW bytes, then release control
+    char* ptr = [writeBuffer mutableBytes];
+    unsigned int length = [writeBuffer length];
+    if (length > MAXRW) {
+        length = MAXRW;
+    }
+    ssize_t written = write(fd, [writeBuffer mutableBytes], length);
+
+    // No data?
+    if ((written < 0) && (!(errno == EAGAIN || errno == EINTR))) {
+        [self brokenPipe];
+    } else if (written > 0) {
+        // Shrink the writeBuffer
+        length = [writeBuffer length] - written;
+        memmove(ptr, ptr+written, length);
+        [writeBuffer setLength:length];
+    }
+
+    // Clean up locks
+    [writeLock unlock];
+    [self autorelease];
+}
+
+- (void)stopCoprocess {
+    pid_t thePid = 0;
+    @synchronized (self) {
+        if (coprocess_.pid > 0) {
+            thePid = coprocess_.pid;
+        }
+        [coprocess_ terminate];
+        [coprocess_ release];
+        coprocess_ = nil;
+        self.hasMuteCoprocess = NO;
+    }
+    if (thePid) {
+        [[TaskNotifier sharedInstance] waitForPid:thePid];
+    }
+    [[TaskNotifier sharedInstance] performSelectorOnMainThread:@selector(notifyCoprocessChange)
+                                                    withObject:nil
+                                                 waitUntilDone:NO];
+}
+
+- (void)logData:(const char *)buffer length:(int)length {
     @synchronized(self) {
-        return (_logHandle != nil);
+        if ([self logging]) {
+            [_logHandle writeData:[NSData dataWithBytes:buffer
+                                                 length:length]];
+        }
     }
 }
 
-- (NSString*)description {
-    return [NSString stringWithFormat:@"PTYTask(child pid %d, server-child pid %d, fildes %d)",
-              _serverChildPid, _serverPid, fd];
+- (BOOL)tryToAttachToServerWithProcessId:(pid_t)thePid {
+    if (![iTermAdvancedSettingsModel runJobsInServers]) {
+        return NO;
+    }
+    if (_serverChildPid != -1) {
+        return NO;
+    }
+
+    // TODO: This server code is super scary so I'm NSLog'ing it to make it easier to recover
+    // logs. These should eventually become DLog's and the log statements in the server should
+    // become LOG_DEBUG level.
+    NSLog(@"tryToAttachToServerWithProcessId: Attempt to connect to server for pid %d", (int)thePid);
+    iTermFileDescriptorServerConnection serverConnection = iTermFileDescriptorClientRun(thePid);
+    if (!serverConnection.ok) {
+        NSLog(@"Failed with error %s", serverConnection.error);
+        return NO;
+    } else {
+        NSLog(@"Succeeded.");
+        [self attachToServer:serverConnection];
+
+        // Prevent any future attempt to connect to this server as an orphan.
+        char buffer[PATH_MAX + 1];
+        iTermFileDescriptorSocketPath(buffer, sizeof(buffer), thePid);
+        [[iTermOrphanServerAdopter sharedInstance] removePath:[NSString stringWithUTF8String:buffer]];
+
+        return YES;
+    }
 }
+
+- (void)attachToServer:(iTermFileDescriptorServerConnection)serverConnection {
+    assert([iTermAdvancedSettingsModel runJobsInServers]);
+    fd = serverConnection.ptyMasterFd;
+    _serverPid = serverConnection.serverPid;
+    _serverChildPid = serverConnection.childPid;
+    _socketFd = serverConnection.socketFd;
+    [[TaskNotifier sharedInstance] registerTask:self];
+}
+
+// Sends a signal to the server. This breaks it out of accept()ing forever when iTerm2 quits.
+- (void)killServerIfRunning {
+    if (_serverPid >= 0) {
+        // This makes the server unlink its socket and exit immediately.
+        kill(_serverPid, SIGUSR1);
+
+        // Mac OS seems to have a bug in waitpid. I've seen a case where the child has exited
+        // (ps shows it in parens) but when the parent calls waitPid it just hangs. Rather than
+        // wait here, I'll add the server to the deadpool. The TaskNotifier thread can wait
+        // on it when it spins. I hope in this weird case that waitpid doesn't take long to run
+        // and that it's rare enough that the zombies don't pile up. Not much else I can do.
+        [[TaskNotifier sharedInstance] waitForPid:_serverPid];
+
+        // Don't want to leak these. They exist to let the server know when iTerm2 crashes, but if
+        // the server is dead it's not needed any more.
+        close(_socketFd);
+        _socketFd = -1;
+        NSLog(@"File descriptor server exited with status %d", status);
+    }
+}
+
+- (void)registerAsCoprocessOnlyTask {
+    self.isCoprocessOnly = YES;
+    [[TaskNotifier sharedInstance] registerTask:self];
+}
+
+- (void)writeToCoprocessOnlyTask:(NSData *)data {
+    if (self.coprocess) {
+        TaskNotifier *taskNotifier = [TaskNotifier sharedInstance];
+        [taskNotifier lock];
+        @synchronized (self) {
+            [self.coprocess.outputBuffer appendData:data];
+        }
+        [taskNotifier unlock];
+
+        // Wake up the task notifier so the coprocess's output buffer will be sent to its file
+        // descriptor.
+        [taskNotifier unblock];
+    }
+}
+
+#pragma mark - Private
+
+#pragma mark Task Launching Helpers
+
+// Returns a NSMutableDictionary containing the key-value pairs defined in the
+// global "environ" variable.
+- (NSMutableDictionary *)mutableEnvironmentDictionary {
+    NSMutableDictionary *result = [NSMutableDictionary dictionary];
+    extern char **environ;
+    if (environ != NULL) {
+        for (int i = 0; environ[i]; i++) {
+            NSString *kvp = [NSString stringWithUTF8String:environ[i]];
+            NSRange equalsRange = [kvp rangeOfString:@"="];
+            if (equalsRange.location != NSNotFound) {
+                NSString *key = [kvp substringToIndex:equalsRange.location];
+                NSString *value = [kvp substringFromIndex:equalsRange.location + 1];
+                result[key] = value;
+            } else {
+                result[kvp] = @"";
+            }
+        }
+    }
+    return result;
+}
+
+// Returns an array of C strings terminated with a null pointer of the form
+// KEY=VALUE that is based on this process's "environ" variable. Values passed
+// in "env" are added or override existing environment vars. Both the returned
+// array and all string pointers within it are malloced and should be free()d
+// by the caller.
+- (char **)environWithOverrides:(NSDictionary *)env {
+    NSMutableDictionary *environmentDict = [self mutableEnvironmentDictionary];
+    for (NSString *k in env) {
+        environmentDict[k] = env[k];
+    }
+    char **environment = malloc(sizeof(char*) * (environmentDict.count + 1));
+    int i = 0;
+    for (NSString *k in environmentDict) {
+        NSString *temp = [NSString stringWithFormat:@"%@=%@", k, environmentDict[k]];
+        environment[i++] = strdup([temp UTF8String]);
+    }
+    environment[i] = NULL;
+    return environment;
+}
+
+- (NSDictionary *)environmentBySettingShell:(NSDictionary *)originalEnvironment {
+    NSString *shell = [PTYTask userShell];
+    if (!shell) {
+        return originalEnvironment;
+    }
+    NSMutableDictionary *newEnvironment = [[originalEnvironment mutableCopy] autorelease];
+    newEnvironment[@"SHELL"] = [[shell copy] autorelease];
+    return newEnvironment;
+}
+
+- (void)setCommand:(NSString *)command {
+    [command_ autorelease];
+    command_ = [command copy];
+}
+
+- (void)populateArgvArray:(const char **)argv
+              fromProgram:(NSString *)progpath
+                     args:(NSArray *)args
+                    count:(int)max {
+    argv[0] = [[progpath stringByStandardizingPath] UTF8String];
+    if (args != nil) {
+        int i;
+        for (i = 0; i < max; ++i) {
+            argv[i + 1] = [args[i] UTF8String];
+        }
+    }
+    argv[max + 1] = NULL;
+}
+
+- (void)showFailedToCreateTempSocketError {
+    NSAlert *alert = [[[NSAlert alloc] init] autorelease];
+    alert.messageText = @"Error";
+    alert.informativeText = [NSString stringWithFormat:@"An error was encountered while creating a temporary file with mkstemps. Verify that %@ exists and is writable.", NSTemporaryDirectory()];
+    [alert addButtonWithTitle:@"OK"];
+    [alert runModal];
+}
+
+- (void)forkToRunJobDirectlyWithForkState:(iTermForkState *)forkState
+                                 ttyState:(iTermTTYState *)ttyState {
+    forkState->pid = _childPid = forkpty(&fd, ttyState->tty, &ttyState->term, &ttyState->win);
+    forkState->numFileDescriptorsToPreserve = 3;
+}
+
+- (void)failedToForkWithEnvironment:(char **)newEnviron program:(NSString *)progpath {
+    DLog(@"Unable to fork %@: %s", progpath, strerror(errno));
+    [[iTermNotificationController sharedInstance] notify:@"Unable to fork!" withDescription:@"You may have too many processes already running."];
+    [self freeEnvironment:newEnviron];
+}
+
+- (void)freeEnvironment:(char **)newEnviron {
+    for (int j = 0; newEnviron[j]; j++) {
+        free(newEnviron[j]);
+    }
+    free(newEnviron);
+}
+
+- (void)finishHandshakeWithJobInServer:(const iTermForkState *)forkState ttyState:(const iTermTTYState *)ttyState {
+    iTermFileDescriptorServerConnection serverConnection =
+    iTermFileDescriptorClientRead(forkState->connectionFd, forkState->deadMansPipe[0]);
+    close(forkState->deadMansPipe[0]);
+    if (serverConnection.ok) {
+        // We intentionally leave connectionFd open. If iTerm2 stops unexpectedly then its closure
+        // lets the server know it should call accept(). We now have two copies of the master PTY
+        // file descriptor. Let's close the original one because attachToServer: will use the
+        // copy in serverConnection.
+        close(fd);
+        fd = -1;
+
+        // The serverConnection has the wrong server PID because the connection was made prior
+        // to fork(). Update serverConnection with the real server PID.
+        serverConnection.serverPid = forkState->pid;
+
+        // Connect this task to the server's PIDs and file descriptor.
+        [self attachToServer:serverConnection];
+
+        self.tty = [NSString stringWithUTF8String:ttyState->tty];
+        fcntl(fd, F_SETFL, O_NONBLOCK);
+    } else {
+        close(fd);
+        NSLog(@"Server died immediately!");
+        [_delegate taskDiedImmediately];
+    }
+}
+
+- (NSString *)tty {
+    @synchronized([PTYTaskLock class]) {
+        return [[_tty retain] autorelease];
+    }
+}
+
+- (void)setTty:(NSString *)tty {
+    @synchronized([PTYTaskLock class]) {
+        [_tty autorelease];
+        _tty = [tty copy];
+    }
+    if ([NSThread isMainThread]) {
+        [self.delegate taskDidChangeTTY:self];
+    } else {
+        __weak id<PTYTaskDelegate> delegate = self.delegate;
+        __weak __typeof(self) weakSelf = self;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if ([weakSelf retain]) {
+                [delegate taskDidChangeTTY:weakSelf];
+            }
+            [weakSelf release];
+        });
+    }
+}
+
+- (void)finishLaunchingDirectChild:(iTermTTYState *)ttyState {
+    self.tty = [NSString stringWithUTF8String:ttyState->tty];
+    fcntl(fd, F_SETFL, O_NONBLOCK);
+    [[TaskNotifier sharedInstance] registerTask:self];
+}
+
+- (void)didForkParent:(const iTermForkState *)forkState newEnviron:(char **)newEnviron ttyState:(iTermTTYState *)ttyState {
+    [self freeEnvironment:newEnviron];
+
+    // Make sure the master side of the pty is closed on future exec() calls.
+    fcntl(fd, F_SETFD, fcntl(fd, F_GETFD) | FD_CLOEXEC);
+
+    if (forkState->connectionFd > 0) {
+        // Jobs run in servers. The client and server connected to each other
+        // before forking. The server will send us the child pid now. We don't
+        // really need the rest of the stuff in serverConnection since we already know
+        // it, but that's ok.
+        [self finishHandshakeWithJobInServer:forkState ttyState:ttyState];
+    } else {
+        // Jobs are direct children of iTerm2
+        [self finishLaunchingDirectChild:ttyState];
+    }
+}
+
+- (NSString *)pathToNewUnixDomainSocket {
+    // Create a temporary filename for the unix domain socket. It'll only exist for a moment.
+    NSString *tempPath = [[NSWorkspace sharedWorkspace] temporaryFileNameWithPrefix:@"iTerm2-temp-socket."
+                                                                             suffix:@""];
+    if (tempPath == nil) {
+        [self showFailedToCreateTempSocketError];
+    }
+    return tempPath;
+}
+
+- (void)reallyLaunchWithPath:(NSString *)progpath
+                   arguments:(NSArray *)args
+                 environment:(NSDictionary *)env
+                       width:(int)width
+                      height:(int)height
+                      isUTF8:(BOOL)isUTF8
+                 autologPath:(NSString *)autologPath
+                 synchronous:(BOOL)synchronous
+                  completion:(void (^)(void))completion {
+    if (autologPath) {
+        [self startLoggingToFileWithPath:autologPath shouldAppend:NO];
+    }
+
+    iTermTTYState ttyState;
+    setup_tty_param(&ttyState, width, height, isUTF8);
+
+    [self setCommand:progpath];
+    env = [self environmentBySettingShell:env];
+    path = [progpath copy];
+    NSString *commandToExec = [progpath stringByStandardizingPath];
+    const char *argpath = [commandToExec UTF8String];
+
+    // Register a handler for the child death signal. There is some history here.
+    // Originally, a do-nothing handler was registered with the following comment:
+    //   We cannot ignore SIGCHLD because Sparkle (the software updater) opens a
+    //   Safari control which uses some buggy Netscape code that calls wait()
+    //   until it succeeds. If we wait() on its pid, that process locks because
+    //   it doesn't check if wait()'s failure is ECHLD. Instead of wait()ing here,
+    //   we reap our children when our select() loop sees that a pipes is broken.
+    // In response to bug 2903, wherein select() fails to return despite the file
+    // descriptor having EOF status, I changed the handler to unblock the task
+    // notifier.
+    signal(SIGCHLD, HandleSigChld);
+
+    int max = (args == nil) ? 0 : [args count];
+    const char* argv[max + 2];
+    [self populateArgvArray:argv fromProgram:progpath args:args count:max];
+
+    DLog(@"Preparing to launch a job. Command is %@ and args are %@", commandToExec, args);
+    DLog(@"Environment is\n%@", env);
+    char **newEnviron = [self environWithOverrides:env];
+
+    // Note: stringByStandardizingPath will automatically call stringByExpandingTildeInPath.
+    const char *initialPwd = [[[env objectForKey:@"PWD"] stringByStandardizingPath] UTF8String];
+
+    iTermForkState forkState = {
+        .connectionFd = -1,
+        .deadMansPipe = { 0, 0 },
+    };
+
+    const BOOL runJobsInServers = [iTermAdvancedSettingsModel runJobsInServers];
+    BOOL closeFileDescriptors = !runJobsInServers;
+    if (runJobsInServers) {
+        // Create a temporary filename for the unix domain socket. It'll only exist for a moment.
+        NSString *tempPath = [self pathToNewUnixDomainSocket];
+        if (tempPath == nil) {
+            if (completion != nil) {
+                completion();
+            }
+            return;
+        }
+
+        // Begin listening on that path as a unix domain socket.
+        fd = iTermForkToRunJobInServer(&forkState, &ttyState, tempPath);
+        _serverPid = forkState.pid;
+    } else {
+        [self forkToRunJobDirectlyWithForkState:&forkState ttyState:&ttyState];
+    }
+    if (forkState.pid == (pid_t)0) {
+        // Child
+        // Do not start the new process with a signal handler.
+        iTermDidForkChild(argpath, argv, closeFileDescriptors, &forkState, initialPwd, newEnviron);
+        _exit(-1);
+    } else if (forkState.pid < (pid_t)0) {
+        // Error
+        [self failedToForkWithEnvironment:newEnviron program:progpath];
+        if (completion != nil) {
+            completion();
+        }
+        return;
+    }
+    // Parent
+    [self didForkParent:&forkState newEnviron:newEnviron ttyState:&ttyState];
+    if (completion != nil) {
+        completion();
+    }
+}
+
+#pragma mark I/O
+
+- (BOOL)wantsRead {
+    return !self.paused;
+}
+
+- (BOOL)wantsWrite {
+    if (self.paused) {
+        return NO;
+    }
+    [writeLock lock];
+    BOOL wantsWrite = [writeBuffer length] > 0;
+    [writeLock unlock];
+    return wantsWrite;
+}
+
+- (BOOL)hasOutput {
+    return hasOutput;
+}
+
+// The bytes in data were just read from the fd.
+- (void)readTask:(char *)buffer length:(int)length {
+    [self logData:buffer length:length];
+
+    // The delegate is responsible for parsing VT100 tokens here and sending them off to the
+    // main thread for execution. If its queues get too large, it can block.
+    [self.delegate threadedReadTask:buffer length:length];
+
+    @synchronized (self) {
+        if (coprocess_) {
+            [coprocess_.outputBuffer appendData:[NSData dataWithBytes:buffer length:length]];
+        }
+    }
+}
+
+- (void)closeFileDescriptor {
+    if (fd != -1) {
+        close(fd);
+    }
+}
+
+#pragma mark Terminal Size
+
+- (void)rateLimitedSetSizeToDesiredSize {
+    if (_rateLimitedSetSizeToDesiredSizePending) {
+        return;
+    }
+
+    static const NSTimeInterval kDelayBetweenSizeChanges = 0.2;
+    if ([NSDate timeIntervalSinceReferenceDate] - _timeOfLastSizeChange < kDelayBetweenSizeChanges) {
+        // Avoid problems with signal coalescing of SIGWINCH preventing redraw for the second size
+        // change. For example, issue 5096 and 4494.
+        _rateLimitedSetSizeToDesiredSizePending = YES;
+        DLog(@" ** Rate limiting **");
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kDelayBetweenSizeChanges * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            _rateLimitedSetSizeToDesiredSizePending = NO;
+            [self setTerminalSizeToDesiredSize];
+        });
+    } else {
+        [self setTerminalSizeToDesiredSize];
+    }
+}
+
+- (void)setTerminalSizeToDesiredSize {
+    DLog(@"Set size of %@ to %@", _delegate, VT100GridSizeDescription(_desiredSize));
+    _timeOfLastSizeChange = [NSDate timeIntervalSinceReferenceDate];
+
+    struct winsize winsize;
+    ioctl(fd, TIOCGWINSZ, &winsize);
+    if (winsize.ws_col != _desiredSize.width || winsize.ws_row != _desiredSize.height) {
+        DLog(@"Actually setting the size");
+        winsize.ws_col = _desiredSize.width;
+        winsize.ws_row = _desiredSize.height;
+        ioctl(fd, TIOCSWINSZ, &winsize);
+    }
+}
+
+#pragma mark Process Tree
 
 // This is a stunningly brittle hack. Find the child of parentPid with the
 // oldest start time. This relies on undocumented APIs, but short of forking
 // ps, I can't see another way to do it.
-
 - (pid_t)getFirstChildOfPid:(pid_t)parentPid {
     int numBytes;
     numBytes = proc_listpids(PROC_ALL_PIDS, 0, NULL, 0);
@@ -1084,94 +1336,22 @@ static int MyForkPty(int *amaster,
     return oldestPid;
 }
 
-// Get the name of this task's current job. It is quite approximate! Any
-// arbitrary tty-controller in the tty's pgid that has this task as an ancestor
-// may be chosen. This function also implements a chache to avoid doing the
-// potentially expensive system calls too often.
-- (NSString*)currentJob:(BOOL)forceRefresh {
-    return [[ProcessCache sharedInstance] jobNameWithPid:self.pid];
-}
+#pragma mark - Notifications
 
-- (NSString*)getWorkingDirectory {
-    if (self.pid == -1) {
-        DLog(@"Want to use the kernel to get the working directory but pid = -1");
-        return nil;
+// This runs in TaskNotifier's thread.
+- (void)notifierDidSpin {
+    BOOL unblock = NO;
+    @synchronized(self) {
+        unblock = (--_spinsNeeded) > 0;
     }
-    DLog(@"Using OS magic to get the working directory");
-    struct proc_vnodepathinfo vpi;
-    int ret;
-
-    // This only works if the child process is owned by our uid
-    // Notably it seems to work (at least on 10.10) even if the process ID is
-    // not owned by us.
-    ret = iTermProcPidInfoWrapper(self.pid, PROC_PIDVNODEPATHINFO, 0, &vpi, sizeof(vpi));
-    if (ret <= 0) {
-        // The child was probably owned by root (which is expected if it's
-        // a login shell. Use the cwd of its oldest child instead.
-        pid_t childPid = [self getFirstChildOfPid:self.pid];
-        if (childPid > 0) {
-            ret = iTermProcPidInfoWrapper(childPid, PROC_PIDVNODEPATHINFO, 0, &vpi, sizeof(vpi));
-        }
-    }
-    if (ret <= 0) {
-        // An error occurred
-        DLog(@"Failed with error %d", ret);
-        return nil;
-    } else if (ret != sizeof(vpi)) {
-        // Now this is very bad...
-        DLog(@"Got a struct of the wrong size back");
-        return nil;
+    if (unblock) {
+        // Force select() to return so we get another spin even if there is no
+        // activity on the file descriptors.
+        [[TaskNotifier sharedInstance] unblock];
     } else {
-        // All is good
-        NSString *dir = [NSString stringWithUTF8String:vpi.pvi_cdir.vip_path];
-        DLog(@"Result: %@", dir);
-        return dir;
+        [[NSNotificationCenter defaultCenter] removeObserver:self];
+        [self.delegate taskWasDeregistered];
     }
-}
-
-- (void)stopCoprocess {
-    pid_t thePid = 0;
-    @synchronized (self) {
-        if (coprocess_.pid > 0) {
-            thePid = coprocess_.pid;
-        }
-        [coprocess_ terminate];
-        [coprocess_ release];
-        coprocess_ = nil;
-        self.hasMuteCoprocess = NO;
-    }
-    if (thePid) {
-        [[TaskNotifier sharedInstance] waitForPid:thePid];
-    }
-    [[TaskNotifier sharedInstance] performSelectorOnMainThread:@selector(notifyCoprocessChange)
-                                                    withObject:nil
-                                                 waitUntilDone:NO];
-}
-
-- (void)setCoprocess:(Coprocess *)coprocess
-{
-    @synchronized (self) {
-        [coprocess_ autorelease];
-        coprocess_ = [coprocess retain];
-        self.hasMuteCoprocess = coprocess_.mute;
-    }
-    [[TaskNotifier sharedInstance] unblock];
-}
-
-- (Coprocess *)coprocess
-{
-    @synchronized (self) {
-        return coprocess_;
-    }
-    return nil;
-}
-
-- (BOOL)hasCoprocess
-{
-    @synchronized (self) {
-        return coprocess_ != nil;
-    }
-    return NO;
 }
 
 @end

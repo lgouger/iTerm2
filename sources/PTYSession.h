@@ -7,6 +7,8 @@
 #import "iTermWeakReference.h"
 #import "ITAddressBookMgr.h"
 #import "iTermPopupWindowController.h"
+#import "iTermSessionNameController.h"
+
 #import "LineBuffer.h"
 #import "PTYTask.h"
 #import "PTYTextView.h"
@@ -34,6 +36,8 @@ extern NSString *const PTYSessionRevivedNotification;
 @class CapturedOutput;
 @class FakeWindow;
 @class iTermAnnouncementViewController;
+@class iTermVariables;
+@class iTermVariableScope;
 @class PTYTab;
 @class PTYTask;
 @class PTYTextView;
@@ -124,7 +128,7 @@ typedef enum {
 - (void)sessionDidChangeFontSize:(PTYSession *)session;
 
 // Session-initiated resize.
-- (void)sessionInitiatedResize:(PTYSession*)session width:(int)width height:(int)height;
+- (BOOL)sessionInitiatedResize:(PTYSession*)session width:(int)width height:(int)height;
 
 // Select the "next" session in this tab.
 - (void)nextSession;
@@ -200,6 +204,8 @@ typedef enum {
 // Scrollback buffer cleared.
 - (void)sessionDidClearScrollbackBuffer:(PTYSession *)session;
 
+- (iTermVariables *)sessionTabVariables;
+- (void)sessionDuplicateTab;
 @end
 
 @class SessionView;
@@ -250,26 +256,15 @@ typedef enum {
 // than tab colors.
 @property(nonatomic, assign) BOOL havePostedNewOutputNotification;
 
-// Session name; can be changed via escape code. The getter will add formatting to it; to retrieve
-// the value that was set, use -rawName.
-@property(nonatomic, copy) NSString *name;
+@property(nonatomic, readonly) iTermSessionNameController *nameController;
 
-// Unformatted version of -name.
-@property(nonatomic, readonly) NSString *rawName;
-
-// The original bookmark name.
-@property(nonatomic, copy) NSString *bookmarkName;
-
-// defaultName cannot be changed by the host. The getter returns a formatted name. Use
-// joblessDefaultName to get the value that was set.
-@property(nonatomic, copy) NSString *defaultName;
-
-// The value to which defaultName was last set, unadorned with additional formatting.
-@property(nonatomic, readonly) NSString *joblessDefaultName;
+// Returns the presentationName from the nameController. This is only here because
+// it's nearly impossible to find all the call sites for it.
+@property (nonatomic, readonly) NSString *name;
 
 // The window title that should be used when this session is current. Otherwise defaultName
 // should be used.
-@property(nonatomic, copy) NSString *windowTitle;
+@property(nonatomic, readonly) NSString *windowTitle;
 
 // Shell wraps the underlying file descriptor pair.
 @property(nonatomic, retain) PTYTask *shell;
@@ -413,9 +408,9 @@ typedef enum {
 @property(nonatomic, readonly) NSMutableArray<NSString *> *directories;  // of NSString
 @property(nonatomic, readonly) NSMutableArray<VT100RemoteHost *> *hosts;  // of VT100RemoteHost
 
-// Session-defined and user-defined variables. Session-defined vars start with "session." and
-// user-defined variables start with "user.".
-@property(nonatomic, readonly) NSMutableDictionary *variables;
+// Has two children: session and user
+@property (nonatomic, readonly) iTermVariables *variables;
+@property (nonatomic, readonly) iTermVariableScope *variablesScope;
 
 @property(atomic, readonly) PTYSessionTmuxMode tmuxMode;
 
@@ -465,12 +460,26 @@ typedef enum {
 
 #pragma mark - methods
 
++ (id (^)(NSString *))functionCallSource;
+- (id (^)(NSString *))functionCallSource;
+
 + (NSDictionary *)repairedArrangement:(NSDictionary *)arrangement
              replacingProfileWithGUID:(NSString *)badGuid
                           withProfile:(Profile *)goodProfile;
 
++ (NSString *)titleForSessionName:(NSString *)sessionName
+                      profileName:(NSString *)profileName
+                              job:(NSString *)jobVariable
+                              pwd:(NSString *)pwdVariable
+                              tty:(NSString *)ttyVariable
+                             user:(NSString *)userVariable
+                             host:(NSString *)hostVariable
+                             tmux:(NSString *)tmuxVariable
+                       components:(iTermTitleComponents)titleComponents;
+
 + (BOOL)handleShortcutWithoutTerminal:(NSEvent*)event;
 + (void)selectMenuItem:(NSString*)theName;
++ (void)registerBuiltInFunctions;
 
 // Register the contents in the arrangement so that if the session is later
 // restored from an arrangement with the same guid as |arrangement|, the
@@ -520,15 +529,11 @@ typedef enum {
 // Set rows, columns from arrangement.
 - (void)resizeFromArrangement:(NSDictionary *)arrangement;
 
-- (void)runCommandWithOldCwd:(NSString*)oldCWD
-               forObjectType:(iTermObjectType)objectType
-              forceUseOldCWD:(BOOL)forceUseOldCWD
-               substitutions:(NSDictionary *)substituions;
-
 - (void)startProgram:(NSString *)program
          environment:(NSDictionary *)prog_env
               isUTF8:(BOOL)isUTF8
-       substitutions:(NSDictionary *)substitutions;
+       substitutions:(NSDictionary *)substitutions
+          completion:(void (^)(BOOL))completion;
 
 // This is an alternative to runCommandWithOldCwd and startProgram. It attaches
 // to an existing server. Use only if [iTermAdvancedSettingsModel runJobsInServers]
@@ -742,16 +747,31 @@ typedef enum {
 - (void)drawFrameAndRemoveTemporarilyDisablementOfMetalForToken:(id)token NS_AVAILABLE_MAC(10_11);
 
 - (void)executeTokens:(const CVector *)vector bytesHandled:(int)length;
-- (void)setVariableNamed:(NSString *)name toValue:(NSString *)newValue;
+- (void)setVariableNamed:(NSString *)name toValue:(id)newValue;
 - (void)injectData:(NSData *)data;
+
+// Call this when a session moves to a different tab or window to update the session ID.
+- (void)didMoveSession;
+- (void)triggerDidChangeNameTo:(NSString *)newName;
+- (void)setTmuxWindowTitle:(NSString *)newName;
+- (void)didInitializeSessionWithName:(NSString *)name;
+- (void)profileNameDidChangeTo:(NSString *)name;
+- (void)profileDidChangeToProfileWithName:(NSString *)name;
 
 #pragma mark - API
 
 - (ITMGetBufferResponse *)handleGetBufferRequest:(ITMGetBufferRequest *)request;
 - (ITMGetPromptResponse *)handleGetPromptRequest:(ITMGetPromptRequest *)request;
-- (ITMNotificationResponse *)handleAPINotificationRequest:(ITMNotificationRequest *)request connection:(id)connection;
-- (ITMSetProfilePropertyResponse *)handleSetProfilePropertyForKey:(NSString *)key value:(id)value;
+- (ITMNotificationResponse *)handleAPINotificationRequest:(ITMNotificationRequest *)request
+                                            connectionKey:(NSString *)connectionKey;
+- (ITMSetProfilePropertyResponse_Status)handleSetProfilePropertyForKey:(NSString *)key value:(id)value;
 - (ITMGetProfilePropertyResponse *)handleGetProfilePropertyForKeys:(NSArray<NSString *> *)keys;
+
+// Run a script-side function. Can include composition, references to variables.
+// origin is used to show why the function was called and goes in the error's title. e.g., "Trigger".
+- (void)invokeFunctionCall:(NSString *)invocation
+              extraContext:(NSDictionary *)extraContext
+                    origin:(NSString *)origin;
 
 #pragma mark - Testing utilities
 

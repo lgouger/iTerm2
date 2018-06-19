@@ -12,6 +12,7 @@
 #import "iTermAdvancedSettingsModel.h"
 #import "iTermBuildingScriptWindowController.h"
 #import "iTermPythonRuntimeDownloader.h"
+#import "iTermScriptHistory.h"
 #import "iTermScriptTemplatePickerWindowController.h"
 #import "iTermWarning.h"
 #import "NSFileManager+iTerm.h"
@@ -27,11 +28,13 @@ NS_ASSUME_NONNULL_BEGIN
     NSMenu *_scriptsMenu;
     BOOL _ranAutoLaunchScript;
     SCEvents *_events;
+    NSArray<NSString *> *_allScripts;
 }
 
 - (instancetype)initWithMenu:(NSMenu *)menu {
     self = [super init];
     if (self) {
+        _allScripts = [NSMutableArray array];
         _scriptsMenu = menu;
         _events = [[SCEvents alloc] init];
         _events.delegate = self;
@@ -50,14 +53,41 @@ NS_ASSUME_NONNULL_BEGIN
     [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 
+- (BOOL)validateMenuItem:(NSMenuItem *)menuItem {
+    NSString *path = menuItem.identifier;
+    const BOOL isRunning = path && !![[iTermScriptHistory sharedInstance] runningEntryWithPath:path];
+    menuItem.state = isRunning ? NSOnState : NSOffState;
+    return YES;
+}
+
 - (void)didInstallPythonRuntime:(NSNotification *)notification {
-    [self removeInstallMenuItem];
+    [self changeInstallToUpdate];
 }
 
 - (NSInteger)separatorIndex {
     return [_scriptsMenu.itemArray indexOfObjectPassingTest:^BOOL(NSMenuItem * _Nonnull obj, NSUInteger idx, BOOL * _Nonnull stop) {
         return [obj.identifier isEqualToString:@"Separator"];
     }];
+}
+
+- (NSArray<NSString *> *)allScriptsFromMenu {
+    NSInteger i = [self separatorIndex];
+    NSMutableArray<NSString *> *result = [NSMutableArray array];
+    if (i != NSNotFound) {
+        [self addMenuItemsIn:_scriptsMenu fromIndex:i + 1 toArray:result path:@""];
+    }
+    return result;
+}
+
+- (void)addMenuItemsIn:(NSMenu *)container fromIndex:(NSInteger)fromIndex toArray:(NSMutableArray<NSString *> *)result path:(NSString *)path {
+    for (NSInteger i = fromIndex; i < container.itemArray.count; i++) {
+        NSMenuItem *item = container.itemArray[i];
+        if (item.submenu) {
+            [self addMenuItemsIn:item.submenu fromIndex:0 toArray:result path:[path stringByAppendingPathComponent:item.title]];
+        } else {
+            [result addObject:[path stringByAppendingPathComponent:item.title]];
+        }
+    }
 }
 
 - (void)removeMenuItemsAfterSeparator {
@@ -76,6 +106,7 @@ NS_ASSUME_NONNULL_BEGIN
     NSString *scriptsPath = [[NSFileManager defaultManager] scriptsPath];
 
     [self addMenuItemsAt:scriptsPath toMenu:_scriptsMenu];
+    _allScripts = [self allScriptsFromMenu];
 }
 
 - (void)addMenuItemsAt:(NSString *)root toMenu:(NSMenu *)menu {
@@ -130,6 +161,7 @@ NS_ASSUME_NONNULL_BEGIN
     }
 }
 
+
 - (void)revealScriptsInFinder {
     NSString *scriptsPath = [[NSFileManager defaultManager] scriptsPath];
     [[NSFileManager defaultManager] createDirectoryAtPath:scriptsPath
@@ -142,22 +174,42 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)setInstallRuntimeMenuItem:(NSMenuItem *)installRuntimeMenuItem {
     _installRuntimeMenuItem = installRuntimeMenuItem;
     if ([[iTermPythonRuntimeDownloader sharedInstance] isPythonRuntimeInstalled]) {
-        [self removeInstallMenuItem];
+        [self changeInstallToUpdate];
     }
 }
 
-- (void)removeInstallMenuItem {
-    if (_installRuntimeMenuItem) {
-        [_scriptsMenu removeItem:_installRuntimeMenuItem];
-        _installRuntimeMenuItem = nil;
-    }
+
+- (void)changeInstallToUpdate {
+    _installRuntimeMenuItem.title = @"Check for Updated Runtime";
+    _installRuntimeMenuItem.action = @selector(userRequestedCheckForUpdate);
+    _installRuntimeMenuItem.target = [iTermPythonRuntimeDownloader sharedInstance];
 }
 
 #pragma mark - Actions
 
-- (void)launchScript:(NSMenuItem *)sender {
+- (void)launchOrTerminateScript:(NSMenuItem *)sender {
     NSString *fullPath = sender.identifier;
+    iTermScriptHistoryEntry *entry = [[iTermScriptHistory sharedInstance] runningEntryWithPath:fullPath];
+    if (entry) {
+        [entry kill];
+    } else {
+        [self launchScriptWithAbsolutePath:fullPath];
+    }
+}
 
+- (void)revealScript:(NSMenuItem *)sender {
+    NSString *identifier = sender.identifier;
+    NSString *prefix = @"/Reveal/";
+    NSString *fullPath = [identifier substringFromIndex:prefix.length];
+    [[NSWorkspace sharedWorkspace] activateFileViewerSelectingURLs:@[ [NSURL fileURLWithPath:fullPath] ]];
+}
+
+- (void)launchScriptWithRelativePath:(NSString *)path {
+    NSString *fullPath = [[[NSFileManager defaultManager] scriptsPath] stringByAppendingPathComponent:path];
+    [self launchScriptWithAbsolutePath:fullPath];
+}
+
+- (void)launchScriptWithAbsolutePath:(NSString *)fullPath {
     NSString *venv = [iTermAPIScriptLauncher environmentForScript:fullPath checkForMain:YES];
     if (venv) {
         [iTermAPIScriptLauncher launchScript:[fullPath stringByAppendingPathComponent:@"main.py"]
@@ -165,11 +217,11 @@ NS_ASSUME_NONNULL_BEGIN
         return;
     }
 
-    if ([[[sender title] pathExtension] isEqualToString:@"py"]) {
+    if ([[fullPath pathExtension] isEqualToString:@"py"]) {
         [iTermAPIScriptLauncher launchScript:fullPath];
         return;
     }
-    if ([[[sender title] pathExtension] isEqualToString:@"scpt"]) {
+    if ([[fullPath pathExtension] isEqualToString:@"scpt"]) {
         NSAppleScript *script;
         NSDictionary *errorInfo = nil;
         NSURL *aURL = [NSURL fileURLWithPath:fullPath];
@@ -213,41 +265,52 @@ NS_ASSUME_NONNULL_BEGIN
 
     NSURL *url = [self runSavePanelForNewScriptWithPicker:picker];
     if (url) {
-        if (picker.selectedEnvironment == iTermScriptEnvironmentPrivateEnvironment) {
-            NSURL *folder = [NSURL fileURLWithPath:[self folderForFullEnvironmentSavePanelURL:url]];
-            NSURL *existingEnv = [folder URLByAppendingPathComponent:@"iterm2env"];
-            [[NSFileManager defaultManager] removeItemAtURL:existingEnv error:nil];
-            iTermBuildingScriptWindowController *pleaseWait = [[iTermBuildingScriptWindowController alloc] initWithWindowNibName:@"iTermBuildingScriptWindowController"];
-            pleaseWait.window.alphaValue = 0;
-            NSScreen *screen = pleaseWait.window.screen;
-            NSRect screenFrame = screen.frame;
-            NSSize windowSize = pleaseWait.window.frame.size;
-            NSPoint screenCenter = NSMakePoint(NSMinX(screenFrame) + NSWidth(screenFrame) / 2,
-                                               NSMinY(screenFrame) + NSHeight(screenFrame) / 2);
-            NSPoint windowOrigin = NSMakePoint(screenCenter.x - windowSize.width / 2,
-                                               screenCenter.y - windowSize.height / 2);
-            [pleaseWait.window setFrameOrigin:windowOrigin];
-            pleaseWait.window.alphaValue = 1;
+        [[iTermPythonRuntimeDownloader sharedInstance] downloadOptionalComponentsIfNeededWithConfirmation:YES withCompletion:^(BOOL ok) {
+            if (!ok) {
+                return;
+            }
+            [self reallyCreateNewPythonScriptAtURL:url picker:picker];
+        }];
+    }
+}
 
-            [pleaseWait.window makeKeyAndOrderFront:nil];
-            [[iTermPythonRuntimeDownloader sharedInstance] installPythonEnvironmentTo:folder completion:^(BOOL ok) {
-                if (ok) {
-                    [pleaseWait.window close];
-                    [self finishInstallingNewPythonScriptForPicker:picker url:url];
-                } else {
-                    [pleaseWait.window close];
-                    NSAlert *alert = [[NSAlert alloc] init];
-                    alert.messageText = @"Installation Failed";
-                    alert.informativeText = @"Remove ~/Library/Application Support/iTerm2/iterm2env and try again.";
-                    [alert runModal];
-                    return;
-                }
-            }];
-        } else {
-            [[iTermPythonRuntimeDownloader sharedInstance] downloadOptionalComponentsIfNeededWithCompletion:^{
-                [self finishInstallingNewPythonScriptForPicker:picker url:url];
-            }];
-        }
+- (iTermBuildingScriptWindowController *)newPleaseWaitWindowController {
+    iTermBuildingScriptWindowController *pleaseWait = [[iTermBuildingScriptWindowController alloc] initWithWindowNibName:@"iTermBuildingScriptWindowController"];
+    pleaseWait.window.alphaValue = 0;
+    NSScreen *screen = pleaseWait.window.screen;
+    NSRect screenFrame = screen.frame;
+    NSSize windowSize = pleaseWait.window.frame.size;
+    NSPoint screenCenter = NSMakePoint(NSMinX(screenFrame) + NSWidth(screenFrame) / 2,
+                                       NSMinY(screenFrame) + NSHeight(screenFrame) / 2);
+    NSPoint windowOrigin = NSMakePoint(screenCenter.x - windowSize.width / 2,
+                                       screenCenter.y - windowSize.height / 2);
+    [pleaseWait.window setFrameOrigin:windowOrigin];
+    pleaseWait.window.alphaValue = 1;
+
+    [pleaseWait.window makeKeyAndOrderFront:nil];
+    return pleaseWait;
+}
+
+- (void)reallyCreateNewPythonScriptAtURL:(NSURL *)url
+                                  picker:(iTermScriptTemplatePickerWindowController *)picker {
+    if (picker.selectedEnvironment == iTermScriptEnvironmentPrivateEnvironment) {
+        NSURL *folder = [NSURL fileURLWithPath:[self folderForFullEnvironmentSavePanelURL:url]];
+        NSURL *existingEnv = [folder URLByAppendingPathComponent:@"iterm2env"];
+        [[NSFileManager defaultManager] removeItemAtURL:existingEnv error:nil];
+        iTermBuildingScriptWindowController *pleaseWait = [self newPleaseWaitWindowController];
+        [[iTermPythonRuntimeDownloader sharedInstance] installPythonEnvironmentTo:folder completion:^(BOOL ok) {
+            [pleaseWait.window close];
+            if (!ok) {
+                NSAlert *alert = [[NSAlert alloc] init];
+                alert.messageText = @"Installation Failed";
+                alert.informativeText = @"Remove ~/Library/Application Support/iTerm2/iterm2env and try again.";
+                [alert runModal];
+                return;
+            }
+            [self finishInstallingNewPythonScriptForPicker:picker url:url];
+        }];
+    } else {
+        [self finishInstallingNewPythonScriptForPicker:picker url:url];
     }
 }
 
@@ -353,12 +416,22 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (void)addFile:(NSString *)file withFullPath:(NSString *)path toScriptMenu:(NSMenu *)scriptMenu {
     NSMenuItem *scriptItem = [[NSMenuItem alloc] initWithTitle:file
-                                                        action:@selector(launchScript:)
+                                                        action:@selector(launchOrTerminateScript:)
                                                  keyEquivalent:@""];
 
     [scriptItem setTarget:self];
     scriptItem.identifier = path;
     [scriptMenu addItem:scriptItem];
+
+    NSMenuItem *altItem = [[NSMenuItem alloc] initWithTitle:[NSString stringWithFormat:@"Reveal %@", file]
+                                                        action:@selector(revealScript:)
+                                                 keyEquivalent:@""];
+
+    [altItem setKeyEquivalentModifierMask:NSEventModifierFlagOption];
+    [altItem setTarget:self];
+    altItem.alternate = YES;
+    altItem.identifier = [NSString stringWithFormat:@"/Reveal/%@", path];
+    [scriptMenu addItem:altItem];
 }
 
 - (void)showAlertForScript:(NSString *)fullPath error:(NSDictionary *)errorInfo {
@@ -407,7 +480,7 @@ NS_ASSUME_NONNULL_BEGIN
 }
 
 - (void)runAutoLaunchScript:(NSString *)path {
-    [iTermAPIScriptLauncher launchScript:path];
+    [self launchScriptWithAbsolutePath:path];
 }
 
 - (void)runLegacyAutoLaunchScripts {

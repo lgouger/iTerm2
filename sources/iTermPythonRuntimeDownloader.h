@@ -16,16 +16,18 @@ extern NSString *const iTermPythonRuntimeDownloaderDidInstallRuntimeNotification
 // Returns the path of the standard python binary.
 @property (nonatomic, readonly) NSString *pathToStandardPyenvPython;
 
-// Returns the path of the standard pyenv folder.
-@property (nonatomic, readonly) NSString *pathToStandardPyenv;
+- (NSString *)pathToStandardPyenvCreatingSymlinkIfNeeded:(BOOL)createSymlink;
 
 + (instancetype)sharedInstance;
 
 // This downloads if any version is already installed and there's a newer version available.
 - (void)upgradeIfPossible;
 
+// Like upgradeIfPossible but shows the window immediately.
+- (void)userRequestedCheckForUpdate;
+
 // This downloads only if the minimum version is not installed.
-- (void)downloadOptionalComponentsIfNeededWithCompletion:(void (^)(void))completion;
+- (void)downloadOptionalComponentsIfNeededWithConfirmation:(BOOL)confirm withCompletion:(void (^)(BOOL))completion;
 
 // Returns the path of the python binary given a root directory having a pyenv.
 - (NSString *)pyenvAt:(NSString *)root;

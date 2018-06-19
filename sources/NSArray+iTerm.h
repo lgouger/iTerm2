@@ -8,6 +8,8 @@
 
 #import <Foundation/Foundation.h>
 
+@class iTermTuple;
+
 @interface NSArray<ObjectType> (iTerm)
 
 + (NSArray<NSNumber *> *)sequenceWithRange:(NSRange)range;
@@ -82,6 +84,11 @@
 
 - (void)enumerateCoalescedObjectsWithComparator:(BOOL (^)(ObjectType obj1, ObjectType obj2))comparator
                                           block:(void (^)(ObjectType object, NSUInteger count))block;
+
+- (NSArray<iTermTuple *> *)tuplesWithFirstObjectEqualTo:(id)firstObject;
+- (NSDictionary<id, NSArray<ObjectType> *> *)classifyWithBlock:(id (^)(ObjectType))block;
+- (ObjectType)uncheckedObjectAtIndex:(NSInteger)index;
+
 @end
 
 @interface NSMutableArray<ObjectType> (iTerm)

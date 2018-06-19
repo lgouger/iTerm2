@@ -24,6 +24,7 @@
 #import "iTermController.h"
 #import "iTermFindCursorView.h"
 #import "iTermFontPanel.h"
+#import "iTermFunctionCallTextFieldDelegate.h"
 #import "iTermNotificationController.h"
 #import "iTermHotKeyController.h"
 #import "iTermHotKeyMigrationHelper.h"
@@ -38,12 +39,15 @@
 #import "iTermQuickLookController.h"
 #import "iTermRateLimitedUpdate.h"
 #import "iTermRootTerminalView.h"
+#import "iTermScriptFunctionCall.h"
 #import "iTermSelection.h"
+#import "iTermSessionFactory.h"
 #import "iTermShellHistoryController.h"
 #import "iTermSystemVersion.h"
 #import "iTermTabBarControlView.h"
 #import "iTermToolbeltView.h"
 #import "iTermTouchBarButton.h"
+#import "iTermVariables.h"
 #import "iTermWarning.h"
 #import "iTermWindowShortcutLabelTitlebarAccessoryViewController.h"
 #import "MovePaneController.h"
@@ -172,17 +176,6 @@ static NSRect iTermRectCenteredVerticallyWithinRect(NSRect frameToCenter, NSRect
 
 @implementation PseudoTerminal {
     NSPoint preferredOrigin_;
-
-
-    ////////////////////////////////////////////////////////////////////////////
-    // Parameter Panel
-    // A bookmark may have metasyntactic variables like $$FOO$$ in the command.
-    // When opening such a bookmark, pop up a sheet and ask the user to fill in
-    // the value. These fields belong to that sheet.
-    __weak IBOutlet NSTextField *parameterName;
-    __weak IBOutlet NSPanel *parameterPanel;
-    __weak IBOutlet NSTextField *parameterValue;
-    __weak IBOutlet NSTextField *parameterPrompt;
 
     ////////////////////////////////////////////////////////////////////////////
     // Instant Replay
@@ -355,8 +348,6 @@ static NSRect iTermRectCenteredVerticallyWithinRect(NSRect frameToCenter, NSRect
     // out if it's safe to toggle Lion full screen since only one can go at a time.
     BOOL _haveDelayedEnterFullScreenMode;
 
-    BOOL _parameterPanelCanceled;
-
     // Number of tabs since last change.
     NSInteger _previousNumberOfTabs;
 
@@ -374,6 +365,9 @@ static NSRect iTermRectCenteredVerticallyWithinRect(NSRect frameToCenter, NSRect
     NSString *_previousTouchBarWord;
 
     BOOL _windowWasJustCreated;
+
+    iTermSessionFactory *_sessionFactory;
+    BOOL _openingPopupWindow;
 }
 
 + (void)registerSessionsInArrangement:(NSDictionary *)arrangement {
@@ -862,6 +856,7 @@ ITERM_WEAKLY_REFERENCEABLE
     [_touchBarRateLimitedUpdate invalidate];
     [_touchBarRateLimitedUpdate release];
     [_previousTouchBarWord release];
+    [_sessionFactory release];
 
     [super dealloc];
 }
@@ -1159,7 +1154,7 @@ ITERM_WEAKLY_REFERENCEABLE
 {
     Profile* profile = [[ProfileModel sharedInstance] bookmarkWithGuid:[sender representedObject]];
     if (profile) {
-        [self createTabWithProfile:profile withCommand:nil];
+        [self createTabWithProfile:profile withCommand:nil environment:nil];
     }
 }
 
@@ -3035,6 +3030,12 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (void)windowDidResignKey:(NSNotification *)aNotification {
+    PtyLog(@"PseudoTerminal windowDidResignKey");
+    if (_openingPopupWindow) {
+        DLog(@"Ignoring it because we're opening a popup window now");
+        return;
+    }
+
     for (PTYSession *aSession in [self allSessions]) {
         if ([[aSession textview] isFindingCursor]) {
             [[aSession textview] endFindCursor];
@@ -3042,16 +3043,17 @@ ITERM_WEAKLY_REFERENCEABLE
         [[aSession textview] removeUnderline];
     }
 
-    PtyLog(@"PseudoTerminal windowDidResignKey");
     if (togglingFullScreen_) {
         PtyLog(@"windowDidResignKey returning because togglingFullScreen.");
         return;
     }
 
-    NSArray<NSWindowController *> *siblings = [[iTermHotKeyController sharedInstance] siblingWindowControllersOf:self];
-    NSWindowController *newKeyWindowController = [[NSApp keyWindow] windowController];
-    if (![siblings containsObject:newKeyWindowController]) {
-        [[iTermHotKeyController sharedInstance] autoHideHotKeyWindows:siblings];
+    if (![iTermApplication sharedApplication].it_characterPanelIsOpen) {
+        NSArray<NSWindowController *> *siblings = [[iTermHotKeyController sharedInstance] siblingWindowControllersOf:self];
+        NSWindowController *newKeyWindowController = [[NSApp keyWindow] windowController];
+        if (![siblings containsObject:newKeyWindowController]) {
+            [[iTermHotKeyController sharedInstance] autoHideHotKeyWindows:siblings];
+        }
     }
 
     [_contentView.tabBarControl setFlashing:NO];
@@ -3101,10 +3103,12 @@ ITERM_WEAKLY_REFERENCEABLE
 #endif
     PtyLog(@"%s(%d):-[PseudoTerminal windowDidResignMain:%@]",
           __FILE__, __LINE__, aNotification);
-    NSArray<NSWindowController *> *siblings = [[iTermHotKeyController sharedInstance] siblingWindowControllersOf:self];
-    NSWindowController *newMainWindowController = [[NSApp mainWindow] windowController];
-    if (![siblings containsObject:newMainWindowController]) {
-        [[iTermHotKeyController sharedInstance] autoHideHotKeyWindows:siblings];
+    if (![iTermApplication sharedApplication].it_characterPanelIsOpen) {
+        NSArray<NSWindowController *> *siblings = [[iTermHotKeyController sharedInstance] siblingWindowControllersOf:self];
+        NSWindowController *newMainWindowController = [[NSApp mainWindow] windowController];
+        if (![siblings containsObject:newMainWindowController]) {
+            [[iTermHotKeyController sharedInstance] autoHideHotKeyWindows:siblings];
+        }
     }
 
     // update the cursor
@@ -4041,13 +4045,12 @@ ITERM_WEAKLY_REFERENCEABLE
     }
 }
 
-- (void)sessionInitiatedResize:(PTYSession*)session width:(int)width height:(int)height
-{
+- (BOOL)sessionInitiatedResize:(PTYSession *)session width:(int)width height:(int)height {
     PtyLog(@"sessionInitiatedResize");
     // ignore resize request when we are in full screen mode.
     if ([self anyFullScreen]) {
         PtyLog(@"sessionInitiatedResize - in full screen mode");
-        return;
+        return NO;
     }
 
     PTYTab *tab = [self tabForSession:session];
@@ -4058,6 +4061,7 @@ ITERM_WEAKLY_REFERENCEABLE
     PtyLog(@"sessionInitiatedResize - calling fitTabsToWindow");
     [self fitTabsToWindow];
     [tab setLockedSession:nil];
+    return YES;
 }
 
 // Contextual menu
@@ -4907,10 +4911,30 @@ ITERM_WEAKLY_REFERENCEABLE
             [session.shell originalCommand] ?: @"None"];
 }
 
-- (void)tabView:(NSTabView *)tabView doubleClickTabViewItem:(NSTabViewItem *)tabViewItem
-{
+- (void)tabView:(NSTabView *)tabView doubleClickTabViewItem:(NSTabViewItem *)tabViewItem {
     [tabView selectTabViewItem:tabViewItem];
-    [self editCurrentSession:self];
+    PTYTab *tab = tabViewItem.identifier;
+    NSAlert *alert = [[[NSAlert alloc] init] autorelease];
+    alert.messageText = @"Set Tab Title";
+    alert.informativeText = @"If this is empty, the tab takes the active session’s title. Variables and function calls enclosed in \\(…) will replaced with their evalution.";
+    NSTextField *titleTextField = [[[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 400, 24 * 3)] autorelease];
+    iTermFunctionCallTextFieldDelegate *delegate;
+    delegate = [[[iTermFunctionCallTextFieldDelegate alloc] initWithPaths:[iTermVariables recordedVariableNamesInContext:iTermVariablesSuggestionContextTab]
+                                                              passthrough:nil
+                                                            functionsOnly:NO] autorelease];
+    titleTextField.delegate = delegate;
+    titleTextField.editable = YES;
+    titleTextField.selectable = YES;
+    titleTextField.stringValue = tab.titleOverride ?: @"";
+    alert.accessoryView = titleTextField;
+    [alert addButtonWithTitle:@"OK"];
+    [alert addButtonWithTitle:@"Cancel"];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [titleTextField.window makeFirstResponder:titleTextField];
+    });
+    if ([alert runModal] == NSAlertFirstButtonReturn) {
+        tab.titleOverride = titleTextField.stringValue.length ? titleTextField.stringValue : nil;
+    }
 }
 
 - (void)tabViewDoubleClickTabBar:(NSTabView *)tabView {
@@ -4986,6 +5010,9 @@ ITERM_WEAKLY_REFERENCEABLE
     }
     [controller setPartialWindowIdOrder:windowIds];
     [[NSNotificationCenter defaultCenter] postNotificationName:iTermTabDidChangePositionInWindowNotification object:nil];
+    for (PTYSession *session in self.allSessions) {
+        [session didMoveSession];
+    }
 }
 
 - (PTYTabView *)tabView
@@ -5067,6 +5094,12 @@ ITERM_WEAKLY_REFERENCEABLE
               contextInfo:(id)contextInfo {
     [sheet close];
     [sheet release];
+}
+
+- (void)openPopupWindow:(iTermPopupWindowController *)popupWindowController {
+    _openingPopupWindow = YES;
+    [popupWindowController popWithDelegate:[self currentSession]];
+    _openingPopupWindow = NO;
 }
 
 #pragma mark - iTermInstantReplayDelegate
@@ -5196,13 +5229,15 @@ ITERM_WEAKLY_REFERENCEABLE
     PTYSession *newSession;
 
     // Initialize a new session
+    Profile *profile = [self profileForNewSessionPreferringProfile:oldSession.profile];
     newSession = [[[PTYSession alloc] initSynthetic:YES] autorelease];
     // NSLog(@"New session for IR view is at %p", newSession);
 
     // set our preferences
-    [newSession setProfile:[oldSession profile]];
+    newSession.profile = profile;
+
     [[newSession screen] setMaxScrollbackLines:0];
-    [self setupSession:newSession title:nil withSize:nil];
+    [self setupSession:newSession withSize:nil];
     [[newSession view] setViewId:[[oldSession view] viewId]];
     [[newSession view] setShowTitle:[[oldSession view] showTitle] adjustScrollView:YES];
 
@@ -5401,7 +5436,7 @@ ITERM_WEAKLY_REFERENCEABLE
     if (!pbHistoryView) {
         pbHistoryView = [[PasteboardHistoryWindowController alloc] init];
     }
-    [pbHistoryView popWithDelegate:[self currentSession]];
+    [self openPopupWindow:pbHistoryView];
 }
 
 - (IBAction)openCommandHistory:(id)sender
@@ -5410,7 +5445,7 @@ ITERM_WEAKLY_REFERENCEABLE
         commandHistoryPopup = [[CommandHistoryPopupWindowController alloc] init];
     }
     if ([[iTermShellHistoryController sharedInstance] commandHistoryHasEverBeenUsed]) {
-        [commandHistoryPopup popWithDelegate:[self currentSession]];
+        [self openPopupWindow:commandHistoryPopup];
         [commandHistoryPopup loadCommands:[commandHistoryPopup commandsForHost:[[self currentSession] currentHost]
                                                                 partialCommand:[[self currentSession] currentCommand]
                                                                         expand:YES]
@@ -5425,7 +5460,7 @@ ITERM_WEAKLY_REFERENCEABLE
         _directoriesPopupWindowController = [[DirectoriesPopupWindowController alloc] init];
     }
     if ([[iTermShellHistoryController sharedInstance] commandHistoryHasEverBeenUsed]) {
-        [_directoriesPopupWindowController popWithDelegate:[self currentSession]];
+        [self openPopupWindow:_directoriesPopupWindowController];
         [_directoriesPopupWindowController loadDirectoriesForHost:[[self currentSession] currentHost]];
     } else {
         [iTermShellHistoryController showInformationalMessage];
@@ -5527,7 +5562,7 @@ ITERM_WEAKLY_REFERENCEABLE
     if ([[autocompleteView window] isVisible]) {
         [autocompleteView more];
     } else {
-        [autocompleteView popWithDelegate:[self currentSession]];
+        [self openPopupWindow:autocompleteView];
         NSString *currentCommand = [[self currentSession] currentCommand];
         [autocompleteView addCommandEntries:[[self currentSession] autocompleteSuggestionsForCurrentCommand]
                                     context:currentCommand];
@@ -5744,7 +5779,7 @@ ITERM_WEAKLY_REFERENCEABLE
     scrollView = sessionView.scrollview;
     NSSize size = [sessionView frame].size;
     if (performSetup) {
-        [self setupSession:newSession title:nil withSize:&size];
+        [self setupSession:newSession withSize:&size];
         scrollView = [[[newSession view] subviews] objectAtIndex:0];
     } else {
         [newSession setScrollViewDocumentView];
@@ -5792,6 +5827,13 @@ ITERM_WEAKLY_REFERENCEABLE
     }
 }
 
+- (iTermSessionFactory *)sessionFactory {
+    if (!_sessionFactory) {
+        _sessionFactory = [[iTermSessionFactory alloc] init];
+    }
+    return _sessionFactory;
+}
+
 - (PTYSession *)splitVertically:(BOOL)isVertical
                    withBookmark:(Profile*)theBookmark
                   targetSession:(PTYSession*)targetSession {
@@ -5835,14 +5877,27 @@ ITERM_WEAKLY_REFERENCEABLE
         [[ProfileModel sessionsInstance] addBookmark:temp];
         theBookmark = temp;
     }
-    PTYSession* newSession = [[self newSessionWithBookmark:theBookmark] autorelease];
+    PTYSession* newSession = [[self.sessionFactory newSessionWithProfile:theBookmark] autorelease];
     [self splitVertically:isVertical
                    before:before
             addingSession:newSession
             targetSession:targetSession
              performSetup:YES];
 
-    if (![self runCommandInSession:newSession inCwd:oldCWD forObjectType:iTermPaneObject]) {
+    if (![self.sessionFactory attachOrLaunchCommandInSession:newSession
+                                                   canPrompt:YES
+                                                  objectType:iTermPaneObject
+                                            serverConnection:nil
+                                                   urlString:nil
+                                                allowURLSubs:NO
+                                                 environment:@{}
+                                                      oldCWD:oldCWD
+                                              forceUseOldCWD:NO
+                                                     command:nil
+                                                      isUTF8:nil
+                                               substitutions:nil
+                                            windowController:self
+                                                  completion:nil]) {
         [newSession terminate];
         [[self tabForSession:newSession] removeSession:newSession];
     }
@@ -6206,58 +6261,6 @@ ITERM_WEAKLY_REFERENCEABLE
             [self tabsDidReorder];
         }
     }
-}
-
-- (NSString *)promptForParameter:(NSString *)name {
-    if (self.disablePromptForSubstitutions) {
-        return @"";
-    }
-    // Make the name pretty.
-    name = [name stringByReplacingOccurrencesOfString:@"$$" withString:@""];
-    name = [name stringByReplacingOccurrencesOfString:@"_" withString:@" "];
-    name = [name lowercaseString];
-    if (name.length) {
-        NSString *firstLetter = [name substringWithRange:NSMakeRange(0, 1)];
-        NSString *lastLetters = [name substringFromIndex:1];
-        name = [[firstLetter uppercaseString] stringByAppendingString:lastLetters];
-    }
-    [parameterName setStringValue:[NSString stringWithFormat:@"“%@”:", name]];
-    [parameterValue setStringValue:@""];
-
-    [self.window beginSheet:parameterPanel completionHandler:nil];
-
-    [NSApp runModalForWindow:parameterPanel];
-
-    [self.window endSheet:parameterPanel];
-
-    [parameterPanel orderOut:self];
-
-    if (_parameterPanelCanceled) {
-        return nil;
-    } else {
-        return [[parameterValue.stringValue copy] autorelease];
-    }
-}
-
-// Returns nil if the user pressed cancel, otherwise returns a dictionary that's a supeset of |substitutions|.
-- (NSDictionary *)substitutionsForCommand:(NSString *)command
-                              sessionName:(NSString *)name
-                        baseSubstitutions:(NSDictionary *)substitutions {
-    NSSet *cmdVars = [command doubleDollarVariables];
-    NSSet *nameVars = [name doubleDollarVariables];
-    NSMutableSet *allVars = [[cmdVars mutableCopy] autorelease];
-    [allVars unionSet:nameVars];
-    NSMutableDictionary *allSubstitutions = [[substitutions mutableCopy] autorelease];
-    for (NSString *var in allVars) {
-        if (!substitutions[var]) {
-            NSString *value = [self promptForParameter:var];
-            if (!value) {
-                return nil;
-            }
-            allSubstitutions[var] = value;
-        }
-    }
-    return allSubstitutions;
 }
 
 - (NSArray<PTYTab *> *)tabs {
@@ -6920,37 +6923,39 @@ ITERM_WEAKLY_REFERENCEABLE
     }
 }
 
-// Set the session's profile dictionary and initialize its screen and name. Sets the
-// window title to the session's name. If size is not nil then the session is initialized to fit
-// a view of that size; otherwise the size is derived from the existing window if there is already
-// an open tab, or its bookmark's preference if it's the first session in the window.
-- (void)setupSession:(PTYSession *)aSession
-               title:(NSString *)title
-            withSize:(NSSize*)size {
-    NSDictionary *tempPrefs;
-    NSParameterAssert(aSession != nil);
-
+- (Profile *)profileForNewSessionPreferringProfile:(Profile *)preferred {
     // set some default parameters
-    if ([aSession profile] == nil) {
-        tempPrefs = [[ProfileModel sharedInstance] defaultBookmark];
+    if (preferred == nil) {
+        Profile *tempPrefs = [[ProfileModel sharedInstance] defaultBookmark];
         if (tempPrefs != nil) {
             // Use the default bookmark. This path is taken with applescript's
             // "make new session at the end of sessions" command.
-            [aSession setProfile:tempPrefs];
+            return tempPrefs;
         } else {
             // get the hardcoded defaults
             NSMutableDictionary* dict = [[[NSMutableDictionary alloc] init] autorelease];
             [ITAddressBookMgr setDefaultsInBookmark:dict];
             [dict setObject:[ProfileModel freshGuid] forKey:KEY_GUID];
-            [aSession setProfile:dict];
-            tempPrefs = dict;
+            return dict;
         }
     } else {
-        tempPrefs = [aSession profile];
+        return preferred;
     }
-    PtyLog(@"Open session with prefs: %@", tempPrefs);
-    int rows = [[tempPrefs objectForKey:KEY_ROWS] intValue];
-    int columns = [[tempPrefs objectForKey:KEY_COLUMNS] intValue];
+}
+
+// Set the session's profile dictionary and initialize its screen and name. Sets the
+// window title to the session's name. If size is not nil then the session is initialized to fit
+// a view of that size; otherwise the size is derived from the existing window if there is already
+// an open tab, or its bookmark's preference if it's the first session in the window.
+- (void)setupSession:(PTYSession *)aSession
+            withSize:(NSSize*)size {
+    NSDictionary *profile;
+    NSParameterAssert(aSession != nil);
+
+    profile = aSession.profile;
+    PtyLog(@"Open session with prefs: %@", profile);
+    int rows = [[profile objectForKey:KEY_ROWS] intValue];
+    int columns = [[profile objectForKey:KEY_COLUMNS] intValue];
     if (self.tabs.count == 0 && desiredRows_ < 0) {
         desiredRows_ = rows;
         desiredColumns_ = columns;
@@ -6965,9 +6970,9 @@ ITERM_WEAKLY_REFERENCEABLE
     }
     // rows, columns are set to the bookmark defaults. Make sure they'll fit.
 
-    NSSize charSize = [PTYTextView charSizeForFont:[ITAddressBookMgr fontWithDesc:[tempPrefs objectForKey:KEY_NORMAL_FONT]]
-                                 horizontalSpacing:[[tempPrefs objectForKey:KEY_HORIZONTAL_SPACING] floatValue]
-                                   verticalSpacing:[[tempPrefs objectForKey:KEY_VERTICAL_SPACING] floatValue]];
+    NSSize charSize = [PTYTextView charSizeForFont:[ITAddressBookMgr fontWithDesc:[profile objectForKey:KEY_NORMAL_FONT]]
+                                 horizontalSpacing:[[profile objectForKey:KEY_HORIZONTAL_SPACING] floatValue]
+                                   verticalSpacing:[[profile objectForKey:KEY_VERTICAL_SPACING] floatValue]];
 
     if (size == nil && [_contentView.tabView numberOfTabViewItems] != 0) {
         NSSize contentSize = [[[[self currentSession] view] scrollview] documentVisibleRect].size;
@@ -6996,16 +7001,9 @@ ITERM_WEAKLY_REFERENCEABLE
         PtyLog(@"setupSession - call safelySetSessionSize");
         [self safelySetSessionSize:aSession rows:rows columns:columns];
         PtyLog(@"setupSession - call setPreferencesFromAddressBookEntry");
-        [aSession setPreferencesFromAddressBookEntry:tempPrefs];
+        [aSession setPreferencesFromAddressBookEntry:profile];
         [aSession loadInitialColorTable];
-        [aSession setBookmarkName:[tempPrefs objectForKey:KEY_NAME]];
         [aSession.screen resetTimestamps];
-
-        if (title) {
-            [aSession setName:title];
-            [aSession setDefaultName:title];
-            [self setWindowTitle];
-        }
     }
 }
 
@@ -7147,30 +7145,11 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (NSString *)currentSessionName {
-    PTYSession* session = [self currentSession];
-    return [session windowTitle] ? [session windowTitle] : [session defaultName];
+    return self.currentSession.nameController.presentationWindowTitle ?: @"Untitled";
 }
 
-- (void)setName:(NSString *)theSessionName forSession:(PTYSession*)aSession
-{
-    if (theSessionName != nil) {
-        [aSession setDefaultName:theSessionName];
-        [aSession setName:theSessionName];
-    } else {
-        NSMutableString *title = [NSMutableString string];
-        NSString *progpath = [NSString stringWithFormat: @"%@ #%ld",
-                              [[[[aSession shell] path] pathComponents] lastObject],
-                              (long)[_contentView.tabView indexOfTabViewItem:[_contentView.tabView selectedTabViewItem]]];
-
-        if ([aSession exited]) {
-            [title appendString:@"Finish"];
-        } else {
-            [title appendString:progpath];
-        }
-
-        [aSession setName:title];
-        [aSession setDefaultName:title];
-    }
+- (void)setName:(NSString *)theSessionName forSession:(PTYSession *)aSession {
+    [aSession didInitializeSessionWithName:theSessionName];
 }
 
 // Assign a value to the 'uniqueNumber_' member variable which is used for storing
@@ -7178,22 +7157,6 @@ ITERM_WEAKLY_REFERENCEABLE
 - (void)assignUniqueNumberToWindow
 {
     uniqueNumber_ = [[TemporaryNumberAllocator sharedInstance] allocateNumber];
-}
-
-// Execute the given program and set the window title if it is uninitialized.
-- (void)startProgram:(NSString *)command
-         environment:(NSDictionary *)prog_env
-              isUTF8:(BOOL)isUTF8
-           inSession:(PTYSession*)theSession
-        substitutions:(NSDictionary *)substitutions {
-    [theSession startProgram:command
-                 environment:prog_env
-                      isUTF8:isUTF8
-               substitutions:substitutions];
-
-    if ([[[self window] title] isEqualToString:@"Window"]) {
-        [self setWindowTitle];
-    }
 }
 
 // Reset all state associated with the terminal.
@@ -7452,7 +7415,10 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (IBAction)duplicateTab:(id)sender {
-    PTYTab *theTab = (PTYTab *)[[sender representedObject] identifier];
+    [self createDuplicateOfTab:(PTYTab *)[[sender representedObject] identifier]];
+}
+
+- (void)createDuplicateOfTab:(PTYTab *)theTab {
     if (!theTab) {
         theTab = [self currentTab];
     }
@@ -7603,10 +7569,7 @@ ITERM_WEAKLY_REFERENCEABLE
             [[self tabForSession:session] recheckBlur];
             NSDictionary *profile = [session profile];
             if (![[profile objectForKey:KEY_NAME] isEqualToString:oldName]) {
-                // Set name, which overrides any session-set icon name.
-                [session setName:[profile objectForKey:KEY_NAME]];
-                // set default name, which will appear as a prefix if the session changes the name.
-                [session setDefaultName:[profile objectForKey:KEY_NAME]];
+                [session profileNameDidChangeTo:profile[KEY_NAME]];
             }
             if ([session isDivorced] &&
                 [[[PreferencePanel sessionsInstance] currentProfileGuid] isEqualToString:guid] &&
@@ -7632,12 +7595,6 @@ ITERM_WEAKLY_REFERENCEABLE
     [self updateTouchBarIfNeeded:NO];
 }
 
-// Called when the parameter panel should close.
-- (IBAction)parameterPanelEnd:(id)sender {
-    _parameterPanelCanceled = ([sender tag] == 0);
-    [NSApp stopModal];
-}
-
 // Return the timestamp for a slider position in [0, 1] for the current session.
 - (long long)timestampForFraction:(float)f
 {
@@ -7654,69 +7611,6 @@ ITERM_WEAKLY_REFERENCEABLE
         [result addObjectsFromArray:[[item identifier] sessions]];
     }
     return result;
-}
-
-// Allocate a new session and assign it a bookmark. Returns a retained object.
-- (PTYSession*)newSessionWithBookmark:(Profile*)bookmark {
-    assert(bookmark);
-    PTYSession *aSession;
-
-    // Initialize a new session
-    aSession = [[PTYSession alloc] initSynthetic:NO];
-
-    [[aSession screen] setUnlimitedScrollback:[[bookmark objectForKey:KEY_UNLIMITED_SCROLLBACK] boolValue]];
-    [[aSession screen] setMaxScrollbackLines:[[bookmark objectForKey:KEY_SCROLLBACK_LINES] intValue]];
-
-    // set our preferences
-    [aSession setProfile:bookmark];
-    return aSession;
-}
-
-// Execute the bookmark command in this session.
-// Used when adding a split pane.
-// Execute the bookmark command in this session.
-- (BOOL)runCommandInSession:(PTYSession*)aSession
-                      inCwd:(NSString*)oldCWD
-              forObjectType:(iTermObjectType)objectType {
-    if ([aSession screen]) {
-        BOOL isUTF8;
-        // Grab the addressbook command
-        Profile *profile = [aSession profile];
-        NSString *cmd = [ITAddressBookMgr bookmarkCommand:profile
-                                            forObjectType:objectType];
-        NSString *name = profile[KEY_NAME];
-
-        // Get session parameters
-        NSDictionary *substitutions = [self substitutionsForCommand:cmd
-                                                        sessionName:name
-                                                  baseSubstitutions:@{}];
-        if (!substitutions) {
-            return NO;
-        }
-        cmd = [cmd stringByReplacingOccurrencesOfString:@"$$$$" withString:@"$$"];
-
-        name = [name stringByPerformingSubstitutions:substitutions];
-        NSString *pwd = [ITAddressBookMgr bookmarkWorkingDirectory:profile
-                                                     forObjectType:objectType];
-        if ([pwd length] == 0) {
-            if (oldCWD) {
-                pwd = oldCWD;
-            } else {
-                pwd = NSHomeDirectory();
-            }
-        }
-        NSDictionary *env = [NSDictionary dictionaryWithObject: pwd forKey:@"PWD"];
-        isUTF8 = ([iTermProfilePreferences unsignedIntegerForKey:KEY_CHARACTER_ENCODING inProfile:profile] == NSUTF8StringEncoding);
-        [self setName:name forSession:aSession];
-        // Start the command
-        [self startProgram:cmd
-               environment:env
-                    isUTF8:isUTF8
-                 inSession:aSession
-             substitutions:substitutions];
-        return YES;
-    }
-    return NO;
 }
 
 - (void)_loadFindStringFromSharedPasteboard
@@ -7781,16 +7675,19 @@ ITERM_WEAKLY_REFERENCEABLE
     _contentView.tabBarControl.alphaValue = 0;
     _contentView.tabBarControl.hidden = NO;
     [self repositionWidgets];
+    [self updateUseMetalInAllTabs];
 }
 
 - (void)iTermTabBarDidFinishFlash {
     _contentView.tabBarControl.alphaValue = 1;
     _contentView.tabBarControl.hidden = YES;
     [self repositionWidgets];
+    [self updateUseMetalInAllTabs];
 }
 
 - (PTYSession *)createTabWithProfile:(Profile *)profile
-                         withCommand:(NSString *)command {
+                         withCommand:(NSString *)command
+                         environment:(NSDictionary *)environment {
     assert(profile);
 
     // Get active session's directory
@@ -7804,15 +7701,6 @@ ITERM_WEAKLY_REFERENCEABLE
         previousDirectory = [currentSession currentLocalWorkingDirectory];
     }
 
-    // Initialize a new session
-    PTYSession *aSession = [[[PTYSession alloc] initSynthetic:NO] autorelease];
-    [[aSession screen] setUnlimitedScrollback:[[profile objectForKey:KEY_UNLIMITED_SCROLLBACK] boolValue]];
-    [[aSession screen] setMaxScrollbackLines:[[profile objectForKey:KEY_SCROLLBACK_LINES] intValue]];
-
-    // If a command was provided, create a temporary copy of the profile dictionary that runs
-    // the user-supplied command in lieu of the profile's command.
-    NSString *preferredName = nil;
-
     iTermObjectType objectType;
     if ([_contentView.tabView numberOfTabViewItems] == 0) {
         objectType = iTermWindowObject;
@@ -7824,40 +7712,33 @@ ITERM_WEAKLY_REFERENCEABLE
         commandForSubs = [ITAddressBookMgr bookmarkCommand:profile
                                              forObjectType:objectType];
     }
-    NSDictionary *substitutions = [self substitutionsForCommand:commandForSubs ?: @""
-                                                    sessionName:profile[KEY_NAME] ?: @""
-                                              baseSubstitutions:@{}];
-    if (!substitutions) {
-        return nil;
-    }
-    commandForSubs = [commandForSubs stringByReplacingOccurrencesOfString:@"$$$$" withString:@"$$"];
     if (command) {
-        // Create a modified profile to run "command".
-        NSMutableDictionary *temp = [[profile mutableCopy] autorelease];
-        temp[KEY_CUSTOM_COMMAND] = @"Yes";
-        temp[KEY_COMMAND_LINE] = command;
-        profile = temp;
+        profile = [[profile
+                    dictionaryBySettingObject:@"Yes" forKey:KEY_CUSTOM_COMMAND]
+                    dictionaryBySettingObject:command forKey:KEY_COMMAND_LINE];
 
-    } else if (substitutions.count && profile[KEY_NAME]) {
-        preferredName = [profile[KEY_NAME] stringByPerformingSubstitutions:substitutions];
     }
 
-    // set our preferences
-    [aSession setProfile:profile];
+    // Initialize a new session
+    PTYSession *aSession = [self.sessionFactory newSessionWithProfile:profile];
+
     // Add this session to our term and make it current
     [self addSessionInNewTab:aSession];
-    if ([aSession screen]) {
-        [aSession runCommandWithOldCwd:previousDirectory
-                         forObjectType:objectType
-                        forceUseOldCWD:NO
-                         substitutions:substitutions];
-        if ([[[self window] title] compare:@"Window"] == NSOrderedSame) {
-            [self setWindowTitle];
-        }
-        if (preferredName) {
-            [self setName:preferredName forSession:aSession];
-        }
-    }
+
+    [self.sessionFactory attachOrLaunchCommandInSession:aSession
+                                              canPrompt:YES
+                                             objectType:objectType
+                                       serverConnection:nil
+                                              urlString:nil
+                                           allowURLSubs:NO
+                                            environment:environment
+                                                 oldCWD:previousDirectory
+                                         forceUseOldCWD:NO
+                                                command:nil
+                                                 isUTF8:nil
+                                          substitutions:nil
+                                       windowController:self
+                                             completion:nil];
 
     // On Lion, a window that can join all spaces can't go fullscreen.
     if ([self numberOfTabs] == 1 &&
@@ -7940,78 +7821,12 @@ ITERM_WEAKLY_REFERENCEABLE
     return proposedOptions | NSApplicationPresentationAutoHideToolbar;
 }
 
-- (PTYSession *)createSessionWithProfile:(NSDictionary *)profile
-                                 withURL:(NSString *)urlString
-                           forObjectType:(iTermObjectType)objectType
-                        serverConnection:(iTermFileDescriptorServerConnection *)serverConnection {
-    PtyLog(@"PseudoTerminal: -createSessionWithProfile:withURL:forObjectType:");
-    PTYSession *aSession;
-
-    // Initialize a new session
-    aSession = [[[PTYSession alloc] initSynthetic:NO] autorelease];
-    [[aSession screen] setUnlimitedScrollback:[profile[KEY_UNLIMITED_SCROLLBACK] boolValue]];
-    [[aSession screen] setMaxScrollbackLines:[profile[KEY_SCROLLBACK_LINES] intValue]];
-    // set our preferences
-    [aSession setProfile:profile];
-    // Add this session to our term and make it current
-    [self addSessionInNewTab: aSession];
-    if ([aSession screen]) {
-        // We process the cmd to insert URL parts
-        NSString *cmd = [ITAddressBookMgr bookmarkCommand:profile
-                                            forObjectType:objectType];
-        NSString *name = profile[KEY_NAME];
-        NSURL *url = [NSURL URLWithString:urlString];
-
-        // Grab the addressbook command
-        NSDictionary *substitutions = @{ @"$$URL$$": urlString ?: @"",
-                                         @"$$HOST$$": [url host] ?: @"",
-                                         @"$$USER$$": [url user] ?: @"",
-                                         @"$$PASSWORD$$": [url password] ?: @"",
-                                         @"$$PORT$$": [url port] ? [[url port] stringValue] : @"",
-                                         @"$$PATH$$": [url path] ?: @"",
-                                         @"$$RES$$": [url resourceSpecifier] ?: @"" };
-
-        // If the command or name have any $$VARS$$ not accounted for above, prompt the user for
-        // substitutions.
-        substitutions = [self substitutionsForCommand:cmd
-                                          sessionName:name
-                                    baseSubstitutions:substitutions];
-        if (!substitutions) {
-            return nil;
-        }
-        cmd = [cmd stringByReplacingOccurrencesOfString:@"$$$$" withString:@"$$"];
-
-        NSString *pwd = [ITAddressBookMgr bookmarkWorkingDirectory:profile forObjectType:objectType];
-        if ([pwd length] == 0) {
-            pwd = NSHomeDirectory();
-        }
-        NSDictionary *env = [NSDictionary dictionaryWithObject: pwd forKey:@"PWD"];
-        BOOL isUTF8 = ([iTermProfilePreferences unsignedIntegerForKey:KEY_CHARACTER_ENCODING inProfile:profile] == NSUTF8StringEncoding);
-
-        [self setName:[name stringByPerformingSubstitutions:substitutions]
-           forSession:aSession];
-
-        // Start the command
-        if (serverConnection) {
-            assert([iTermAdvancedSettingsModel runJobsInServers]);
-            [aSession attachToServer:*serverConnection];
-        } else {
-            [self startProgram:cmd
-                   environment:env
-                        isUTF8:isUTF8
-                     inSession:aSession
-                 substitutions:substitutions];
-        }
-    }
-    return aSession;
-}
-
 - (void)addSessionInNewTab:(PTYSession *)object {
     PtyLog(@"PseudoTerminal: -addSessionInNewTab: %p", object);
     // Increment tabViewItemsBeingAdded so that the maximum content size will
     // be calculated with the tab bar if it's about to open.
     ++tabViewItemsBeingAdded;
-    [self setupSession:object title:nil withSize:nil];
+    [self setupSession:object withSize:nil];
     tabViewItemsBeingAdded--;
     if ([object screen]) {  // screen initialized ok
         if ([iTermAdvancedSettingsModel addNewTabAtEndOfTabs] || ![self currentTab]) {
@@ -8161,6 +7976,10 @@ ITERM_WEAKLY_REFERENCEABLE
 
 - (void)tab:(PTYTab *)tab didSetMetalEnabled:(BOOL)useMetal {
     _contentView.useMetal = useMetal;
+}
+
+- (BOOL)tabCanUseMetal:(PTYTab *)tab {
+    return !_contentView.tabBarControl.flashing;
 }
 
 - (void)currentSessionWordAtCursorDidBecome:(NSString *)word {

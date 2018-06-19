@@ -1577,8 +1577,10 @@ const NSInteger kPSMStartResizeAnimation = 0;
 }
 
 - (void)tabClick:(id)sender {
-    [_tabView selectTabViewItem:[sender representedObject]];
-    [self update];
+    if ([sender representedObject]) {
+        [_tabView selectTabViewItem:[sender representedObject]];
+        [self update];
+    }
 }
 
 - (void)tabDoubleClick:(id)sender {
@@ -1958,6 +1960,7 @@ const NSInteger kPSMStartResizeAnimation = 0;
 
 - (void)bindPropertiesForCell:(PSMTabBarCell *)cell andTabViewItem:(NSTabViewItem *)item {
     // bind my string value to the label on the represented tab
+    // cell.title <- item.label
     [cell bind:@"title" toObject:item withKeyPath:@"label" options:nil];
     [_delegate tabView:_tabView updateStateForTabViewItem:item];
 }

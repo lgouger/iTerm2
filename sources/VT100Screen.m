@@ -1411,6 +1411,17 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
     }
 }
 
+- (void)linkTextInRange:(NSRange)range
+basedAtAbsoluteLineNumber:(long long)absoluteLineNumber
+                  URLCode:(unsigned short)code {
+    long long lineNumber = absoluteLineNumber - self.totalScrollbackOverflow - self.numberOfScrollbackLines;
+    
+    VT100GridRun gridRun = [currentGrid_ gridRunFromRange:range relativeToRow:lineNumber];
+    if (gridRun.length > 0) {
+        [self linkRun:gridRun withURLCode:code];
+    }
+}
+
 - (void)setFromFrame:(screen_char_t*)s len:(int)len info:(DVRFrameInfo)info
 {
     assert(len == (info.width + 1) * info.height * sizeof(screen_char_t));
@@ -2522,6 +2533,9 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
 {
     [currentGrid_ moveCursorLeft:n];
     [delegate_ screenTriggerableChangeDidOccur];
+    if (commandStartX_ != -1) {
+        [delegate_ screenCommandDidChangeWithRange:[self commandRange]];
+    }
 }
 
 - (void)terminalCursorDown:(int)n andToStartOfLine:(BOOL)toStart {
@@ -2530,12 +2544,18 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
         [currentGrid_ moveCursorToLeftMargin];
     }
     [delegate_ screenTriggerableChangeDidOccur];
+    if (commandStartX_ != -1) {
+        [delegate_ screenCommandDidChangeWithRange:[self commandRange]];
+    }
 }
 
 - (void)terminalCursorRight:(int)n
 {
     [currentGrid_ moveCursorRight:n];
     [delegate_ screenTriggerableChangeDidOccur];
+    if (commandStartX_ != -1) {
+        [delegate_ screenCommandDidChangeWithRange:[self commandRange]];
+    }
 }
 
 - (void)terminalCursorUp:(int)n andToStartOfLine:(BOOL)toStart{
@@ -2544,12 +2564,18 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
         [currentGrid_ moveCursorToLeftMargin];
     }
     [delegate_ screenTriggerableChangeDidOccur];
+    if (commandStartX_ != -1) {
+        [delegate_ screenCommandDidChangeWithRange:[self commandRange]];
+    }
 }
 
 - (void)terminalMoveCursorToX:(int)x y:(int)y
 {
     [self cursorToX:x Y:y];
     [delegate_ screenTriggerableChangeDidOccur];
+    if (commandStartX_ != -1) {
+        [delegate_ screenCommandDidChangeWithRange:[self commandRange]];
+    }
 }
 
 - (BOOL)terminalShouldSendReport
@@ -2701,6 +2727,9 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
         [currentGrid_ moveCursorToLeftMargin];
     }
     [delegate_ screenTriggerableChangeDidOccur];
+    if (commandStartX_ != -1) {
+        [delegate_ screenCommandDidChangeWithRange:[self commandRange]];
+    }
 }
 
 - (void)terminalReverseIndex {
@@ -2854,11 +2883,7 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
 
 - (void)terminalSetWindowTitle:(NSString *)title {
     if ([delegate_ screenAllowTitleSetting]) {
-        NSString *newTitle = [[title copy] autorelease];
-        if ([delegate_ screenShouldSyncTitle]) {
-            newTitle = [NSString stringWithFormat:@"%@: %@", [delegate_ screenNameExcludingJob], newTitle];
-        }
-        [delegate_ screenSetWindowTitle:newTitle];
+        [delegate_ screenSetWindowTitle:title];
     }
 
     // If you know to use RemoteHost then assume you also use CurrentDirectory. Innocent window title
@@ -2875,11 +2900,7 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
 
 - (void)terminalSetIconTitle:(NSString *)title {
     if ([delegate_ screenAllowTitleSetting]) {
-        NSString *newTitle = [[title copy] autorelease];
-        if ([delegate_ screenShouldSyncTitle]) {
-            newTitle = [NSString stringWithFormat:@"%@: %@", [delegate_ screenNameExcludingJob], newTitle];
-        }
-        [delegate_ screenSetName:newTitle];
+        [delegate_ screenSetName:title];
     }
 }
 
@@ -3070,9 +3091,7 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
 
 - (NSString *)terminalIconTitle {
     if (allowTitleReporting_ && [self terminalIsTrusted]) {
-        // TODO: Should be something like screenRawName (which doesn't exist yet but would return
-        // [self rawName]), not screenWindowTitle, right?
-        return [delegate_ screenWindowTitle] ? [delegate_ screenWindowTitle] : [delegate_ screenDefaultName];
+        return [delegate_ screenIconTitle];
     } else {
         return @"";
     }
@@ -4275,6 +4294,17 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
 - (void)dumpScreen
 {
     NSLog(@"%@", [self debugString]);
+}
+
+- (void)linkRun:(VT100GridRun)run
+    withURLCode:(unsigned short)code {
+    
+    for (NSValue *value in [currentGrid_ rectsForRun:run]) {
+        VT100GridRect rect = [value gridRectValue];
+        [currentGrid_ setURLCode:code
+                      inRectFrom:rect.origin
+                              to:VT100GridRectMax(rect)];
+    }
 }
 
 // Set the color of prototypechar to all chars between startPoint and endPoint on the screen.

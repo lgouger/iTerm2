@@ -31,7 +31,7 @@ typedef NS_ENUM(NSInteger, BroadcastMode) {
 // Called by VT100Screen when it wants to resize a window for a
 // session-initiated resize. It resizes the session, then the window, then all
 // sessions to fit the new window size.
-- (void)sessionInitiatedResize:(PTYSession*)session width:(int)width height:(int)height;
+- (BOOL)sessionInitiatedResize:(PTYSession*)session width:(int)width height:(int)height;
 
 // Is the window in traditional fullscreen mode?
 - (BOOL)fullScreen;
@@ -49,6 +49,9 @@ typedef NS_ENUM(NSInteger, BroadcastMode) {
 
 // Select the tab to the left of the foreground tab.
 - (void)previousTab:(id)sender;
+
+// Add a tab with the same panes and profiles.
+- (void)createDuplicateOfTab:(PTYTab *)theTab;
 
 // Set background color for tab chrome.
 - (void)updateTabColors;
@@ -364,7 +367,7 @@ typedef NS_ENUM(NSInteger, BroadcastMode) {
 
 // Create a new split with the specified bookmark. The passed-in session is
 // inserted either before (left/above) or after (right/below) the target
-// session. If performSetup is set, then setupSession:title:withSize: is
+// session. If performSetup is set, then setupSession:withSize: is
 // called.
 - (void)splitVertically:(BOOL)isVertical
                  before:(BOOL)before

@@ -163,6 +163,7 @@ typedef NS_ENUM(NSUInteger, iTermHotkeyWindowType) {
 
 - (NSArray<PseudoTerminal *> *)terminals;
 - (void)addTerminalWindow:(PseudoTerminal *)terminalWindow;
+- (PTYSession *)sessionWithGUID:(NSString *)identifier;
 
 void OnHotKeyEvent(void);
 
@@ -170,8 +171,9 @@ void OnHotKeyEvent(void);
 - (void)makeTerminalWindowFullScreen:(NSWindowController<iTermWindowController> *)term;
 
 - (void)openSingleUseWindowWithCommand:(NSString *)command;
-- (void)openSingleUseWindowWithCommand:(NSString *)command inject:(NSData *)injection;
-- (void)migrateApplicationSupportDirectoryIfNeeded;
+- (void)openSingleUseWindowWithCommand:(NSString *)command
+                                inject:(NSData *)injection
+                           environment:(NSDictionary *)environment;
 
 @end
 

@@ -145,6 +145,8 @@ Other Sections
     * Example Script
     * :doc:`running`
     * :doc:`daemons`
+    * :doc:`rpcs`
+    * :doc:`hooks`
 
 Indices and tables
 ==================
