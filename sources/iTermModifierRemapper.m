@@ -131,7 +131,7 @@
         // OS's remap feature.
         return [self eventByRemappingEvent:event];
     } else {
-        DLog(@"iTerm2 not active. The active app is %@", [[NSWorkspace sharedWorkspace] activeApplication]);
+        DLog(@"iTerm2 not active. The active app is %@", [[NSWorkspace sharedWorkspace] frontmostApplication]);
         return event;
     }
 }
@@ -173,7 +173,7 @@
 }
 
 - (int)boundActionForEvent:(NSEvent *)cocoaEvent {
-    if (cocoaEvent.type == NSFlagsChanged) {
+    if (cocoaEvent.type == NSEventTypeFlagsChanged) {
         return -1;
     }
     NSString* unmodkeystr = [cocoaEvent charactersIgnoringModifiers];

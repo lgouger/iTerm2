@@ -25,11 +25,15 @@
     if (self) {
         _metalRenderer = [[iTermMetalRenderer alloc] initWithDevice:device
                                                  vertexFunctionName:@"iTermCopyBackgroundVertexShader"
-                                               fragmentFunctionName:@"iTermCopyBackgroundFragmentShader"
+                                               fragmentFunctionName:self.fragmentFunctionName
                                                            blending:nil
                                                 transientStateClass:[self transientStateClass]];
     }
     return self;
+}
+
+- (NSString *)fragmentFunctionName {
+    return @"iTermCopyBackgroundFragmentShader";
 }
 
 - (iTermMetalFrameDataStat)createTransientStateStat {
@@ -37,7 +41,7 @@
 }
 
 - (void)drawWithFrameData:(nonnull iTermMetalFrameData *)frameData
-           transientState:(nonnull __kindof iTermMetalRendererTransientState *)transientState {
+           transientState:(__kindof iTermMetalRendererTransientState *)transientState {
     iTermCopyRendererTransientState *tState = transientState;
     [_metalRenderer drawWithTransientState:tState
                              renderEncoder:frameData.renderEncoder
@@ -52,7 +56,7 @@
     return NO;
 }
 
-- (__kindof iTermMetalRendererTransientState * _Nonnull)createTransientStateForConfiguration:(iTermRenderConfiguration *)configuration
+- (nullable __kindof iTermMetalRendererTransientState *)createTransientStateForConfiguration:(iTermRenderConfiguration *)configuration
                                                                                commandBuffer:(id<MTLCommandBuffer>)commandBuffer {
     if (!_enabled) {
         return nil;
@@ -111,3 +115,18 @@
 
 @end
 #endif
+
+@implementation iTermPremultiplyAlphaRendererTransientState
+@end
+
+@implementation iTermPremultiplyAlphaRenderer
+
+- (Class)transientStateClass {
+    return [iTermPremultiplyAlphaRendererTransientState class];
+}
+
+- (NSString *)fragmentFunctionName {
+    return @"iTermPremultiplyAlphaFragmentShader";
+}
+
+@end

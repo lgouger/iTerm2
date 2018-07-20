@@ -2,14 +2,16 @@
 
 import iterm2.rpc
 import iterm2.api_pb2
+import json
 
 class Tab:
     """Represents a tab."""
-    def __init__(self, connection, tab_id, root):
+    def __init__(self, connection, tab_id, root, tmux_window_id=None):
         self.connection = connection
         self.__tab_id = tab_id
         self.__root = root
         self.active_session_id = None
+        self.__tmux_window_id = tmux_window_id
 
     def __repr__(self):
         return "<Tab id=%s sessions=%s>" % (self.__tab_id, self.sessions)
@@ -99,3 +101,49 @@ class Tab:
             return response.set_tab_layout_response
         else:
             raise iterm2.rpc.RPCException(iterm2.api_pb2.SetTabLayoutResponse.Status.Name(status))
+
+    @property
+    def tmux_window_id(self):
+        """Returns this tab's tmux window id or None.
+
+        :returns: A tmux window id (a string) or None if this is not a tmux integration window.
+        """
+        return self.__tmux_window_id
+
+    async def async_set_variable(self, name, value):
+        """
+        Sets a user-defined variable in the tab.
+
+        See Badges documentation for more information on user-defined variables.
+
+        :param name: The variable's name.
+        :param value: The new value to assign.
+
+        :throws: :class:`RPCException` if something goes wrong.
+        """
+        result = await iterm2.rpc.async_variable(
+            self.connection,
+            sets=[(name, json.dumps(value))],
+            tab_id=self.__tab_id)
+        status = result.variable_response.status
+        if status != iterm2.api_pb2.VariableResponse.Status.Value("OK"):
+            raise iterm2.rpc.RPCException(iterm2.api_pb2.VariableResponse.Status.Name(status))
+
+    async def async_get_variable(self, name):
+        """
+        Fetches a tab variable.
+
+        See Badges documentation for more information on variables.
+
+        :param name: The variable's name.
+
+        :returns: The variable's value or empty string if it is undefined.
+
+        :throws: :class:`RPCException` if something goes wrong.
+        """
+        result = await iterm2.rpc.async_variable(self.connection, gets=[name], tab_id=self.__tab_id)
+        status = result.variable_response.status
+        if status != iterm2.api_pb2.VariableResponse.Status.Value("OK"):
+            raise iterm2.rpc.RPCException(iterm2.api_pb2.VariableResponse.Status.Name(status))
+        else:
+            return json.loads(result.variable_response.values[0])

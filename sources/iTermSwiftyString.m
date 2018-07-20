@@ -21,7 +21,6 @@
 @end
 
 @implementation iTermSwiftyString {
-    NSSet<NSString *> *_dependencies;
     NSSet<NSString *> *_mutations;
     NSMutableSet<NSString *> *_missingFunctions;
 }
@@ -164,6 +163,29 @@
     }
     [_missingFunctions minusSet:[NSSet setWithArray:registered]];
     [self setNeedsReevaluation];
+}
+
+@end
+
+@implementation iTermSwiftyStringPlaceholder {
+    NSString *_string;
+}
+
+- (instancetype)initWithString:(NSString *)swiftyString {
+    self = [super initWithString:@""
+                          source:^id _Nonnull(NSString * _Nonnull name) {
+                              return @"";
+                          }
+                         mutates:[NSSet set]
+                        observer:^(NSString * _Nonnull newValue) {}];
+    if (self) {
+        _string = [swiftyString copy];
+    }
+    return self;
+}
+
+- (NSString *)swiftyString {
+    return _string;
 }
 
 @end

@@ -61,6 +61,7 @@ NSString *const iTermApplicationCharacterPaletteDidClose = @"iTermApplicationCha
 
 - (void)dealloc {
     [_fakeCurrentEvent release];
+    [_statusBarItem release];
     [super dealloc];
 }
 
@@ -106,12 +107,13 @@ NSString *const iTermApplicationCharacterPaletteDidClose = @"iTermApplicationCha
 
 - (BOOL)routeEventToShortcutInputView:(NSEvent *)event {
     NSResponder *firstResponder = [[NSApp keyWindow] firstResponder];
-    if (event.keyCode == iTermBogusVirtualKeyCode) {
-        return YES;
-    }
     if ([firstResponder isKindOfClass:[iTermShortcutInputView class]]) {
         iTermShortcutInputView *shortcutView = (iTermShortcutInputView *)firstResponder;
         if (shortcutView) {
+            if (event.keyCode == iTermBogusVirtualKeyCode) {
+                // You can't register a carbon hotkey for these so just ignore them when listining for a shortcut.
+                return YES;
+            }
             [shortcutView handleShortcutEvent:event];
             return YES;
         }
@@ -162,7 +164,7 @@ NSString *const iTermApplicationCharacterPaletteDidClose = @"iTermApplicationCha
 
 - (BOOL)switchToWindowByNumber:(NSEvent *)event {
     const NSUInteger allModifiers =
-        (NSShiftKeyMask | NSControlKeyMask | NSCommandKeyMask | NSAlternateKeyMask);
+        (NSEventModifierFlagShift | NSEventModifierFlagControl | NSEventModifierFlagCommand | NSEventModifierFlagOption);
     if (([event modifierFlags] & allModifiers) == [iTermPreferences maskForModifierTag:[iTermPreferences intForKey:kPreferenceKeySwitchWindowModifier]]) {
         // Command-Alt (or selected modifier) + number: Switch to window by number.
         int digit = [self digitKeyForEvent:event];
@@ -185,7 +187,7 @@ NSString *const iTermApplicationCharacterPaletteDidClose = @"iTermApplicationCha
 }
 
 - (BOOL)switchToPaneInWindowController:(PseudoTerminal *)currentTerminal byNumber:(NSEvent *)event {
-    const int mask = NSShiftKeyMask | NSControlKeyMask | NSAlternateKeyMask | NSCommandKeyMask;
+    const int mask = NSEventModifierFlagShift | NSEventModifierFlagControl | NSEventModifierFlagOption | NSEventModifierFlagCommand;
     if (([event modifierFlags] & mask) == [iTermPreferences maskForModifierTag:[iTermPreferences intForKey:kPreferenceKeySwitchPaneModifier]]) {
         int digit = [self digitKeyForEvent:event];
         NSArray *orderedSessions = currentTerminal.currentTab.orderedSessions;
@@ -211,7 +213,7 @@ NSString *const iTermApplicationCharacterPaletteDidClose = @"iTermApplicationCha
 }
 
 - (BOOL)switchToTabInTabView:(PTYTabView *)tabView byNumber:(NSEvent *)event {
-    const int mask = NSShiftKeyMask | NSControlKeyMask | NSAlternateKeyMask | NSCommandKeyMask;
+    const int mask = NSEventModifierFlagShift | NSEventModifierFlagControl | NSEventModifierFlagOption | NSEventModifierFlagCommand;
     if (([event modifierFlags] & mask) == [iTermPreferences maskForModifierTag:[iTermPreferences intForKey:kPreferenceKeySwitchTabModifier]]) {
         int digit = [self digitKeyForEvent:event];
         if (digit == 9 && [tabView numberOfTabViewItems] > 0) {
@@ -347,12 +349,12 @@ NSString *const iTermApplicationCharacterPaletteDidClose = @"iTermApplicationCha
 
 // override to catch key press events very early on
 - (void)sendEvent:(NSEvent *)event {
-    if ([event type] == NSFlagsChanged) {
+    if ([event type] == NSEventTypeFlagsChanged) {
         event = [self eventByRemappingForSecureInput:event];
         if ([self handleFlagsChangedEvent:event]) {
             return;
         }
-    } else if ([event type] == NSKeyDown) {
+    } else if ([event type] == NSEventTypeKeyDown) {
         event = [self eventByRemappingForSecureInput:event];
         if ([self handleKeyDownEvent:event]) {
             return;
@@ -404,7 +406,7 @@ NSString *const iTermApplicationCharacterPaletteDidClose = @"iTermApplicationCha
 
         if ([iTermAdvancedSettingsModel statusBarIcon]) {
             NSImage *image = [NSImage imageNamed:@"StatusItem"];
-            self.statusBarItem = [[[NSStatusBar systemStatusBar] statusItemWithLength:image.size.width] retain];
+            self.statusBarItem = [[NSStatusBar systemStatusBar] statusItemWithLength:image.size.width];
             _statusBarItem.title = @"";
             _statusBarItem.image = image;
             _statusBarItem.alternateImage = [NSImage imageNamed:@"StatusItemAlt"];

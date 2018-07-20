@@ -23,6 +23,7 @@ NSString *const iTermVariableKeyApplicationPID = @"pid";
 
 NSString *const iTermVariableKeyTabTitleOverride = @"titleOverride";
 NSString *const iTermVariableKeyTabCurrentSession = @"currentSession";
+NSString *const iTermVariableKeyTabTmuxWindow = @"tmuxWindow";
 
 NSString *const iTermVariableKeySessionAutoLogID = @"session.autoLogId";
 NSString *const iTermVariableKeySessionColumns = @"session.columns";
@@ -46,6 +47,10 @@ NSString *const iTermVariableKeySessionTmuxWindowTitle = @"session.tmuxWindowTit
 NSString *const iTermVariableKeySessionTmuxRole = @"session.tmuxRole";
 NSString *const iTermVariableKeySessionTmuxClientName = @"session.tmuxClientName";
 NSString *const iTermVariableKeySessionAutoName = @"session.autoName";
+NSString *const iTermVariableKeySessionTmuxWindowPane = @"session.tmuxWindowPane";
+NSString *const iTermVariableKeySessionJobPid = @"session.jobPid";
+NSString *const iTermVariableKeySessionChildPid = @"session.pid";
+
 // NOTE: If you add here, also update +recordBuiltInVariables
 
 @implementation iTermVariables {
@@ -88,7 +93,10 @@ NSString *const iTermVariableKeySessionAutoName = @"session.autoName";
                                     iTermVariableKeySessionTmuxWindowTitle,
                                     iTermVariableKeySessionTmuxRole,
                                     iTermVariableKeySessionTmuxClientName,
-                                    iTermVariableKeySessionAutoName ];
+                                    iTermVariableKeySessionAutoName,
+                                    iTermVariableKeySessionTmuxWindowPane,
+                                    iTermVariableKeySessionJobPid,
+                                    iTermVariableKeySessionChildPid ];
     [names enumerateObjectsUsingBlock:^(NSString * _Nonnull obj, NSUInteger idx, BOOL * _Nonnull stop) {
         [self recordUseOfVariableNamed:obj inContext:iTermVariablesSuggestionContextSession];
     }];
@@ -96,8 +104,9 @@ NSString *const iTermVariableKeySessionAutoName = @"session.autoName";
     // Tab context
     [self recordUseOfVariableNamed:iTermVariableKeyTabTitleOverride inContext:iTermVariablesSuggestionContextTab];
     [self recordUseOfVariableNamed:iTermVariableKeyTabCurrentSession inContext:iTermVariablesSuggestionContextTab];
+    [self recordUseOfVariableNamed:iTermVariableKeyTabTmuxWindow inContext:iTermVariablesSuggestionContextTab];
 
-    // App cnotext
+    // App context
     [self recordUseOfVariableNamed:iTermVariableKeyApplicationPID inContext:iTermVariablesSuggestionContextApp];
 }
 
@@ -145,10 +154,18 @@ NSString *const iTermVariableKeySessionAutoName = @"session.autoName";
 + (NSSet<NSString *> *)recordedVariableNamesInContext:(iTermVariablesSuggestionContext)context {
     NSSet<NSString *> *result = [NSSet set];
     for (int bit = 0; bit < 64; bit++) {
-        NSUInteger mask = 1 << bit;
+        const NSUInteger one = 1;
+        NSUInteger mask = one << bit;
         if (mask & context) {
             result = [result setByAddingObjectsFromSet:self.mutableRecordedNames[@(mask)] ?: [NSSet set]];
         }
+    }
+    if ((context & (iTermVariablesSuggestionContextSession | iTermVariablesSuggestionContextTab)) &&
+        !(context & iTermVariablesSuggestionContextApp)) {
+        NSSet<NSString *> *appVariables = [self recordedVariableNamesInContext:iTermVariablesSuggestionContextApp];
+        result = [NSSet setWithArray:[result.allObjects arrayByAddingObjectsFromArray:[appVariables.allObjects mapWithBlock:^id(NSString *appVariable) {
+            return [@"iterm2." stringByAppendingString:appVariable];
+        }]]];
     }
     return result;
 }

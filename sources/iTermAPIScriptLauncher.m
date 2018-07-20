@@ -9,6 +9,7 @@
 
 #import "DebugLogging.h"
 #import "iTermAPIConnectionIdentifierController.h"
+#import "iTermAPIHelper.h"
 #import "iTermNotificationController.h"
 #import "iTermOptionalComponentDownloadWindowController.h"
 #import "iTermPythonRuntimeDownloader.h"
@@ -39,10 +40,14 @@
 }
 
 + (void)reallyLaunchScript:(NSString *)filename withVirtualEnv:(NSString *)virtualenv {
+    if (![iTermAPIHelper sharedInstance]) {
+        return;
+    }
+
     NSString *key = [[NSUUID UUID] UUIDString];
     NSString *name = [[filename lastPathComponent] stringByDeletingPathExtension];
     if (virtualenv) {
-        // Convert /foo/bar/Name/main.py to Name
+        // Convert /foo/bar/Name/Name/main.py to Name
         name = [[[filename stringByDeletingLastPathComponent] pathComponents] lastObject];
     }
     NSString *identifier = [[iTermAPIConnectionIdentifierController sharedInstance] identifierForKey:key];
@@ -200,12 +205,16 @@
 
 + (NSString *)environmentForScript:(NSString *)path checkForMain:(BOOL)checkForMain {
     if (checkForMain) {
-        if (![[NSFileManager defaultManager] fileExistsAtPath:[path stringByAppendingPathComponent:@"main.py"] isDirectory:nil]) {
+        NSString *name = path.lastPathComponent;
+        // If path is foo/bar then look for foo/bar/bar/bar.py
+        NSString *expectedPath = [[path stringByAppendingPathComponent:name] stringByAppendingPathComponent:[name stringByAppendingPathExtension:@"py"]];
+        if (![[NSFileManager defaultManager] fileExistsAtPath:expectedPath isDirectory:nil]) {
             return nil;
         }
     }
 
     // Does it have an pyenv?
+    // foo/bar/iterm2env
     NSString *pyenvPython = [[iTermPythonRuntimeDownloader sharedInstance] pyenvAt:[path stringByAppendingPathComponent:@"iterm2env"]];
     if ([[NSFileManager defaultManager] fileExistsAtPath:pyenvPython isDirectory:nil]) {
         return pyenvPython;

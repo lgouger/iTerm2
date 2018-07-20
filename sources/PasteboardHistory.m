@@ -49,6 +49,11 @@
     return e;
 }
 
+- (void)dealloc {
+    [_timestamp release];
+    [super dealloc];
+}
+
 @end
 
 @implementation PasteboardHistory {
@@ -200,7 +205,7 @@
 @end
 
 @implementation PasteboardHistoryWindowController {
-    __weak IBOutlet NSTableView *table_;
+    IBOutlet NSTableView *table_;
     NSTimer *minuteRefreshTimer_;
 }
 

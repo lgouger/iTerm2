@@ -10,6 +10,7 @@ import iterm2.rpc
 
 RPC_ROLE_GENERIC = iterm2.api_pb2.RPCRegistrationRequest.Role.Value("GENERIC")
 RPC_ROLE_SESSION_TITLE = iterm2.api_pb2.RPCRegistrationRequest.Role.Value("SESSION_TITLE")
+RPC_ROLE_STATUS_BAR_COMPONENT = iterm2.api_pb2.RPCRegistrationRequest.Role.Value("STATUS_BAR_COMPONENT")
 
 MODIFIER_CONTROL = iterm2.api_pb2.Modifiers.Value("CONTROL")
 MODIFIER_OPTION = iterm2.api_pb2.Modifiers.Value("OPTION")
@@ -214,7 +215,24 @@ async def async_subscribe_to_focus_change_notification(connection, callback):
         callback,
         session=None)
 
-async def async_subscribe_to_server_originated_rpc_notification(connection, callback, name, arguments=[], timeout_seconds=5, defaults={}, role=RPC_ROLE_GENERIC, display_name=None):
+async def async_subscribe_to_broadcast_domains_change_notification(connection, callback):
+    """
+    Registers a callback to be run when the current broadcast domains change.
+
+    See also: :meth:`iTerm2.App.parse_broadcast_domains`. Pass it `notification.broadcast_domains`.
+
+    :param connection: A connected :class:`Connection`.
+    :param callback: A coroutine taking two arguments: an :class:`Connection` and
+      iterm2.api_pb2.BroadcastDomainsChangedNotification.
+    """
+    return await _async_subscribe(
+        connection,
+        True,
+        iterm2.api_pb2.NOTIFY_ON_BROADCAST_CHANGE,
+        callback,
+        session=None)
+
+async def async_subscribe_to_server_originated_rpc_notification(connection, callback, name, arguments=[], timeout_seconds=5, defaults={}, role=RPC_ROLE_GENERIC, session_title_display_name=None, status_bar_component=None):
     """
     Registers a callback to be run when the server wants to invoke an RPC.
 
@@ -226,7 +244,7 @@ async def async_subscribe_to_server_originated_rpc_notification(connection, call
     :param timeout_seconds: How long iTerm2 should wait for this function to return or `None` to use the default timeout.
     :param defaults: Gives default values. Names correspond to argument names in `arguments`. Values are in-scope variables at the callsite.
     :param role: Defines the special purpose of this RPC. If none, use `RPC_ROLE_GENERIC`.
-    :param display_name: Used by the `RPC_ROLE_SESSION_TITLE` role to give the name of the function to show in preferences.
+    :param session_title_display_name: Used by the `RPC_ROLE_SESSION_TITLE` role to give the name of the function to show in preferences.
 
     :returns: A token that can be passed to unsubscribe.
     """
@@ -254,8 +272,10 @@ async def async_subscribe_to_server_originated_rpc_notification(connection, call
 
         rpc_registration_request.defaults.extend(d)
 
-    if display_name is not None:
-        rpc_registration_request.display_name = display_name
+    if session_title_display_name is not None:
+        rpc_registration_request.session_title_attributes.display_name = session_title_display_name
+    elif status_bar_component is not None:
+        status_bar_component.set_fields_in_proto(rpc_registration_request.status_bar_component_attributes)
 
     return await _async_subscribe(
         connection,
@@ -352,6 +372,8 @@ def _get_handler_key_from_notification(notification):
         notification = notification.focus_changed_notification
     elif notification.HasField('server_originated_rpc_notification'):
         key = (None, iterm2.api_pb2.NOTIFY_ON_SERVER_ORIGINATED_RPC, _string_rpc_registration_request(notification.server_originated_rpc_notification.rpc))
+    elif notification.HasField('broadcast_domains_changed'):
+        key = (None, iterm2.api_pb2.NOTIFY_ON_BROADCAST_CHANGE)
     return key, notification
 
 def _get_notification_handlers(message):

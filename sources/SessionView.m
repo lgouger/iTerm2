@@ -5,9 +5,13 @@
 #import "FutureMethods.h"
 #import "iTermAdvancedSettingsModel.h"
 #import "iTermAnnouncementViewController.h"
+#import "iTermDropDownFindViewController.h"
+#import "iTermFindDriver.h"
 #import "iTermMetalClipView.h"
 #import "iTermMetalDeviceProvider.h"
 #import "iTermPreferences.h"
+#import "iTermStatusBarSearchFieldComponent.h"
+#import "iTermStatusBarViewController.h"
 #import "NSView+iTerm.h"
 #import "MovePaneController.h"
 #import "NSResponder+iTerm.h"
@@ -57,7 +61,11 @@ static NSDate* lastResizeDate_;
 @end
 
 
-@interface SessionView () <iTermAnnouncementDelegate, NSDraggingSource, PTYScrollerDelegate>
+@interface SessionView () <
+    iTermAnnouncementDelegate,
+    iTermFindDriverDelegate,
+    NSDraggingSource,
+    PTYScrollerDelegate>
 @property(nonatomic, strong) PTYScrollView *scrollview;
 @end
 
@@ -68,9 +76,6 @@ static NSDate* lastResizeDate_;
 
     BOOL _dim;
     BOOL _backgroundDimmed;
-
-    // Find window
-    FindViewController *_findView;
 
     // Saved size for unmaximizing.
     NSSize _savedSize;
@@ -89,6 +94,15 @@ static NSDate* lastResizeDate_;
 
     BOOL _useMetal;
     iTermMetalClipView *_metalClipView;
+    iTermDropDownFindViewController *_dropDownFindViewController;
+    enum {
+        iTermSessionViewFindDriverDropDown,
+        iTermSessionViewFindDriverTemporaryStatusBar,
+        iTermSessionViewFindDriverPermanentStatusBar
+    } _findDriver;
+    iTermFindDriver *_dropDownFindDriver;
+    iTermFindDriver *_permanentStatusBarFindDriver;
+    iTermFindDriver *_temporaryStatusBarFindDriver;
 }
 
 + (double)titleHeight {
@@ -113,17 +127,14 @@ static NSDate* lastResizeDate_;
         _announcements = [[NSMutableArray alloc] init];
 
         // Set up find view
-        _findView = [[FindViewController alloc] initWithNibName:@"FindView" bundle:nil];
-        [[_findView view] setHidden:YES];
-        [self addSubview:[_findView view]];
-        NSRect aRect = [self frame];
-        [_findView setFrameOrigin:NSMakePoint(aRect.size.width - [[_findView view] frame].size.width - 30,
-                                                     aRect.size.height - [[_findView view] frame].size.height)];
+        _dropDownFindViewController = [self newDropDownFindView];
+        _dropDownFindDriver = [[iTermFindDriver alloc] initWithViewController:_dropDownFindViewController];
 
         // Assign a globally unique view ID.
         _viewId = nextViewId++;
 
         // Allocate a scrollview
+        NSRect aRect = self.frame;
         _scrollview = [[PTYScrollView alloc] initWithFrame:NSMakeRect(0,
                                                                       0,
                                                                       aRect.size.width,
@@ -171,6 +182,99 @@ static NSDate* lastResizeDate_;
     _metalView.delegate = nil;
 }
 
+- (iTermDropDownFindViewController *)newDropDownFindView {
+    iTermDropDownFindViewController *dropDownViewController =
+        [[iTermDropDownFindViewController alloc] initWithNibName:@"FindView" bundle:nil];
+    [[dropDownViewController view] setHidden:YES];
+    [self addSubview:dropDownViewController.view];
+    NSRect aRect = [self frame];
+    NSSize size = [[dropDownViewController view] frame].size;
+    [dropDownViewController setFrameOrigin:NSMakePoint(aRect.size.width - size.width - 30,
+                                                       aRect.size.height - size.height)];
+    return dropDownViewController;
+}
+
+- (BOOL)isDropDownSearchVisible {
+    return _findDriver == iTermSessionViewFindDriverDropDown && _dropDownFindDriver.isVisible;
+}
+
+- (void)setFindDriverDelegate:(id<iTermFindDriverDelegate>)delegate {
+    _dropDownFindDriver.delegate = delegate;
+    _temporaryStatusBarFindDriver.delegate = delegate;
+    _permanentStatusBarFindDriver.delegate = delegate;
+}
+
+- (id<iTermFindDriverDelegate>)findDriverDelegate {
+    return _dropDownFindDriver.delegate;
+}
+
+- (BOOL)findViewHasKeyboardFocus {
+    switch (_findDriver) {
+        case iTermSessionViewFindDriverDropDown:
+            return !_dropDownFindDriver.isVisible;
+        case iTermSessionViewFindDriverPermanentStatusBar:
+            return NO;
+        case iTermSessionViewFindDriverTemporaryStatusBar:
+            return !_temporaryStatusBarFindDriver.isVisible;
+    }
+    assert(false);
+    return YES;
+}
+
+- (BOOL)findViewIsHidden {
+
+    switch (_findDriver) {
+        case iTermSessionViewFindDriverDropDown:
+            return !_dropDownFindDriver.isVisible;
+        case iTermSessionViewFindDriverPermanentStatusBar:
+            return NO;
+        case iTermSessionViewFindDriverTemporaryStatusBar:
+            return _title.statusBarViewController.temporaryLeftComponent == nil;
+    }
+    assert(false);
+    return YES;
+}
+
+- (iTermFindDriver *)findDriver {
+    switch (_findDriver) {
+        case iTermSessionViewFindDriverDropDown:
+            return _dropDownFindDriver;
+        case iTermSessionViewFindDriverPermanentStatusBar:
+            return _permanentStatusBarFindDriver;
+        case iTermSessionViewFindDriverTemporaryStatusBar:
+            return _temporaryStatusBarFindDriver;
+    }
+    assert(false);
+    return nil;
+}
+
+- (void)showFindUI {
+    if (self.findViewIsHidden) {
+        if (_title.statusBarViewController) {
+            if (!_title.statusBarViewController.temporaryLeftComponent) {
+                _findDriver = iTermSessionViewFindDriverTemporaryStatusBar;
+                NSDictionary *knobs = @{ iTermStatusBarPriorityKey: @(INFINITY),
+                                         iTermStatusBarSearchComponentIsTemporaryKey: @YES };
+                NSDictionary *configuration = @{ iTermStatusBarComponentConfigurationKeyKnobValues: knobs};
+                iTermStatusBarSearchFieldComponent *component =
+                    [[iTermStatusBarSearchFieldComponent alloc] initWithConfiguration:configuration];
+                _temporaryStatusBarFindDriver = [[iTermFindDriver alloc] initWithViewController:component.statusBarComponentSearchViewController];
+                _temporaryStatusBarFindDriver.delegate = _dropDownFindDriver.delegate;
+                component.statusBarComponentSearchViewController.driver = _temporaryStatusBarFindDriver;
+                _title.statusBarViewController.temporaryLeftComponent = component;
+            }
+        } else {
+            _findDriver = iTermSessionViewFindDriverDropDown;
+            [_temporaryStatusBarFindDriver open];
+        }
+    }
+    [self.findDriver makeVisible];
+}
+
+- (void)findViewDidHide {
+    _title.statusBarViewController.temporaryLeftComponent = nil;
+}
+
 - (BOOL)useMetal {
     return _useMetal;
 }
@@ -201,7 +305,15 @@ static NSDate* lastResizeDate_;
 
 - (void)installMetalViewWithDataSource:(id<iTermMetalDriverDataSource>)dataSource NS_AVAILABLE_MAC(10_11) {
     // Allocate a new metal view
-    if ([iTermPreferences boolForKey:kPreferenceKeyPreferIntegratedGPU]) {
+    static BOOL preferIntegrated;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        preferIntegrated = [iTermPreferences boolForKey:kPreferenceKeyPreferIntegratedGPU];
+    });
+    if (_metalView) {
+        [self removeMetalView];
+    }
+    if (preferIntegrated) {
         NSArray<id<MTLDevice>> *devices = MTLCopyAllDevices();
 
         id<MTLDevice> gpu = nil;
@@ -219,14 +331,25 @@ static NSDate* lastResizeDate_;
         _metalView = [[MTKView alloc] initWithFrame:_scrollview.contentView.frame
                                              device:gpu];
     } else {
+        static id<MTLDevice> device;
+        static dispatch_once_t once;
+        dispatch_once(&once, ^{
+            device = MTLCreateSystemDefaultDevice();
+        });
         _metalView = [[MTKView alloc] initWithFrame:_scrollview.contentView.frame
-                                             device:MTLCreateSystemDefaultDevice()];
+                                             device:device];
     }
+#if ENABLE_TRANSPARENT_METAL_WINDOWS
+    _metalView.layer.opaque = NO;
+#else
+    _metalView.layer.opaque = YES;
+#endif
+    _metalView.colorspace = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+    
     // There was a spike in crashes on 5/1. I'm removing this temporarily to see if it was the cause.
 #if ENABLE_LOW_POWER_GPU_DETECTION
                                          device:[[iTermMetalDeviceProvider sharedInstance] preferredDevice]];
 #endif
-    _metalView.layer.opaque = YES;
     // Tell the clip view about it so it can ask the metalview to draw itself on scroll.
     _metalClipView.metalView = _metalView;
 
@@ -265,6 +388,7 @@ static NSDate* lastResizeDate_;
         // TODO: Would be nice to draw only the rect, but I don't see a way to do that with MTKView
         // that doesn't involve doing something nutty like saving a copy of the drawable.
         [_metalView setNeedsDisplay:YES];
+        [_scrollview setNeedsDisplay:YES];
     }
 }
 
@@ -280,8 +404,8 @@ static NSDate* lastResizeDate_;
 - (void)addSubview:(NSView *)aView {
     BOOL wasRunning = _inAddSubview;
     _inAddSubview = YES;
-    if (!wasRunning && _findView && aView != [_findView view]) {
-        [super addSubview:aView positioned:NSWindowBelow relativeTo:[_findView view]];
+    if (!wasRunning && _dropDownFindViewController && aView != _dropDownFindViewController.view) {
+        [super addSubview:aView positioned:NSWindowBelow relativeTo:_dropDownFindViewController.view];
     } else {
         [super addSubview:aView];
     }
@@ -351,7 +475,11 @@ static NSDate* lastResizeDate_;
 }
 
 - (NSRect)frameByInsettingForMetal:(NSRect)frame {
-    return NSInsetRect(frame, 1, [iTermAdvancedSettingsModel terminalVMargin]);
+    if (@available(macOS 10.14, *)) {
+        return frame;
+    } else {
+        return NSInsetRect(frame, 1, [iTermAdvancedSettingsModel terminalVMargin]);
+    }
 }
 
 - (void)setDelegate:(id<iTermSessionViewDelegate>)delegate {
@@ -502,27 +630,24 @@ static NSDate* lastResizeDate_;
     --inme;
 }
 
-- (FindViewController*)findViewController {
-    return _findView;
-}
-
 - (void)setFrameSize:(NSSize)frameSize {
     [self updateAnnouncementFrame];
     [super setFrameSize:frameSize];
+    NSView *findView = _dropDownFindViewController.view;
     if (frameSize.width < 340) {
-        [[_findView view] setFrameSize:NSMakeSize(MAX(150, frameSize.width - 50),
-                                                  [[_findView view] frame].size.height)];
-        [_findView setFrameOrigin:NSMakePoint(frameSize.width - [[_findView view] frame].size.width - 30,
-                                              frameSize.height - [[_findView view] frame].size.height)];
+        [findView setFrameSize:NSMakeSize(MAX(150, frameSize.width - 50),
+                                          [findView frame].size.height)];
+        [_dropDownFindViewController setFrameOrigin:NSMakePoint(frameSize.width - [findView frame].size.width - 30,
+                                                                frameSize.height - [findView frame].size.height)];
     } else {
-        [[_findView view] setFrameSize:NSMakeSize(290,
-                                                  [[_findView view] frame].size.height)];
-        [_findView setFrameOrigin:NSMakePoint(frameSize.width - [[_findView view] frame].size.width - 30,
-                                              frameSize.height - [[_findView view] frame].size.height)];
+        [findView setFrameSize:NSMakeSize(290,
+                                          [findView frame].size.height)];
+        [_dropDownFindViewController setFrameOrigin:NSMakePoint(frameSize.width - [findView frame].size.width - 30,
+                                                                frameSize.height - [findView frame].size.height)];
     }
 }
 
-+ (NSDate*)lastResizeDate {
++ (NSDate *)lastResizeDate {
     return lastResizeDate_;
 }
 
@@ -662,7 +787,7 @@ static NSDate* lastResizeDate_;
         [_hoverURLTextField setEditable:NO];
         [_hoverURLTextField setSelectable:NO];
         [_hoverURLTextField setStringValue:url];
-        [_hoverURLTextField setAlignment:NSLeftTextAlignment];
+        [_hoverURLTextField setAlignment:NSTextAlignmentLeft];
         [_hoverURLTextField setAutoresizingMask:NSViewWidthSizable];
         [_hoverURLTextField setTextColor:[NSColor headerTextColor]];
         _hoverURLTextField.autoresizingMask = NSViewNotSizable;
@@ -762,6 +887,7 @@ static NSDate* lastResizeDate_;
                                                                     self.frame.size.height - kTitleHeight,
                                                                     self.frame.size.width,
                                                                     kTitleHeight)];
+        [self invalidateStatusBar];
         if (adjustScrollView) {
             [_title setAutoresizingMask:NSViewWidthSizable | NSViewMinYMargin];
         }
@@ -780,7 +906,24 @@ static NSDate* lastResizeDate_;
     }
     [self setTitle:[_delegate sessionViewTitle]];
     [self updateScrollViewFrame];
+    [self invalidateStatusBar];
     return YES;
+}
+
+- (void)invalidateStatusBar {
+    iTermStatusBarViewController *newVC = [self.delegate sessionViewStatusBarViewController];
+    if (newVC != _title.statusBarViewController) {
+        _title.statusBarViewController = newVC;
+        if (newVC.searchViewController) {
+            _findDriver = iTermSessionViewFindDriverPermanentStatusBar;
+            _permanentStatusBarFindDriver = [[iTermFindDriver alloc] initWithViewController:newVC.searchViewController];
+            _permanentStatusBarFindDriver.delegate = self.findDriverDelegate;
+        } else if (newVC) {
+            _findDriver = iTermSessionViewFindDriverTemporaryStatusBar;
+        } else {
+            _findDriver = iTermSessionViewFindDriverDropDown;
+        }
+    }
 }
 
 - (void)setOrdinal:(int)ordinal {
@@ -803,7 +946,7 @@ static NSDate* lastResizeDate_;
                        horizontalScrollerClass:nil
                          verticalScrollerClass:(hasScrollbar ? [PTYScroller class] : nil)
                                     borderType:NSNoBorder
-                                   controlSize:NSRegularControlSize
+                                   controlSize:NSControlSizeRegular
                                  scrollerStyle:[[self scrollview] scrollerStyle]];
 
     if (_showTitle) {
@@ -830,7 +973,7 @@ static NSDate* lastResizeDate_;
                           horizontalScrollerClass:nil
                             verticalScrollerClass:verticalScrollerClass
                                        borderType:[[self scrollview] borderType]
-                                      controlSize:NSRegularControlSize
+                                      controlSize:NSControlSizeRegular
                                     scrollerStyle:[[[self scrollview] verticalScroller] scrollerStyle]];
     return contentSize;
 }
@@ -842,6 +985,9 @@ static NSDate* lastResizeDate_;
                                     aRect.size.height - kTitleHeight,
                                     aRect.size.width,
                                     kTitleHeight)];
+        NSViewController *viewController = [self.delegate sessionViewStatusBarViewController];
+        
+        [[viewController view] setNeedsLayout:YES];
     }
     [self updateScrollViewFrame];
     [self updateFindViewFrame];
@@ -849,8 +995,9 @@ static NSDate* lastResizeDate_;
 
 - (void)updateFindViewFrame {
     NSRect aRect = self.frame;
-    [_findView setFrameOrigin:NSMakePoint(aRect.size.width - [[_findView view] frame].size.width - 30,
-                                          aRect.size.height - [[_findView view] frame].size.height)];
+    NSView *findView = _dropDownFindViewController.view;
+    [_dropDownFindViewController setFrameOrigin:NSMakePoint(aRect.size.width - [findView frame].size.width - 30,
+                                                            aRect.size.height - [findView frame].size.height)];
 }
 
 - (void)updateScrollViewFrame {
@@ -1003,6 +1150,71 @@ static NSDate* lastResizeDate_;
 
 - (void)userScrollDidChange:(BOOL)userScroll {
     [self.delegate sessionViewUserScrollDidChange:userScroll];
+}
+
+#pragma mark - iTermFindDriverDelegate
+
+- (BOOL)canSearch {
+    return [self.delegate canSearch];
+}
+
+- (void)resetFindCursor {
+    [self.delegate resetFindCursor];
+}
+
+- (BOOL)findInProgress {
+    return [self.delegate findInProgress];
+}
+
+- (BOOL)continueFind:(double *)progress {
+    return [self.delegate continueFind:progress];
+}
+
+- (BOOL)growSelectionLeft {
+    return [self.delegate growSelectionLeft];
+}
+
+- (void)growSelectionRight {
+    [self.delegate growSelectionRight];
+}
+
+- (NSString *)selectedText {
+    return [self.delegate selectedText];
+}
+
+- (NSString *)unpaddedSelectedText {
+    return [self.delegate unpaddedSelectedText];
+}
+
+- (void)copySelection {
+    [self.delegate copySelection];
+}
+
+- (void)pasteString:(NSString *)string {
+    [self.delegate pasteString:string];
+}
+
+- (void)findViewControllerMakeDocumentFirstResponder {
+    [self.delegate findViewControllerMakeDocumentFirstResponder];
+}
+
+- (void)findViewControllerClearSearch {
+    [self.delegate findViewControllerClearSearch];
+    _title.statusBarViewController.temporaryLeftComponent = nil;
+}
+
+- (void)findString:(NSString *)aString
+  forwardDirection:(BOOL)direction
+              mode:(iTermFindMode)mode
+        withOffset:(int)offset {
+    [self.delegate findString:aString
+             forwardDirection:direction
+                         mode:mode
+                   withOffset:offset];
+}
+
+- (void)findViewControllerVisibilityDidChange:(id<iTermFindViewController>)sender {
+    [self.delegate findViewControllerVisibilityDidChange:sender];
 }
 
 @end

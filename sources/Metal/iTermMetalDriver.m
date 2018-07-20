@@ -107,8 +107,9 @@ typedef struct {
     iTermCopyBackgroundRenderer *_copyBackgroundRenderer;
     iTermImageRenderer *_imageRenderer;
 #if ENABLE_USE_TEMPORARY_TEXTURE
-    iTermCopyToDrawableRenderer *_copyToDrawableRenderer;
+    iTermCopyToDrawableRenderer *_copyToDrawableRenderer NS_DEPRECATED_MAC(10_12, 10_14);
 #endif
+    iTermPremultiplyAlphaRenderer *_premultiplyAlphaRenderer NS_AVAILABLE_MAC(10_14);
 
     // This one is special because it's debug only
     iTermCopyOffscreenRenderer *_copyOffscreenRenderer;
@@ -172,8 +173,13 @@ typedef struct {
         _copyModeCursorRenderer = [iTermCursorRenderer newCopyModeCursorRendererWithDevice:device];
         _copyBackgroundRenderer = [[iTermCopyBackgroundRenderer alloc] initWithDevice:device];
 #if ENABLE_USE_TEMPORARY_TEXTURE
-        _copyToDrawableRenderer = [[iTermCopyToDrawableRenderer alloc] initWithDevice:device];
+        if (@available(macOS 10.14, *)) {} else {
+            _copyToDrawableRenderer = [[iTermCopyToDrawableRenderer alloc] initWithDevice:device];
+        }
 #endif
+        if (@available(macOS 10.14, *)) {
+            _premultiplyAlphaRenderer = [[iTermPremultiplyAlphaRenderer alloc] initWithDevice:device];
+        }
 
         _commandQueue = [device newCommandQueue];
 #if ENABLE_PRIVATE_QUEUE
@@ -438,6 +444,7 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
         frameData.cellSizeWithoutSpacing = rescale(frameData.perFrameState.cellSizeWithoutSpacing);
 
         frameData.scale = self.mainThreadState->scale;
+        frameData.hasBackgroundImage = frameData.perFrameState.hasBackgroundImage;
     }];
     return frameData;
 }
@@ -463,8 +470,15 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
     if ([self shouldCreateIntermediateRenderPassDescriptor:frameData]) {
         [frameData createIntermediateRenderPassDescriptor];
     }
+    if (frameData.perFrameState.transparencyAlpha < 1) {
+        if (@available(macOS 10.14, *)) {
+            [frameData createpostmultipliedRenderPassDescriptor];
+        }
+    }
 #if ENABLE_USE_TEMPORARY_TEXTURE
-    [frameData createTemporaryRenderPassDescriptor];
+    if (@available(macOS 10.14, *)) {} else {
+        [frameData createTemporaryRenderPassDescriptor];
+    }
 #endif
 
     // Set properties of the renderers for values that tend not to change very often and which
@@ -551,6 +565,9 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
 }
 
 - (BOOL)shouldCreateIntermediateRenderPassDescriptor:(iTermMetalFrameData *)frameData {
+    if (@available(macOS 10.14, *)) {
+        return NO;
+    }
     if (!_backgroundImageRenderer.rendererDisabled && [frameData.perFrameState metalBackgroundImageGetTiled:NULL]) {
         return YES;
     }
@@ -575,6 +592,11 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
     [self updateTextRendererForFrameData:frameData];
     [self updateBackgroundImageRendererForFrameData:frameData];
     [self updateCopyBackgroundRendererForFrameData:frameData];
+    if (@available(macOS 10.14, *)) {
+        if (frameData.postmultipliedRenderPassDescriptor) {
+            [self updatePremultiplyAlphaRendererForFrameData:frameData];
+        }
+    }
     [self updateBadgeRendererForFrameData:frameData];
     [self updateBroadcastStripesRendererForFrameData:frameData];
     [self updateCursorGuideRendererForFrameData:frameData];
@@ -616,7 +638,7 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
             continue;
         }
         [frameData measureTimeForStat:renderer.createTransientStateStat ofBlock:^{
-            __kindof iTermMetalCellRendererTransientState * _Nonnull tState =
+            __kindof iTermMetalCellRendererTransientState *tState =
                 [renderer createTransientStateForCellConfiguration:cellConfiguration
                                                      commandBuffer:commandBuffer];
             if (tState) {
@@ -632,6 +654,11 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
                                        range:(NSRange)range {
     [self populateMarginRendererTransientStateWithFrameData:frameData];
     [self populateCopyBackgroundRendererTransientStateWithFrameData:frameData];
+    if (@available(macOS 10.14, *)) {
+        if (frameData.postmultipliedRenderPassDescriptor) {
+            [self populatePremultiplyAlphaTransientStateWithFrameData:frameData];
+        }
+    }
     [self populateCursorRendererTransientStateWithFrameData:frameData];
     [self populateTextAndBackgroundRenderersTransientStateWithFrameData:frameData];
     [self populateBadgeRendererTransientStateWithFrameData:frameData];
@@ -667,6 +694,7 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
     }
 }
 
+// Main thread
 - (void)acquireScarceResources:(iTermMetalFrameData *)frameData view:(MTKView *)view {
     if (frameData.debugInfo) {
         [frameData measureTimeForStat:iTermMetalFrameDataStatMtGetRenderPassDescriptor ofBlock:^{
@@ -679,9 +707,13 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
             frameData.destinationTexture = frameData.renderPassDescriptor.colorAttachments[0].texture;
         }];
     } else {
+#if ENABLE_DEFER_CURRENT_DRAWABLE
         const BOOL synchronousDraw = (_context.group != nil);
         frameData.deferCurrentDrawable = ([iTermPreferences boolForKey:kPreferenceKeyMetalMaximizeThroughput] &&
                                           !synchronousDraw);
+#else
+        frameData.deferCurrentDrawable = NO;
+#endif
         if (!frameData.deferCurrentDrawable) {
             [frameData measureTimeForStat:iTermMetalFrameDataStatMtGetCurrentDrawable ofBlock:^{
                 frameData.destinationDrawable = view.currentDrawable;
@@ -808,8 +840,17 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
     }
     _copyBackgroundRenderer.enabled = (frameData.intermediateRenderPassDescriptor != nil);
 #if ENABLE_USE_TEMPORARY_TEXTURE
-    _copyToDrawableRenderer.enabled = YES;
+    if (@available(macOS 10.14, *)) {} else {
+        _copyToDrawableRenderer.enabled = YES;
+    }
 #endif
+}
+
+- (void)updatePremultiplyAlphaRendererForFrameData:(iTermMetalFrameData *)frameData NS_AVAILABLE_MAC(10_14) {
+    if (_premultiplyAlphaRenderer.rendererDisabled) {
+        return;
+    }
+    _premultiplyAlphaRenderer.enabled = YES;
 }
 
 - (void)updateBadgeRendererForFrameData:(iTermMetalFrameData *)frameData {
@@ -858,7 +899,7 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
 
 #pragma mark - Populate Transient States
 
-- (void)populateCopyBackgroundRendererTransientStateWithFrameData:(iTermMetalFrameData *)frameData {
+- (void)populateCopyBackgroundRendererTransientStateWithFrameData:(iTermMetalFrameData *)frameData NS_DEPRECATED_MAC(10_12, 10_14) {
     if (_copyBackgroundRenderer.rendererDisabled) {
         return;
     }
@@ -870,6 +911,14 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
     iTermCopyToDrawableRendererTransientState *dState = [frameData transientStateForRenderer:_copyToDrawableRenderer];
     dState.sourceTexture = frameData.temporaryRenderPassDescriptor.colorAttachments[0].texture;
 #endif
+}
+
+- (void)populatePremultiplyAlphaTransientStateWithFrameData:(iTermMetalFrameData *)frameData NS_AVAILABLE_MAC(10_14) {
+    if (_premultiplyAlphaRenderer.rendererDisabled) {
+        return;
+    }
+    iTermPremultiplyAlphaRendererTransientState *tstate = [frameData transientStateForRenderer:_premultiplyAlphaRenderer];
+    tstate.sourceTexture = frameData.postmultipliedRenderPassDescriptor.colorAttachments[0].texture;
 }
 
 - (void)populateCursorRendererTransientStateWithFrameData:(iTermMetalFrameData *)frameData {
@@ -1134,6 +1183,7 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
 - (void)populateBackgroundImageRendererTransientStateWithFrameData:(iTermMetalFrameData *)frameData {
     iTermBackgroundImageRendererTransientState *tState =
         [frameData transientStateForRenderer:_backgroundImageRenderer];
+    tState.transparencyAlpha = frameData.perFrameState.transparencyAlpha;
     tState.edgeInsets = frameData.perFrameState.edgeInsets;
 }
 
@@ -1274,31 +1324,53 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
                                     label:(NSString *)label {
     const int pass = frameData.currentPass;
 
+    BOOL useTemporaryTexture;
+    if (@available(macOS 10.14, *)) {
+        useTemporaryTexture = NO;
+    } else {
 #if ENABLE_USE_TEMPORARY_TEXTURE
-    assert(pass >= 0 && pass <= 2);
-
-    NSArray<MTLRenderPassDescriptor *> *descriptors =
-        @[ frameData.intermediateRenderPassDescriptor ?: frameData.temporaryRenderPassDescriptor,
-           frameData.temporaryRenderPassDescriptor,
-           frameData.renderPassDescriptor ];
-    iTermMetalFrameDataStat stats[3] = {
-        iTermMetalFrameDataStatPqEnqueueDrawCreateFirstRenderEncoder,
-        iTermMetalFrameDataStatPqEnqueueDrawCreateSecondRenderEncoder,
-        iTermMetalFrameDataStatPqEnqueueDrawCreateThirdRenderEncoder
-    };
+        useTemporaryTexture = YES;
 #else
-    // No temporary texture
-    assert(pass >= 0 && pass <= 1);
-
-    NSArray<MTLRenderPassDescriptor *> *descriptors =
-    @[ frameData.intermediateRenderPassDescriptor ?: frameData.renderPassDescriptor,
-       frameData.renderPassDescriptor,
-       frameData.renderPassDescriptor ];
+        useTemporaryTexture = NO;
+#endif
+    }
+    
+    NSArray<MTLRenderPassDescriptor *> *descriptors;
     iTermMetalFrameDataStat stats[3] = {
         iTermMetalFrameDataStatPqEnqueueDrawCreateFirstRenderEncoder,
         iTermMetalFrameDataStatPqEnqueueDrawCreateSecondRenderEncoder,
+        iTermMetalFrameDataStatPqEnqueueDrawCreateThirdRenderEncoder,
     };
-#endif
+    if (useTemporaryTexture) {
+        assert(pass >= 0 && pass <= 2);
+
+        descriptors =
+            @[ frameData.intermediateRenderPassDescriptor ?: frameData.temporaryRenderPassDescriptor,
+               frameData.temporaryRenderPassDescriptor,
+               frameData.renderPassDescriptor ];
+    } else {
+        // No temporary texture
+
+        BOOL premultiply = NO;
+        if (@available(macOS 10.14, *)) {
+            if (frameData.postmultipliedRenderPassDescriptor) {
+                assert(pass >= 0 && pass <= 2);
+                descriptors =
+                    @[ frameData.intermediateRenderPassDescriptor ?: frameData.postmultipliedRenderPassDescriptor,
+                       frameData.postmultipliedRenderPassDescriptor,
+                       frameData.renderPassDescriptor ];
+                premultiply = YES;
+            }
+        }
+        if (!premultiply) {
+            assert(pass >= 0 && pass <= 1);
+            descriptors =
+            @[ frameData.intermediateRenderPassDescriptor ?: frameData.renderPassDescriptor,
+               frameData.renderPassDescriptor,
+               frameData.renderPassDescriptor ];
+        }
+        
+    }
 
     [frameData updateRenderEncoderWithRenderPassDescriptor:descriptors[pass]
                                                       stat:stats[pass]
@@ -1425,75 +1497,104 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
     }
 }
 
+- (BOOL)deferredRequestCurrentDrawableWithCommandBuffer:(id<MTLCommandBuffer>)commandBuffer
+                                              frameData:(iTermMetalFrameData *)frameData {
+    __block BOOL shouldCopyToDrawable = NO;
+    [frameData measureTimeForStat:iTermMetalFrameDataStatPqBlockOnSynchronousGetDrawable ofBlock:^{
+        // Get a drawable and then copy to it.
+        if (!self.waitingOnSynchronousDraw) {
+            dispatch_semaphore_t sema = dispatch_semaphore_create(0);
+            __block BOOL timedOut = NO;
+            __block id<CAMetalDrawable> drawable = nil;
+            __block id<MTLTexture> texture = nil;
+            __block MTLRenderPassDescriptor *renderPassDescriptor = nil;
+            dispatch_async(dispatch_get_main_queue(), ^{
+                dispatch_semaphore_signal(sema);
+                @synchronized(self) {
+                    if (timedOut) {
+                        DLog(@"** TIMED OUT %@ **", frameData);
+                        return;
+                    }
+                    [frameData measureTimeForStat:iTermMetalFrameDataStatMtGetCurrentDrawable ofBlock:^{
+                        drawable = frameData.view.currentDrawable;
+                        DLog(@"%p DEFERRED PATH: got drawable %@ for frame %@", self, drawable, @(frameData.frameNumber));
+                        texture = drawable.texture;
+                        renderPassDescriptor = frameData.view.currentRenderPassDescriptor;
+                    }];
+                }
+            });
+            // TODO: This could avoid false positives by polling every millisecond to see if
+            // waitingOnSynchronousDraw has become true.
+            const BOOL semaphoreTimeout =
+            (dispatch_semaphore_wait(sema,
+                                     dispatch_time(DISPATCH_TIME_NOW,
+                                                   (int64_t)(0.1 * NSEC_PER_SEC))) != 0);
+            @synchronized(self) {
+                if (semaphoreTimeout) {
+                    // This is usually because the main thread is wedged
+                    // waiting for a synchronous draw.
+                    DLog(@"** SEMAPHORE EXPIRED %@ **", frameData);
+                    timedOut = YES;
+                }
+                frameData.destinationDrawable = drawable;
+                frameData.destinationTexture = texture;
+                frameData.destinationTexture.label = @"Drawable destination";
+                frameData.renderPassDescriptor = renderPassDescriptor;
+            }
+        }
+        if (frameData.destinationTexture == nil) {
+            DLog(@"  abort: failed to get drawable or RPD %@", frameData);
+            self.needsDraw = YES;
+            [frameData.renderEncoder endEncoding];
+            [commandBuffer commit];
+            [self didComplete:NO withFrameData:frameData];
+        } else {
+            DLog(@"Continuing on %@", frameData);
+            shouldCopyToDrawable = YES;
+        }
+    }];
+    return shouldCopyToDrawable;
+}
+
 - (void)finishDrawingWithCommandBuffer:(id<MTLCommandBuffer>)commandBuffer
                              frameData:(iTermMetalFrameData *)frameData {
-    __block BOOL shouldCopyToDrawable = NO;
+    BOOL shouldCopyToDrawable;
+    if (@available(macOS 10.14, *)) {
+        shouldCopyToDrawable = (frameData.postmultipliedRenderPassDescriptor != nil);
+    } else {
 #if ENABLE_USE_TEMPORARY_TEXTURE
-    shouldCopyToDrawable = YES;
+        shouldCopyToDrawable = YES;
+#else
+        shouldCopyToDrawable = NO;
 #endif
+    }
+    
+#if ENABLE_DEFER_CURRENT_DRAWABLE
     if (frameData.deferCurrentDrawable) {
-        [frameData measureTimeForStat:iTermMetalFrameDataStatPqBlockOnSynchronousGetDrawable ofBlock:^{
-            // Get a drawable and then copy to it.
-            if (!self.waitingOnSynchronousDraw) {
-                dispatch_semaphore_t sema = dispatch_semaphore_create(0);
-                __block BOOL timedOut = NO;
-                __block id<CAMetalDrawable> drawable = nil;
-                __block id<MTLTexture> texture = nil;
-                __block MTLRenderPassDescriptor *renderPassDescriptor = nil;
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    dispatch_semaphore_signal(sema);
-                    @synchronized(self) {
-                        if (timedOut) {
-                            NSLog(@"** TIMED OUT **");
-                            return;
-                        }
-                        [frameData measureTimeForStat:iTermMetalFrameDataStatMtGetCurrentDrawable ofBlock:^{
-                            drawable = frameData.view.currentDrawable;
-                            texture = drawable.texture;
-                            renderPassDescriptor = frameData.view.currentRenderPassDescriptor;
-                        }];
-                    }
-                });
-#warning TODO: This could avoid false positives by polling every millisecond to see if waitingOnSynchronousDraw has become true.
-                const BOOL semaphoreTimeout =
-                    (dispatch_semaphore_wait(sema,
-                                             dispatch_time(DISPATCH_TIME_NOW,
-                                                           (int64_t)(0.1 * NSEC_PER_SEC))) != 0);
-                @synchronized(self) {
-                    if (semaphoreTimeout) {
-                        // This is usually because the main thread is wedged
-                        // waiting for a synchronous draw.
-                        NSLog(@"** SEMAPHORE EXPIRED **");
-                        timedOut = YES;
-                    }
-                    frameData.destinationDrawable = drawable;
-                    frameData.destinationTexture = texture;
-                    frameData.destinationTexture.label = @"Drawable destination";
-                    frameData.renderPassDescriptor = renderPassDescriptor;
-                }
-            }
-            if (frameData.destinationTexture == nil) {
-                DLog(@"  abort: failed to get drawable or RPD");
-                self.needsDraw = YES;
-                [frameData.renderEncoder endEncoding];
-                [commandBuffer commit];
-                [self didComplete:NO withFrameData:frameData];
-            } else {
-                shouldCopyToDrawable = YES;
-            }
-        }];
+        if ([self deferredRequestCurrentDrawableWithCommandBuffer:commandBuffer frameData:frameData]) {
+            shouldCopyToDrawable = YES;
+        }
         if (frameData.destinationTexture == nil) {
+            DLog(@"nil texture %@", frameData);
             return;
         }
     }
+#endif
     if (shouldCopyToDrawable) {
         // Copy to the drawable
         frameData.currentPass = 2;
         [frameData.renderEncoder endEncoding];
-        [self updateRenderEncoderForCurrentPass:frameData label:@"Copy to drawable"];
-        [self drawRenderer:_copyToDrawableRenderer
-                 frameData:frameData
-                      stat:iTermMetalFrameDataStatPqEnqueueCopyToDrawable];
+        if (@available(macOS 10.14, *)) {
+            [self updateRenderEncoderForCurrentPass:frameData label:@"Premultiply Alpha"];
+            [self drawRenderer:_premultiplyAlphaRenderer
+                     frameData:frameData
+                          stat:iTermMetalFrameDataStatPqEnqueueCopyToDrawable];
+        } else {
+            [self updateRenderEncoderForCurrentPass:frameData label:@"Copy to drawable"];
+            [self drawRenderer:_copyToDrawableRenderer
+                     frameData:frameData
+                          stat:iTermMetalFrameDataStatPqEnqueueCopyToDrawable];
+        }
     }
     [frameData measureTimeForStat:iTermMetalFrameDataStatPqEnqueueDrawEndEncodingToDrawable ofBlock:^{
         [frameData.renderEncoder endEncoding];
@@ -1564,8 +1665,8 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
         [weakSelf dispatchAsyncToMainQueue:^{
             if (!self->_imageRenderer.rendererDisabled) {
                 iTermImageRendererTransientState *tState = [frameData transientStateForRenderer:self->_imageRenderer];
-                [weakSelf.dataSource metalDidFindImages:tState.missingImageUniqueIdentifiers
-                                          missingImages:tState.foundImageUniqueIdentifiers
+                [weakSelf.dataSource metalDidFindImages:tState.foundImageUniqueIdentifiers
+                                          missingImages:tState.missingImageUniqueIdentifiers
                                           animatedLines:tState.animatedLines];
             }
             [weakSelf.dataSource metalDriverDidDrawFrame:frameData.perFrameState];
@@ -1627,15 +1728,32 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
 }
 
 - (NSArray<id<iTermMetalRenderer>> *)nonCellRenderers {
-    return @[ _backgroundImageRenderer,
-              _badgeRenderer,
-              _broadcastStripesRenderer,
-              _copyBackgroundRenderer,
+    NSArray *shared = @[ _backgroundImageRenderer,
+                         _badgeRenderer,
+                         _broadcastStripesRenderer,
+                         _copyBackgroundRenderer,
+                         _indicatorRenderer,
+                         _flashRenderer ];
+
+    BOOL useTemporaryTexture;
+    if (@available(macOS 10.14, *)) {
+        useTemporaryTexture = NO;
+    } else {
 #if ENABLE_USE_TEMPORARY_TEXTURE
-              _copyToDrawableRenderer,
+        useTemporaryTexture = YES;
+#else
+        useTemporaryTexture = NO;
 #endif
-              _indicatorRenderer,
-              _flashRenderer ];
+    }
+    
+    if (useTemporaryTexture) {
+        return [shared arrayByAddingObject:_copyToDrawableRenderer];
+    } else {
+        if (@available(macOS 10.14, *)) {
+            return [shared arrayByAddingObject:_premultiplyAlphaRenderer];
+        }
+        return shared;
+    }
 }
 
 - (void)scheduleDrawIfNeededInView:(MTKView *)view {
@@ -1671,5 +1789,3 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
 }
 
 @end
-
-

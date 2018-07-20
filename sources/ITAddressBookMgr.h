@@ -46,7 +46,7 @@
 #define KEY_CUSTOM_COMMAND              @"Custom Command"
 #define KEY_COMMAND_LINE                @"Command"
 #define KEY_INITIAL_TEXT                @"Initial Text"
-#define KEY_CUSTOM_DIRECTORY            @"Custom Directory"  // values are Yes, No, Recycle
+#define KEY_CUSTOM_DIRECTORY            @"Custom Directory"  // values are Yes, No, Recycle, Advanced
 #define KEY_WORKING_DIRECTORY           @"Working Directory"
 #define KEY_BADGE_FORMAT                @"Badge Text"
 #define KEY_TERMINAL_PROFILE            @"Terminal Profile"  // Deprecated
@@ -194,6 +194,8 @@
 #define KEY_PROMPT_CLOSE                      @"Prompt Before Closing 2"
 #define KEY_JOBS                              @"Jobs to Ignore"
 #define KEY_REDUCE_FLICKER                    @"Reduce Flicker"
+#define KEY_SHOW_STATUS_BAR                   @"Show Status Bar"
+#define KEY_STATUS_BAR_LAYOUT                 @"Status Bar Layout"
 
 // Keyboard
 #define KEY_KEYBOARD_MAP                      @"Keyboard Map"

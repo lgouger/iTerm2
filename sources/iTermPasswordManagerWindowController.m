@@ -27,13 +27,13 @@ static BOOL sAuthenticated;
 @end
 
 @implementation iTermPasswordManagerWindowController {
-    __weak IBOutlet NSTableView *_tableView;
-    __weak IBOutlet NSTableColumn *_accountNameColumn;
-    __weak IBOutlet NSTableColumn *_passwordColumn;
-    __weak IBOutlet NSButton *_removeButton;
-    __weak IBOutlet NSButton *_editButton;
-    __weak IBOutlet NSButton *_enterPasswordButton;
-    __weak IBOutlet iTermSearchField *_searchField;
+    IBOutlet NSTableView *_tableView;
+    IBOutlet NSTableColumn *_accountNameColumn;
+    IBOutlet NSTableColumn *_passwordColumn;
+    IBOutlet NSButton *_removeButton;
+    IBOutlet NSButton *_editButton;
+    IBOutlet NSButton *_enterPasswordButton;
+    IBOutlet iTermSearchField *_searchField;
     NSArray *_accounts;
     NSString *_passwordBeingShown;
     NSInteger _rowForPasswordBeingShown;
@@ -473,7 +473,8 @@ objectValueForTableColumn:(NSTableColumn *)aTableColumn
         return accountName;
     } else {
         NSString *password = nil;
-        if (_passwordBeingShown && [aTableView selectedRow] == rowIndex) {
+        if (_passwordBeingShown && [aTableView selectedRow] == rowIndex && rowIndex == _rowForPasswordBeingShown) {
+            NSLog(@"Returning plaintext password because selected row %@ equals queried index %@", @(aTableView.selectedRow), @(rowIndex));
             password = _passwordBeingShown;
         }
         return password ?: @"••••••••";

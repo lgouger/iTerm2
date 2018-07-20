@@ -192,7 +192,7 @@ int decode_utf8_char(const unsigned char * restrict datap,
 // Turns a string like fooBar into FooBar.
 - (NSString *)stringWithFirstLetterCapitalized;
 
-// Given a bitmask of modifiers like NSAlternateKeyMask, return a string indicating those modifiers.
+// Given a bitmask of modifiers like NSEventModifierFlagOption, return a string indicating those modifiers.
 + (NSString *)stringForModifiersWithMask:(NSUInteger)mask;
 
 // Returns a fresh UUID
@@ -216,6 +216,8 @@ int decode_utf8_char(const unsigned char * restrict datap,
                                               unichar simple,
                                               NSString *complexString,
                                               BOOL *stop))block;
+
+- (NSString *)firstComposedCharacter:(NSString **)rest;
 
 // It is safe to modify, delete, or insert characters in `range` within `block`.
 - (void)reverseEnumerateSubstringsEqualTo:(NSString *)query

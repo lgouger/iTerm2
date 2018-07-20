@@ -3,9 +3,9 @@
 #import "Coprocess.h"
 #import "DebugLogging.h"
 #import "iTermNotificationController.h"
+#import "iTermProcessCache.h"
 #import "NSWorkspace+iTerm.h"
 #import "PreferencePanel.h"
-#import "ProcessCache.h"
 #import "PTYTask.h"
 #import "TaskNotifier.h"
 #import "iTermAdvancedSettingsModel.h"
@@ -614,6 +614,9 @@ static void HandleSigChld(int n) {
            autologPath:(NSString *)autologPath
            synchronous:(BOOL)synchronous
             completion:(void (^)(void))completion {
+    DLog(@"launchWithPath:%@ args:%@ env:%@ width:%@ height:%@ isUTF8:%@ autologPath:%@ synchronous:%@",
+         progpath, args, env, @(width), @(height), @(isUTF8), autologPath, @(synchronous));
+
     if ([iTermAdvancedSettingsModel runJobsInServers]) {
         // We want to run
         //   iTerm2 --server progpath args
@@ -644,8 +647,16 @@ static void HandleSigChld(int n) {
 // arbitrary tty-controller in the tty's pgid that has this task as an ancestor
 // may be chosen. This function also implements a chache to avoid doing the
 // potentially expensive system calls too often.
-- (NSString *)currentJob:(BOOL)forceRefresh {
-    return [[ProcessCache sharedInstance] jobNameWithPid:self.pid];
+- (NSString *)currentJob:(BOOL)forceRefresh pid:(pid_t *)pid {
+    iTermProcessInfo *info = [[[iTermProcessCache sharedInstance] processInfoForPid:self.pid] deepestForegroundJob];
+    if (!info) {
+        return nil;
+    }
+
+    if (pid) {
+        *pid = info.processID;
+    }
+    return info.name;
 }
 
 - (void)writeTask:(NSData *)data {
@@ -844,8 +855,13 @@ static void HandleSigChld(int n) {
 - (void)logData:(const char *)buffer length:(int)length {
     @synchronized(self) {
         if ([self logging]) {
-            [_logHandle writeData:[NSData dataWithBytes:buffer
-                                                 length:length]];
+            @try {
+                [_logHandle writeData:[NSData dataWithBytes:buffer
+                                                     length:length]];
+            } @catch (NSException *exception) {
+                DLog(@"Exception while logging %@ bytes of data: %@", @(length), exception);
+                [self stopLogging];
+            }
         }
     }
 }
@@ -861,13 +877,13 @@ static void HandleSigChld(int n) {
     // TODO: This server code is super scary so I'm NSLog'ing it to make it easier to recover
     // logs. These should eventually become DLog's and the log statements in the server should
     // become LOG_DEBUG level.
-    NSLog(@"tryToAttachToServerWithProcessId: Attempt to connect to server for pid %d", (int)thePid);
+    DLog(@"tryToAttachToServerWithProcessId: Attempt to connect to server for pid %d", (int)thePid);
     iTermFileDescriptorServerConnection serverConnection = iTermFileDescriptorClientRun(thePid);
     if (!serverConnection.ok) {
         NSLog(@"Failed with error %s", serverConnection.error);
         return NO;
     } else {
-        NSLog(@"Succeeded.");
+        DLog(@"Succeeded.");
         [self attachToServer:serverConnection];
 
         // Prevent any future attempt to connect to this server as an orphan.
@@ -1126,6 +1142,8 @@ static void HandleSigChld(int n) {
                  autologPath:(NSString *)autologPath
                  synchronous:(BOOL)synchronous
                   completion:(void (^)(void))completion {
+    DLog(@"reallyLaunchWithPath:%@ args:%@ env:%@ width:%@ height:%@ isUTF8:%@ autologPath:%@ synchronous:%@",
+         progpath, args, env, @(width), @(height), @(isUTF8), autologPath, @(synchronous));
     if (autologPath) {
         [self startLoggingToFileWithPath:autologPath shouldAppend:NO];
     }
@@ -1135,6 +1153,7 @@ static void HandleSigChld(int n) {
 
     [self setCommand:progpath];
     env = [self environmentBySettingShell:env];
+    DLog(@"After setting shell environment is %@", env);
     path = [progpath copy];
     NSString *commandToExec = [progpath stringByStandardizingPath];
     const char *argpath = [commandToExec UTF8String];
@@ -1161,7 +1180,7 @@ static void HandleSigChld(int n) {
 
     // Note: stringByStandardizingPath will automatically call stringByExpandingTildeInPath.
     const char *initialPwd = [[[env objectForKey:@"PWD"] stringByStandardizingPath] UTF8String];
-
+    DLog(@"initialPwd=%s", initialPwd);
     iTermForkState forkState = {
         .connectionFd = -1,
         .deadMansPipe = { 0, 0 },

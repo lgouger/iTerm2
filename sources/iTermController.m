@@ -61,6 +61,7 @@
 #import "iTermPreferences.h"
 #import "iTermProfilePreferences.h"
 #import "iTermRestorableSession.h"
+#import "iTermSetCurrentTerminalHelper.h"
 #import "iTermSystemVersion.h"
 #import "iTermWarning.h"
 #import "PTYWindow.h"
@@ -74,6 +75,9 @@
 static NSString *const kSelectionRespectsSoftBoundariesKey = @"Selection Respects Soft Boundaries";
 static iTermController *gSharedInstance;
 
+@interface iTermController()<iTermSetCurrentTerminalHelperDelegate>
+@end
+
 @implementation iTermController {
     NSMutableArray *_restorableSessions;
     NSMutableArray *_currentRestorableSessionsStack;
@@ -83,6 +87,7 @@ static iTermController *gSharedInstance;
     iTermFullScreenWindowManager *_fullScreenWindowManager;
     BOOL _willPowerOff;
     BOOL _arrangeHorizontallyPendingFullScreenTransitions;
+    iTermSetCurrentTerminalHelper *_setCurrentTerminalHelper;
 }
 
 + (iTermController *)sharedInstance {
@@ -124,6 +129,8 @@ static iTermController *gSharedInstance;
         // create the "~/Library/Application Support/iTerm2" directory if it does not exist
         [[NSFileManager defaultManager] applicationSupportDirectory];
 
+        _setCurrentTerminalHelper = [[iTermSetCurrentTerminalHelper alloc] init];
+        _setCurrentTerminalHelper.delegate = self;
         _terminalWindows = [[NSMutableArray alloc] init];
         _restorableSessions = [[NSMutableArray alloc] init];
         _currentRestorableSessionsStack = [[NSMutableArray alloc] init];
@@ -194,6 +201,7 @@ static iTermController *gSharedInstance;
     [_currentRestorableSessionsStack release];
     [_fullScreenWindowManager release];
     [_lastSelection release];
+    [_setCurrentTerminalHelper release];
     [super dealloc];
 }
 
@@ -292,7 +300,16 @@ static iTermController *gSharedInstance;
     if (_frontTerminalWindowController) {
         bookmark = [[_frontTerminalWindowController currentSession] profile];
     }
-    [self launchBookmark:bookmark inTerminal:_frontTerminalWindowController];
+    BOOL divorced = ([[ProfileModel sessionsInstance] bookmarkWithGuid:bookmark[KEY_GUID]] != nil);
+    if (divorced) {
+        DLog(@"Creating a new session with a sessions instance guid");
+        NSString *guid = [ProfileModel freshGuid];
+        bookmark = [bookmark dictionaryBySettingObject:guid forKey:KEY_GUID];
+    }
+    PTYSession *session = [self launchBookmark:bookmark inTerminal:_frontTerminalWindowController];
+    if (divorced) {
+        [session divorceAddressBookEntryFromPreferences];
+    }
 }
 
 // Launch a new session using the default profile. If the current session is
@@ -656,7 +673,7 @@ static iTermController *gSharedInstance;
         }
     }
 
-    unsigned int modifierMask = NSCommandKeyMask | NSControlKeyMask;
+    unsigned int modifierMask = NSEventModifierFlagCommand | NSEventModifierFlagControl;
     [aMenuItem setKeyEquivalentModifierMask:modifierMask];
     [aMenuItem setRepresentedObject:[bookmark objectForKey:KEY_GUID]];
     [aMenuItem setTarget:aTarget];
@@ -675,11 +692,11 @@ static iTermController *gSharedInstance;
             }
         }
 
-        modifierMask = NSCommandKeyMask | NSControlKeyMask;
+        modifierMask = NSEventModifierFlagCommand | NSEventModifierFlagControl;
         [aMenuItem setRepresentedObject:[bookmark objectForKey:KEY_GUID]];
         [aMenuItem setTarget:self];
 
-        [aMenuItem setKeyEquivalentModifierMask:modifierMask | NSAlternateKeyMask];
+        [aMenuItem setKeyEquivalentModifierMask:modifierMask | NSEventModifierFlagOption];
         [aMenuItem setAlternate:YES];
         [aMenu addItem:aMenuItem];
         [aMenuItem release];
@@ -736,7 +753,7 @@ static iTermController *gSharedInstance;
         aMenuItem = [[NSMenuItem alloc] initWithTitle:@"Open All"
                                                action:openAllSelector
                                         keyEquivalent:@""];
-        unsigned int modifierMask = NSCommandKeyMask | NSControlKeyMask;
+        unsigned int modifierMask = NSEventModifierFlagCommand | NSEventModifierFlagControl;
         [aMenuItem setKeyEquivalentModifierMask:modifierMask];
         [aMenuItem setRepresentedObject:subMenu];
         if ([self respondsToSelector:openAllSelector]) {
@@ -752,9 +769,9 @@ static iTermController *gSharedInstance;
         aMenuItem = [[NSMenuItem alloc] initWithTitle:@"Open All in New Window"
                                                action:openAllSelector
                                         keyEquivalent:@""];
-        modifierMask = NSCommandKeyMask | NSControlKeyMask;
+        modifierMask = NSEventModifierFlagCommand | NSEventModifierFlagControl;
         [aMenuItem setAlternate:YES];
-        [aMenuItem setKeyEquivalentModifierMask:modifierMask | NSAlternateKeyMask];
+        [aMenuItem setKeyEquivalentModifierMask:modifierMask | NSEventModifierFlagOption];
         [aMenuItem setRepresentedObject:subMenu];
         if ([self respondsToSelector:openAllSelector]) {
             [aMenuItem setTarget:self];
@@ -1001,6 +1018,95 @@ static iTermController *gSharedInstance;
                           block:nil];
 }
 
+- (NSString *)validatedAndShellEscapedUsername:(NSString *)username {
+    NSMutableCharacterSet *legalCharacters = [NSMutableCharacterSet alphanumericCharacterSet];
+    [legalCharacters addCharactersInString:@"_-+."];
+    NSCharacterSet *illegalCharacters = [legalCharacters invertedSet];
+    NSRange range = [username rangeOfCharacterFromSet:illegalCharacters];
+    if (range.location != NSNotFound) {
+        ELog(@"username %@ contains illegal character at position %@", username, @(range.location));
+        return nil;
+    }
+    return [username stringWithEscapedShellCharactersIncludingNewlines:YES];
+}
+
+- (NSString *)validatedAndShellEscapedHostname:(NSString *)hostname {
+    NSCharacterSet *legalCharacters = [NSCharacterSet characterSetWithCharactersInString:@":abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-."];
+    NSCharacterSet *illegalCharacters = [legalCharacters invertedSet];
+    NSRange range = [hostname rangeOfCharacterFromSet:illegalCharacters];
+    if (range.location != NSNotFound) {
+        ELog(@"Hostname %@ contains illegal character at position %@", hostname, @(range.location));
+        return nil;
+    }
+    return [hostname stringWithEscapedShellCharactersIncludingNewlines:YES];
+}
+
+- (Profile *)profileByModifyingProfile:(NSDictionary *)prototype toSshTo:(NSURL *)url {
+    NSMutableString *tempString = [NSMutableString stringWithString:@"ssh "];
+    NSString *username = url.user;
+    BOOL cd = ([iTermAdvancedSettingsModel sshURLsSupportPath] && url.path.length > 1);
+    if (username) {
+        NSString *part = [self validatedAndShellEscapedUsername:username];
+        if (!part) {
+            return nil;
+        }
+        [tempString appendFormat:@"-l %@ ", part];
+    }
+    if (url.port) {
+        [tempString appendFormat:@"-p %@ ", url.port];
+    }
+    if (cd) {
+        // Force a TTY since we're providing a command
+        [tempString appendString:@"-t "];
+    }
+    NSString *hostname = url.host;
+    if (hostname) {
+        NSString *part = [self validatedAndShellEscapedHostname:hostname];
+        if (!part) {
+            return nil;
+        }
+        [tempString appendString:part];
+    }
+    if (cd) {
+        NSString *path = url.path;
+        if ([path hasPrefix:@"/~"]) {
+            path = [path substringFromIndex:1];
+        }
+        NSCharacterSet *unsafeCharacters = [NSCharacterSet characterSetWithCharactersInString:@"\"'\\\r\n\0"];
+        if ([path rangeOfCharacterFromSet:unsafeCharacters].location == NSNotFound) {
+            [tempString appendFormat:@" \"cd %@; exec \\$SHELL -l\"", [path stringWithEscapedShellCharactersIncludingNewlines:YES]];
+        }
+    }
+    return [prototype dictionaryByMergingDictionary:@{ KEY_COMMAND_LINE: tempString,
+                                                       KEY_CUSTOM_COMMAND: @"Yes" }];
+}
+
+- (Profile *)profileByModifyingProfile:(Profile *)prototype toFtpTo:(NSString *)url {
+    NSMutableString *tempString = [NSMutableString stringWithFormat:@"%@ %@", [iTermAdvancedSettingsModel pathToFTP], url];
+    return [prototype dictionaryByMergingDictionary:@{ KEY_COMMAND_LINE: tempString,
+                                                       KEY_CUSTOM_COMMAND: @"Yes" }];
+}
+
+- (Profile *)profileByModifyingProfile:(NSDictionary *)prototype toTelnetTo:(NSURL *)url {
+    NSMutableString *tempString = [NSMutableString stringWithFormat:@"%@ ", [iTermAdvancedSettingsModel pathToTelnet]];
+    if (url.user) {
+        NSString *part = [self validatedAndShellEscapedUsername:url.user];
+        if (!part) {
+            return nil;
+        }
+        [tempString appendFormat:@"-l %@ ", part];
+    }
+    if (url.host) {
+        NSString *part = [self validatedAndShellEscapedHostname:url.host];
+        if (!part) {
+            return nil;
+        }
+        [tempString appendString:part];
+    }
+    return [prototype dictionaryByMergingDictionary:@{ KEY_COMMAND_LINE: tempString,
+                                                       KEY_CUSTOM_COMMAND: @"Yes" }];
+}
+
 - (NSDictionary *)profile:(NSDictionary *)aDict
         modifiedToOpenURL:(NSString *)url
             forObjectType:(iTermObjectType)objectType {
@@ -1008,70 +1114,28 @@ static iTermController *gSharedInstance;
         [[ITAddressBookMgr bookmarkCommand:aDict
                              forObjectType:objectType] isEqualToString:@"$$"] ||
         ![[aDict objectForKey:KEY_CUSTOM_COMMAND] isEqualToString:@"Yes"]) {
-        Profile* prototype = aDict;
+        Profile *prototype = aDict;
         if (!prototype) {
             prototype = [self defaultBookmark];
         }
 
-        NSMutableDictionary *tempDict = [NSMutableDictionary dictionaryWithDictionary:prototype];
         NSURL *urlRep = [NSURL URLWithString:url];
         NSString *urlType = [urlRep scheme];
 
         if ([urlType compare:@"ssh" options:NSCaseInsensitiveSearch] == NSOrderedSame) {
-            NSMutableString *tempString = [NSMutableString stringWithString:@"ssh "];
-            NSString *username = [urlRep user];
-            if (username) {
-                NSMutableCharacterSet *legalCharacters = [NSMutableCharacterSet alphanumericCharacterSet];
-                [legalCharacters addCharactersInString:@"_-+."];
-                NSCharacterSet *illegalCharacters = [legalCharacters invertedSet];
-                NSRange range = [username rangeOfCharacterFromSet:illegalCharacters];
-                if (range.location != NSNotFound) {
-                    ELog(@"username %@ contains illegal character at position %@", username, @(range.location));
-                    return nil;
-                }
-                [tempString appendFormat:@"-l %@ ", [[urlRep user] stringWithEscapedShellCharactersIncludingNewlines:YES]];
-            }
-            if ([urlRep port]) {
-                [tempString appendFormat:@"-p %@ ", [urlRep port]];
-            }
-            NSString *hostname = [urlRep host];
-            if (hostname) {
-                NSCharacterSet *legalCharacters = [NSCharacterSet characterSetWithCharactersInString:@":abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-."];
-                NSCharacterSet *illegalCharacters = [legalCharacters invertedSet];
-                NSRange range = [hostname rangeOfCharacterFromSet:illegalCharacters];
-                if (range.location != NSNotFound) {
-                    ELog(@"Hostname %@ contains illegal character at position %@", hostname, @(range.location));
-                    return nil;
-                }
-                [tempString appendString:[hostname stringWithEscapedShellCharactersIncludingNewlines:YES]];
-            }
-            [tempDict setObject:tempString forKey:KEY_COMMAND_LINE];
-            [tempDict setObject:@"Yes" forKey:KEY_CUSTOM_COMMAND];
-            aDict = tempDict;
+            return [self profileByModifyingProfile:prototype toSshTo:urlRep];
         } else if ([urlType compare:@"ftp" options:NSCaseInsensitiveSearch] == NSOrderedSame) {
-            NSMutableString *tempString = [NSMutableString stringWithFormat:@"ftp %@", url];
-            [tempDict setObject:tempString forKey:KEY_COMMAND_LINE];
-            [tempDict setObject:@"Yes" forKey:KEY_CUSTOM_COMMAND];
-            aDict = tempDict;
+            return [self profileByModifyingProfile:prototype toFtpTo:url];
         } else if ([urlType compare:@"telnet" options:NSCaseInsensitiveSearch] == NSOrderedSame) {
-            NSMutableString *tempString = [NSMutableString stringWithString:@"telnet "];
-            if ([urlRep user]) {
-                [tempString appendFormat:@"-l %@ ", [[urlRep user] stringWithEscapedShellCharactersIncludingNewlines:YES]];
-            }
-            if ([urlRep host]) {
-                [tempString appendString:[[urlRep host] stringWithEscapedShellCharactersIncludingNewlines:YES]];
-                if ([urlRep port]) [tempString appendFormat:@" %@", [urlRep port]];
-            }
-            [tempDict setObject:tempString forKey:KEY_COMMAND_LINE];
-            [tempDict setObject:@"Yes" forKey:KEY_CUSTOM_COMMAND];
-            aDict = tempDict;
+            return [self profileByModifyingProfile:prototype toTelnetTo:urlRep];
+        } else if (!aDict) {
+            return [prototype copy];
+        } else {
+            return prototype;
         }
-        if (!aDict) {
-            aDict = tempDict;
-        }
+    } else {
+        return aDict;
     }
-
-    return aDict;
 }
 
 - (PTYSession *)launchBookmark:(NSDictionary *)bookmarkData
@@ -1416,22 +1480,8 @@ static iTermController *gSharedInstance;
     return _terminalWindows;
 }
 
-- (void)setCurrentTerminal:(PseudoTerminal *)thePseudoTerminal {
-    _frontTerminalWindowController = thePseudoTerminal;
-
-    // make sure this window is the key window
-    if ([thePseudoTerminal windowInitialized] && [[thePseudoTerminal window] isKeyWindow] == NO) {
-        [[thePseudoTerminal window] makeKeyAndOrderFront:self];
-        if ([thePseudoTerminal fullScreen]) {
-          [thePseudoTerminal hideMenuBar];
-        }
-    }
-
-    // Post a notification
-    [[NSNotificationCenter defaultCenter] postNotificationName:@"iTermWindowBecameKey"
-                                                        object:thePseudoTerminal
-                                                      userInfo:nil];
-
+- (void)setCurrentTerminal:(PseudoTerminal *)currentTerminal {
+    [_setCurrentTerminalHelper setCurrentTerminal:currentTerminal];
 }
 
 - (void)addTerminalWindow:(PseudoTerminal *)terminalWindow {
@@ -1510,6 +1560,26 @@ static iTermController *gSharedInstance;
                        }
                        return session;
                    }];
+}
+
+#pragma mark - iTermSetCurrentTerminalHelperDelegate
+
+- (void)reallySetCurrentTerminal:(PseudoTerminal *)thePseudoTerminal {
+    DLog(@"Actually make terminal current: %@", thePseudoTerminal);
+    _frontTerminalWindowController = thePseudoTerminal;
+
+    // make sure this window is the key window
+    if ([thePseudoTerminal windowInitialized] && [[thePseudoTerminal window] isKeyWindow] == NO) {
+        [[thePseudoTerminal window] makeKeyAndOrderFront:self];
+        if ([thePseudoTerminal fullScreen]) {
+            [thePseudoTerminal hideMenuBar];
+        }
+    }
+
+    // Post a notification
+    [[NSNotificationCenter defaultCenter] postNotificationName:@"iTermWindowBecameKey"
+                                                        object:thePseudoTerminal
+                                                      userInfo:nil];
 }
 
 @end

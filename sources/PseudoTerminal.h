@@ -2,6 +2,7 @@
 
 #import "Autocomplete.h"
 #import "FutureMethods.h"
+#import "iTermController.h"
 #import "iTermInstantReplayWindowController.h"
 #import "iTermPopupWindowController.h"
 #import "iTermToolbeltView.h"
@@ -35,6 +36,8 @@ extern NSString *const iTermTabDidChangePositionInWindowNotification;
 extern NSString *const iTermWindowAppearanceDidChange;
 
 extern NSString *const iTermSelectedTabDidChange;
+
+extern NSString *const iTermBroadcastDomainsDidChangeNotification;
 
 // This class is 1:1 with windows. It controls the tabs, the window's fulscreen
 // status, and coordinates resizing of sessions (either session-initiated
@@ -346,6 +349,8 @@ extern NSString *const iTermSelectedTabDidChange;
 - (iTermRestorableSession *)restorableSessionForSession:(PTYSession *)session;
 
 - (void)addSessionInNewTab:(PTYSession *)object;
+- (void)didDonateTab:(PTYTab *)aTab toWindowController:(PseudoTerminal *)term;
+- (void)moveTabAtIndex:(NSInteger)selectedIndex toIndex:(NSInteger)destinationIndex;
 
 @end
 

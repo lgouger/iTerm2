@@ -161,5 +161,7 @@ extern NSString *const kTmuxControllerSessionWasRenamed;
        nonAsciiFont:(NSFont *)nonAsciiFont
            hSpacing:(double)hs
            vSpacing:(double)vs;
+- (BOOL)windowIsHidden:(int)windowId;
+- (void)setLayoutInWindowPane:(int)windowPane toLayoutNamed:(NSString *)name;
 
 @end

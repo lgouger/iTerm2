@@ -2,7 +2,7 @@
 
 #import "Api.pbobjc.h"
 #import "DVR.h"
-#import "FindViewController.h"
+#import "iTermFindDriver.h"
 #import "iTermFileDescriptorClient.h"
 #import "iTermWeakReference.h"
 #import "ITAddressBookMgr.h"
@@ -210,7 +210,7 @@ typedef enum {
 
 @class SessionView;
 @interface PTYSession : NSResponder <
-    FindViewControllerDelegate,
+    iTermFindDriverDelegate,
     iTermWeaklyReferenceable,
     PopupDelegate,
     PTYTaskDelegate,
@@ -357,8 +357,6 @@ typedef enum {
 // in this bookmark may happen indepentendly of the persistent bookmark.
 // You should usually not assign to this; instead use divorceAddressBookEntryFromPreferences.
 @property(nonatomic, assign) BOOL isDivorced;
-
-@property(nonatomic, readonly) NSString *jobName;
 
 // Ignore resize notifications. This would be set because the session's size musn't be changed
 // due to temporary changes in the window size, as code later on may need to know the session's
@@ -747,7 +745,6 @@ typedef enum {
 - (void)drawFrameAndRemoveTemporarilyDisablementOfMetalForToken:(id)token NS_AVAILABLE_MAC(10_11);
 
 - (void)executeTokens:(const CVector *)vector bytesHandled:(int)length;
-- (void)setVariableNamed:(NSString *)name toValue:(id)newValue;
 - (void)injectData:(NSData *)data;
 
 // Call this when a session moves to a different tab or window to update the session ID.

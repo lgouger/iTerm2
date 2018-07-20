@@ -26,7 +26,7 @@
  */
 
 #import <Cocoa/Cocoa.h>
-#import "FindViewController.h"
+#import "iTermFindDriver.h"
 #import "iTermMetalDriver.h"
 #import "PTYScrollView.h"
 #import "PTYSession.h"
@@ -34,12 +34,13 @@
 #import "SplitSelectionView.h"
 
 @class iTermAnnouncementViewController;
+@class iTermFindDriver;
 @class iTermMetalDriver;
 @class PTYSession;
 @class SplitSelectionView;
 @class SessionTitleView;
 
-@protocol iTermSessionViewDelegate<NSObject>
+@protocol iTermSessionViewDelegate<iTermFindDriverDelegate, NSObject>
 
 // Mouse entered the view.
 - (void)sessionViewMouseEntered:(NSEvent *)event;
@@ -131,6 +132,8 @@
 // Please stop using metal and then start again.
 - (void)sessionViewRecreateMetalView;
 
+- (iTermStatusBarViewController *)sessionViewStatusBarViewController;
+
 @end
 
 @interface SessionView : NSView <SessionTitleViewDelegate>
@@ -146,6 +149,15 @@
 @property(nonatomic, readonly) iTermMetalDriver *driver NS_AVAILABLE_MAC(10_11);
 @property(nonatomic, readonly) MTKView *metalView NS_AVAILABLE_MAC(10_11);
 @property(nonatomic, readonly) BOOL useMetal NS_AVAILABLE_MAC(10_11);
+
+@property(nonatomic, readonly) BOOL isDropDownSearchVisible;
+@property(nonatomic, weak) id<iTermFindDriverDelegate> findDriverDelegate;
+@property(nonatomic, readonly) BOOL findViewIsHidden;
+@property(nonatomic, readonly) BOOL findViewHasKeyboardFocus;
+@property(nonatomic, readonly) iTermFindDriver *findDriver;
+
+- (void)showFindUI;
+- (void)findViewDidHide;
 - (void)setUseMetal:(BOOL)useMetal dataSource:(id<iTermMetalDriverDataSource>)dataSource NS_AVAILABLE_MAC(10_11);;
 
 + (double)titleHeight;
@@ -155,7 +167,6 @@
 - (void)setMetalViewNeedsDisplayInTextViewRect:(NSRect)textViewRect NS_AVAILABLE_MAC(10_11);
 
 - (void)setDimmed:(BOOL)isDimmed;
-- (FindViewController*)findViewController;
 - (void)setBackgroundDimmed:(BOOL)backgroundDimmed;
 - (void)updateDim;
 - (void)saveFrameSize;
@@ -195,5 +206,6 @@
 - (BOOL)hasHoverURL;
 - (BOOL)drawFrameSynchronously;
 - (void)reallyUpdateMetalViewFrame;
+- (void)invalidateStatusBar;
 
 @end

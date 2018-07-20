@@ -204,21 +204,29 @@ class Session:
         """
         return self.__session_id
 
-    def get_keystroke_reader(self):
+    def get_keystroke_reader(self, patterns_to_ignore=[]):
         """
         Provides a nice interface for observing a sequence of keystrokes.
+
+        :param patterns_to_ignore: A list of :class`KeystrokePattern` objects giving keystrokes that should not be handled normally by iTerm2 and only sent to the keystroke reader for processing in the script.
 
         :returns: A :class:`Session.KeystrokeReader`.
 
         :Example:
 
-          async with session.get_keystroke_reader() as reader:
-            while condition():
-              handle_keystrokes(reader.async_get())
+        .. code-block:: python
 
-        .. note:: Each call to reader.async_get() returns an array of new keystrokes.
+          async with session.get_keystroke_reader() as reader:
+            done = False
+            while not done:
+              for keystroke in await reader.async_get():
+                done = my_function(keystroke)  # Returns True to finish the keystroke reading loop
+                if done:
+                  break
+
+        .. note:: The `async with` statement will not finish until the while loop exits.
         """
-        return self.KeystrokeReader(self.connection, self.__session_id)
+        return self.KeystrokeReader(self.connection, self.__session_id, patterns_to_ignore)
 
     def get_screen_streamer(self, want_contents=True):
         """
@@ -237,13 +245,14 @@ class Session:
         """
         return self.ScreenStreamer(self.connection, self.__session_id, want_contents=want_contents)
 
-    async def async_send_text(self, text):
+    async def async_send_text(self, text, suppress_broadcast=False):
         """
         Send text as though the user had typed it.
 
         :param text: The text to send.
+        :param suppress_broadcast: If True, input goes only to the specified session even if broadcasting is on.
         """
-        await iterm2.rpc.async_send_text(self.connection, self.__session_id, text)
+        await iterm2.rpc.async_send_text(self.connection, self.__session_id, text, suppress_broadcast)
 
     async def async_split_pane(self, vertical=False, before=False, profile=None, profile_customizations=None):
         """
@@ -529,9 +538,10 @@ class Session:
 
         Don't create this yourself. Use Session.get_keystroke_reader() instead. See
         its docstring for more info."""
-        def __init__(self, connection, session_id):
+        def __init__(self, connection, session_id, patterns_to_ignore):
             self.connection = connection
             self.session_id = session_id
+            self.patterns_to_ignore = []
             self.buffer = []
             self.token = None
             self.future = None
@@ -548,7 +558,8 @@ class Session:
             self.token = await iterm2.notifications.async_subscribe_to_keystroke_notification(
                 self.connection,
                 async_on_keystroke,
-                self.session_id)
+                self.session_id,
+                self.patterns_to_ignore)
             return self
 
         async def async_get(self):

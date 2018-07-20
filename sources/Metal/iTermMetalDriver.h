@@ -68,6 +68,8 @@ NS_CLASS_AVAILABLE(10_11, NA)
 @property (nonatomic, readonly) BOOL cutOutLeftCorner;
 @property (nonatomic, readonly) BOOL cutOutRightCorner;
 @property (nonatomic, readonly) NSEdgeInsets edgeInsets;
+@property (nonatomic, readonly) BOOL hasBackgroundImage;
+@property (nonatomic, readonly) CGFloat transparencyAlpha;
 
 // Initialize sketchPtr to 0. The number of set bits estimates the unique number of color combinations.
 - (void)metalGetGlyphKeys:(iTermMetalGlyphKey *)glyphKeys
@@ -84,10 +86,10 @@ NS_CLASS_AVAILABLE(10_11, NA)
 
 - (nullable iTermMetalCursorInfo *)metalDriverCursorInfo;
 
-- (NSDictionary<NSNumber *, iTermCharacterBitmap *> *)metalImagesForGlyphKey:(iTermMetalGlyphKey *)glyphKey
-                                                                        size:(CGSize)size
-                                                                       scale:(CGFloat)scale
-                                                                       emoji:(BOOL *)emoji;
+- (nullable NSDictionary<NSNumber *, iTermCharacterBitmap *> *)metalImagesForGlyphKey:(iTermMetalGlyphKey *)glyphKey
+                                                                                 size:(CGSize)size
+                                                                                scale:(CGFloat)scale
+                                                                                emoji:(BOOL *)emoji;
 
 // Returns the background image or nil. If there's a background image, fill in blending and tiled.
 - (NSImage *)metalBackgroundImageGetTiled:(nullable BOOL *)tiled;

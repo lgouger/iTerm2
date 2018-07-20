@@ -75,13 +75,13 @@ static const CGFloat kMarginBetweenTitleAndBody = 8;
 @end
 
 @implementation iTermTipCardViewController {
-    __weak IBOutlet NSTextField *_title;
-    __weak IBOutlet NSTextField *_body;
-    __weak IBOutlet NSBox *_titleBox;
-    __weak IBOutlet iTermTipCardContainerView *_container;
+    IBOutlet NSTextField *_title;
+    IBOutlet NSTextField *_body;
+    IBOutlet NSBox *_titleBox;
+    IBOutlet iTermTipCardContainerView *_container;
 
     // A view that sits above the buttons and below the body content to hide staged buttons.
-    __weak IBOutlet SolidColorView *_coverView;
+    IBOutlet SolidColorView *_coverView;
 
     iTermTipCardFakeDividerView *_fakeBottomDivider;
     NSMutableArray *_actionButtons;
@@ -139,7 +139,7 @@ static const CGFloat kMarginBetweenTitleAndBody = 8;
            NSParagraphStyleAttributeName: bigTextParagraphStyle };
 
     NSMutableParagraphStyle *paragraphStyle = [[[NSMutableParagraphStyle alloc] init] autorelease];
-    [paragraphStyle setAlignment:NSRightTextAlignment];
+    [paragraphStyle setAlignment:NSTextAlignmentRight];
     NSDictionary *signatureAttributes =
         @{ NSFontAttributeName: [NSFont fontWithName:@"Helvetica Neue Light Italic" size:12],
            NSForegroundColorAttributeName: [NSColor colorWithCalibratedWhite:0.3 alpha:1],

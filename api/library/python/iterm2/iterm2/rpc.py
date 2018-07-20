@@ -51,19 +51,21 @@ async def async_notification_request(connection, subscribe, notification_type, s
     request.notification_request.notification_type = notification_type
     return await _async_call(connection, request)
 
-async def async_send_text(connection, session, text):
+async def async_send_text(connection, session, text, suppress_broadcast):
     """
     Sends text to a session, as though it had been typed.
 
     connection: A connected iterm2.Connection.
     session: A session ID.
     text: String to send although it had been typed by the user.
+    suppress_broadcast: If True, input goes only to the specified session even if broadcasting is on.
 
     Returns: iterm2.api_pb2.ServerOriginatedMessage
     """
     request = _alloc_request()
     request.send_text_request.session = session
     request.send_text_request.text = text
+    request.send_text_request.suppress_broadcast = suppress_broadcast
     return await _async_call(connection, request)
 
 async def async_split_pane(connection, session, vertical, before, profile=None, profile_customizations=None):
@@ -332,20 +334,26 @@ async def async_activate(connection,
     request.activate_request.select_session = select_session
     return await _async_call(connection, request)
 
-async def async_variable(connection, session_id, sets, gets):
+async def async_variable(connection, session_id=None, sets=[], gets=[], tab_id=None):
     """
     Gets or sets session variables.
 
     `sets` are JSON encoded. The resulting gets will be JSON encoded.
     """
     request = _alloc_request()
-    request.variable_request.session_id = session_id
+    if session_id:
+        request.variable_request.session_id = session_id
+    elif tab_id:
+        request.variable_request.tab_id = tab_id
+    else:
+        request.variable_request.app = True
+
     request.variable_request.get.extend(gets)
     for (name, value) in sets:
-        session = iterm2.api_pb2.VariableRequest.Set()
-        session.name = name
-        session.value = value
-        request.variable_request.set.extend([session])
+        kvp = iterm2.api_pb2.VariableRequest.Set()
+        kvp.name = name
+        kvp.value = value
+        request.variable_request.set.extend([kvp])
     return await _async_call(connection, request)
 
 async def async_save_arrangement(connection, name, window_id=None):
@@ -430,6 +438,56 @@ async def async_set_tab_layout(connection, tab_id, tree):
     request.set_tab_layout_request.SetInParent()
     request.set_tab_layout_request.tab_id = tab_id
     request.set_tab_layout_request.root.CopyFrom(tree)
+    return await _async_call(connection, request)
+
+async def async_get_broadcast_domains(connection):
+    """Fetches the current broadcast domains."""
+    request = _alloc_request()
+    request.get_broadcast_domains_request.SetInParent()
+    return await _async_call(connection, request)
+
+async def async_rpc_list_tmux_connections(connection):
+    """Requests a list of tmux connections."""
+    request = _alloc_request()
+    request.tmux_request.SetInParent()
+    request.tmux_request.list_connections.SetInParent()
+    return await _async_call(connection, request)
+
+async def async_rpc_send_tmux_command(connection, tmux_connection_id, command):
+    """Sends a command to the tmux server."""
+    request = _alloc_request()
+    request.tmux_request.SetInParent()
+    request.tmux_request.send_command.SetInParent()
+    request.tmux_request.send_command.connection_id = tmux_connection_id;
+    request.tmux_request.send_command.command = command
+    return await _async_call(connection, request)
+
+async def async_rpc_set_tmux_window_visible(connection, tmux_connection_id, window_id, visible):
+    """Hides/shows a tmux window (which is an iTerm2 tab)"""
+    request = _alloc_request()
+    request.tmux_request.SetInParent()
+    request.tmux_request.set_window_visible.SetInParent()
+    request.tmux_request.set_window_visible.connection_id = tmux_connection_id
+    request.tmux_request.set_window_visible.window_id = window_id
+    request.tmux_request.set_window_visible.visible = visible
+    return await _async_call(connection, request)
+
+async def async_reorder_tabs(connection, assignments):
+    """Reassigns tabs to windows and specifies their orders.
+
+    :param assignments: a list of tuples of (window_id, [tab_id, ...])
+    """
+    request = _alloc_request()
+    request.reorder_tabs_request.SetInParent()
+
+    def make_assignment(window_id, tab_ids):
+        assignment = iterm2.api_pb2.ReorderTabsRequest.Assignment()
+        assignment.window_id = window_id
+        assignment.tab_ids.extend(tab_ids)
+        return assignment
+
+    protos = list(map(lambda a: make_assignment(a[0], a[1]), assignments))
+    request.reorder_tabs_request.assignments.extend(protos)
     return await _async_call(connection, request)
 
 ## Private --------------------------------------------------------------------

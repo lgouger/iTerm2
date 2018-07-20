@@ -30,6 +30,7 @@
 #import "AppearancePreferencesViewController.h"
 #import "ColorsMenuItemView.h"
 #import "FileTransferManager.h"
+#import "iTermAPIHelper.h"
 #import "ITAddressBookMgr.h"
 #import "iTermAboutWindowController.h"
 #import "iTermAppHotKeyProvider.h"
@@ -144,31 +145,31 @@ static BOOL hasBecomeActive = NO;
     iTermPasswordManagerWindowController *_passwordManagerWindowController;
 
     // Menu items
-    __weak IBOutlet NSMenu *bookmarkMenu;
-    __weak IBOutlet NSMenu *toolbeltMenu;
+    IBOutlet NSMenu *bookmarkMenu;
+    IBOutlet NSMenu *toolbeltMenu;
     NSMenuItem *downloadsMenu_;
     NSMenuItem *uploadsMenu_;
-    __weak IBOutlet NSMenuItem *selectTab;
-    __weak IBOutlet NSMenuItem *logStart;
-    __weak IBOutlet NSMenuItem *logStop;
-    __weak IBOutlet NSMenuItem *closeTab;
-    __weak IBOutlet NSMenuItem *closeWindow;
-    __weak IBOutlet NSMenuItem *sendInputToAllSessions;
-    __weak IBOutlet NSMenuItem *sendInputToAllPanes;
-    __weak IBOutlet NSMenuItem *sendInputNormally;
-    __weak IBOutlet NSMenuItem *irPrev;
-    __weak IBOutlet NSMenuItem *windowArrangements_;
-    __weak IBOutlet NSMenuItem *windowArrangementsAsTabs_;
-    __weak IBOutlet NSMenuItem *_installPythonRuntime;
-    __weak IBOutlet NSMenu *_buriedSessions;
+    IBOutlet NSMenuItem *selectTab;
+    IBOutlet NSMenuItem *logStart;
+    IBOutlet NSMenuItem *logStop;
+    IBOutlet NSMenuItem *closeTab;
+    IBOutlet NSMenuItem *closeWindow;
+    IBOutlet NSMenuItem *sendInputToAllSessions;
+    IBOutlet NSMenuItem *sendInputToAllPanes;
+    IBOutlet NSMenuItem *sendInputNormally;
+    IBOutlet NSMenuItem *irPrev;
+    IBOutlet NSMenuItem *windowArrangements_;
+    IBOutlet NSMenuItem *windowArrangementsAsTabs_;
+    IBOutlet NSMenuItem *_installPythonRuntime;
+    IBOutlet NSMenu *_buriedSessions;
     NSMenu *_statusIconBuriedSessions;  // unsafe unretained
-    __weak IBOutlet NSMenu *_scriptsMenu;
+    IBOutlet NSMenu *_scriptsMenu;
 
-    __weak IBOutlet NSMenuItem *showFullScreenTabs;
-    __weak IBOutlet NSMenuItem *useTransparency;
-    __weak IBOutlet NSMenuItem *maximizePane;
-    __weak IBOutlet SUUpdater * suUpdater;
-    __weak IBOutlet NSMenuItem *_showTipOfTheDay;  // Here because we must remove it for older OS versions.
+    IBOutlet NSMenuItem *showFullScreenTabs;
+    IBOutlet NSMenuItem *useTransparency;
+    IBOutlet NSMenuItem *maximizePane;
+    IBOutlet SUUpdater * suUpdater;
+    IBOutlet NSMenuItem *_showTipOfTheDay;  // Here because we must remove it for older OS versions.
     BOOL secureInputDesired_;
     BOOL quittingBecauseLastWindowClosed_;
 
@@ -200,11 +201,18 @@ static BOOL hasBecomeActive = NO;
     // Location of mouse when the app became inactive.
     NSPoint _savedMouseLocation;
     iTermScriptsMenuController *_scriptsMenuController;
+    enum {
+        iTermUntitledFileOpenUnsafe,
+        iTermUntitledFileOpenPending,
+        iTermUntitledFileOpenAllowed,
+        iTermUntitledFileOpenComplete
+    } _untitledFileOpenStatus;
 }
 
 - (instancetype)init {
     self = [super init];
     if (self) {
+        _untitledFileOpenStatus = iTermUntitledFileOpenUnsafe;
         // Add ourselves as an observer for notifications.
         [[NSNotificationCenter defaultCenter] addObserver:self
                                                  selector:@selector(reloadMenus:)
@@ -358,6 +366,9 @@ static BOOL hasBecomeActive = NO;
     } else if (menuItem.action == @selector(debugLogging:)) {
         menuItem.state = gDebugLogging ? NSOnState : NSOffState;
         return YES;
+    } else if (menuItem.action == @selector(arrangeSplitPanesEvenly:)) {
+        PTYTab *tab = [[[iTermController sharedInstance] currentTerminal] currentTab];
+        return (tab.sessions.count > 0 && !tab.isMaximized);
     } else {
         return YES;
     }
@@ -747,10 +758,50 @@ static BOOL hasBecomeActive = NO;
     if (![iTermAdvancedSettingsModel openUntitledFile]) {
         return NO;
     }
-    if (![[NSApplication sharedApplication] isRunningUnitTests]) {
-        [self newWindow:nil];
-    }
+    [self maybeOpenUntitledFile];
     return YES;
+}
+
+- (void)openUntitledFileBecameSafe {
+    if ([[NSApplication sharedApplication] isRunningUnitTests]) {
+        _untitledFileOpenStatus = iTermUntitledFileOpenUnsafe;
+        return;
+    }
+    switch (_untitledFileOpenStatus) {
+        case iTermUntitledFileOpenUnsafe:
+            _untitledFileOpenStatus = iTermUntitledFileOpenAllowed;
+            break;
+        case iTermUntitledFileOpenAllowed:
+            // Shouldn't happen
+            break;
+        case iTermUntitledFileOpenPending:
+            _untitledFileOpenStatus = iTermUntitledFileOpenAllowed;
+            [self maybeOpenUntitledFile];
+            break;
+
+        case iTermUntitledFileOpenComplete:
+            // Shouldn't happen
+            break;
+    }
+}
+
+- (void)maybeOpenUntitledFile {
+    if (![[NSApplication sharedApplication] isRunningUnitTests]) {
+        switch (_untitledFileOpenStatus) {
+            case iTermUntitledFileOpenUnsafe:
+                _untitledFileOpenStatus = iTermUntitledFileOpenPending;
+                break;
+            case iTermUntitledFileOpenAllowed:
+                _untitledFileOpenStatus = iTermUntitledFileOpenComplete;
+                [self newWindow:nil];
+                break;
+            case iTermUntitledFileOpenPending:
+                break;
+            case iTermUntitledFileOpenComplete:
+                [self newWindow:nil];
+                break;
+        }
+    }
 }
 
 - (NSMenu *)applicationDockMenu:(NSApplication *)sender {
@@ -977,6 +1028,7 @@ static BOOL hasBecomeActive = NO;
                                   block:^(id before, id after) {
                                       [[iTermController sharedInstance] refreshSoftwareUpdateUserDefaults];
                                   }];
+    [self openUntitledFileBecameSafe];
 }
 
 - (void)applicationDidFinishLaunching:(NSNotification *)aNotification {
@@ -1035,7 +1087,7 @@ static BOOL hasBecomeActive = NO;
     // Register our services provider. Registration must happen only when we're
     // ready to accept requests, so I do it after a spin of the runloop.
     dispatch_async(dispatch_get_main_queue(), ^{
-        [NSApp setServicesProvider:[[iTermServiceProvider alloc] init]];
+        [NSApp setServicesProvider:[[[iTermServiceProvider alloc] init] autorelease]];
     });
 
     // Sometimes, open untitled doc isn't called in Lion. We need to give application:openFile:
@@ -1087,10 +1139,13 @@ static BOOL hasBecomeActive = NO;
     } else {
         [self restoreBuriedSessionsState];
     }
+    if ([iTermAdvancedSettingsModel enableAPIServer]) {
+        [iTermAPIHelper sharedInstance];  // starts the server. Won't ask the user since it's enabled.
+    }
 }
 
 - (NSMenu *)statusBarMenu {
-    NSMenu *menu = [[NSMenu alloc] init];
+    NSMenu *menu = [[[NSMenu alloc] init] autorelease];
     NSMenuItem *item;
 
     item = [[[NSMenuItem alloc] initWithTitle:@"Preferences"
@@ -1219,14 +1274,14 @@ static BOOL hasBecomeActive = NO;
     [closeTab setTarget:frontTerminal];
     [closeTab setKeyEquivalent:@"w"];
     [closeWindow setKeyEquivalent:@"W"];
-    [closeWindow setKeyEquivalentModifierMask: NSCommandKeyMask];
+    [closeWindow setKeyEquivalentModifierMask: NSEventModifierFlagCommand];
 }
 
 - (void)nonTerminalWindowBecameKey:(NSNotification *)aNotification {
     [closeTab setAction:nil];
     [closeTab setKeyEquivalent:@""];
     [closeWindow setKeyEquivalent:@"w"];
-    [closeWindow setKeyEquivalentModifierMask:NSCommandKeyMask];
+    [closeWindow setKeyEquivalentModifierMask:NSEventModifierFlagCommand];
 }
 
 - (void)updateAddressBookMenu:(NSNotification*)aNotification {
@@ -1689,6 +1744,10 @@ static BOOL hasBecomeActive = NO;
     [[iTermController sharedInstance] arrangeHorizontally];
 }
 
+- (IBAction)arrangeSplitPanesEvenly:(id)sender {
+    [[[[iTermController sharedInstance] currentTerminal] currentTab] arrangeSplitPanesEvenly];
+}
+
 - (IBAction)showPrefWindow:(id)sender {
     [[PreferencePanel sharedInstance] run];
     [[[PreferencePanel sharedInstance] window] makeKeyAndOrderFront:self];
@@ -1959,6 +2018,14 @@ static BOOL hasBecomeActive = NO;
 
 - (IBAction)revealScriptsInFinder:(id)sender {
     [_scriptsMenuController revealScriptsInFinder];
+}
+
+- (IBAction)exportScript:(id)sender {
+    [_scriptsMenuController chooseAndExportScript];
+}
+
+- (IBAction)importScript:(id)sender {
+    [_scriptsMenuController chooseAndImportScript];
 }
 
 - (IBAction)newPythonScript:(id)sender {

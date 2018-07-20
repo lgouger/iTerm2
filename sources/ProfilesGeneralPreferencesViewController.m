@@ -251,7 +251,7 @@ static NSString *const iTermProfilePreferencesUpdateSessionName = @"iTermProfile
         [self->_titleSettings.menu removeItemAtIndex:idx];
     }];
 
-    NSArray<iTermTuple<NSString *, NSString *> *> *funcs = [[iTermAPIHelper sharedInstance] sessionTitleFunctions];
+    NSArray<iTermTuple<NSString *, NSString *> *> *funcs = [iTermAPIHelper sessionTitleFunctions];
     if (funcs.count) {
         NSMenuItem *separator = [NSMenuItem separatorItem];
         separator.identifier = @"";
@@ -619,7 +619,7 @@ static NSString *const iTermProfilePreferencesUpdateSessionName = @"iTermProfile
                                                                      tty:@"TTY"
                                                                     user:@"User"
                                                                     host:@"Host"
-                                                                    tmux:@"Tmux"
+                                                                    tmux:nil
                                                               components:value];
 
     const CGFloat maxWidth = NSMinX(_customTitleHelp.frame) - NSMinX(_titleSettings.frame) - 5;

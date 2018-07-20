@@ -77,6 +77,21 @@ class Window:
         """
         return self.__tabs
 
+    async def async_set_tabs(self, tabs):
+        """Changes the tabs and their order.
+
+        The provided tabs may belong to any window. They will be moved if needed. Windows entirely denuded of tabs will be closed.
+
+        All provided tabs will be inserted in the given order starting at the first positions. Any tabs already belonging to this window not in the list will remain after the provided tabs.
+
+        :param tabs: a list of :class:`iterm2.Tab` objects
+        :raises: RPCException if something goes wrong.
+        """
+        tab_ids = map(lambda tab: tab.tab_id, tabs)
+        result = await iterm2.rpc.async_reorder_tabs(
+            self.connection,
+            assignments=[(self.window_id, tab_ids)])
+
     @property
     def current_tab(self):
         """
@@ -131,7 +146,7 @@ class Window:
 
         0,0 is the *bottom* right of the main screen.
 
-        :returns: api_pb2.Frame
+        :returns: :class:`Frame`
 
         :raises: :class:`GetPropertyException` if something goes wrong.
         """
@@ -140,11 +155,8 @@ class Window:
         status = response.get_property_response.status
         if status == iterm2.api_pb2.GetPropertyResponse.Status.Value("OK"):
             frame_dict = json.loads(response.get_property_response.json_value)
-            frame = iterm2.api_pb2.Frame()
-            frame.origin.x = frame_dict["origin"]["x"]
-            frame.origin.y = frame_dict["origin"]["y"]
-            frame.size.width = frame_dict["size"]["width"]
-            frame.size.height = frame_dict["size"]["height"]
+            frame = iterm2.Frame()
+            frame.load_from_dict(frame_dict)
             return frame
         else:
             raise GetPropertyException(response.get_property_response.status)
@@ -153,15 +165,11 @@ class Window:
         """
         Sets the window's frame.
 
-        :param frame: api_pb2.Frame
+        :param frame: :class:`Frame`
 
         :raises: :class:`SetPropertyException` if something goes wrong.
         """
-        frame_dict = {"origin": {"x": frame.origin.x,
-                                 "y": frame.origin.y},
-                      "size": {"width": frame.size.width,
-                               "height": frame.size.height}}
-        json_value = json.dumps(frame_dict)
+        json_value = json.dumps(frame.dict)
         response = await iterm2.rpc.async_set_property(
             self.connection,
             "frame",

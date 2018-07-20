@@ -279,10 +279,22 @@ static NSInteger gNextFrameDataNumber;
                      samplesPerPixel:4
                           forTexture:colorAttachment.texture];
         colorAttachment.texture.label = label;
+        [[self sharedTexturePool] stampTextureWithGeneration:colorAttachment.texture];
     }
 
     assert(renderPassDescriptor.colorAttachments[0].texture != nil);
     return renderPassDescriptor;
+}
+
+- (void)createpostmultipliedRenderPassDescriptor NS_AVAILABLE_MAC(10_14) {
+    [self measureTimeForStat:iTermMetalFrameDataStatPqCreateTemporary ofBlock:^{
+        assert(!self.postmultipliedRenderPassDescriptor);
+        
+        self.postmultipliedRenderPassDescriptor = [self newRenderPassDescriptorWithLabel:@"SRGB Texture"
+                                                                          fast:YES];
+        
+        [self->_debugInfo setPostmultipliedRenderPassDescriptor:self.postmultipliedRenderPassDescriptor];
+    }];
 }
 
 - (void)createIntermediateRenderPassDescriptor {
@@ -315,6 +327,11 @@ static NSInteger gNextFrameDataNumber;
     self.status = @"complete";
     if (self.intermediateRenderPassDescriptor) {
         [[self sharedTexturePool] returnTexture:self.intermediateRenderPassDescriptor.colorAttachments[0].texture];
+    }
+    if (@available(macOS 10.14, *)) {
+        if (self.postmultipliedRenderPassDescriptor) {
+            [[self sharedTexturePool] returnTexture:self.postmultipliedRenderPassDescriptor.colorAttachments[0].texture];
+        }
     }
     double duration;
 
@@ -422,6 +439,7 @@ static NSInteger gNextFrameDataNumber;
     if (!_cellConfiguration) {
         _cellConfiguration = [[iTermCellRenderConfiguration alloc] initWithViewportSize:self.viewportSize
                                                                                   scale:self.scale
+                                                                     hasBackgroundImage:self.hasBackgroundImage
                                                                                cellSize:self.cellSize
                                                                  cellSizeWithoutSpacing:self.cellSizeWithoutSpacing
                                                                                gridSize:self.gridSize

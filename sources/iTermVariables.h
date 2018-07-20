@@ -14,6 +14,10 @@ extern NSString *const iTermVariableKeyApplicationPID;
 extern NSString *const iTermVariableKeyTabTitleOverride;
 extern NSString *const iTermVariableKeyTabCurrentSession;
 
+// If this window is a tmux client, this is the window number defined by
+// the tmux server. -1 if not a tmux client.
+extern NSString *const iTermVariableKeyTabTmuxWindow;
+
 extern NSString *const iTermVariableKeySessionAutoLogID;
 extern NSString *const iTermVariableKeySessionColumns;
 extern NSString *const iTermVariableKeySessionCreationTimeString;
@@ -36,6 +40,9 @@ extern NSString *const iTermVariableKeySessionPresentationName;  // What's shown
 extern NSString *const iTermVariableKeySessionTmuxWindowTitle;  // All tmux window panes share the same window title
 extern NSString *const iTermVariableKeySessionTmuxRole;  // Unset (normal session), "gateway" (where you ran tmux -CC), or "client".
 extern NSString *const iTermVariableKeySessionTmuxClientName;  // Set on tmux gateways. Gives a name for the tmux session.
+extern NSString *const iTermVariableKeySessionTmuxWindowPane;  // NSNumber. Window pane number. Set if the session is a tmux session;
+extern NSString *const iTermVariableKeySessionJobPid;  // NSNumber. Process id of foreground job.
+extern NSString *const iTermVariableKeySessionChildPid;  // NSNumber. Process id of child of session task.
 
 @class iTermVariables;
 @class iTermVariableScope;
@@ -93,6 +100,7 @@ typedef NS_OPTIONS(NSUInteger, iTermVariablesSuggestionContext) {
 - (BOOL)setValuesFromDictionary:(NSDictionary<NSString *, id> *)dict;
 
 // nil or NSNull value means unset it.
+// Returns whether it was set. If the value is unchanged, it does not get set.
 - (BOOL)setValue:(nullable id)value forVariableNamed:(NSString *)name;
 
 // Freaking KVO crap keeps autocompleting and causing havoc

@@ -1,6 +1,5 @@
-// -*- mode:objc -*-
 /*
- **  ProcessCache.m
+ **  iTermDropDownFindViewController.h
  **
  **  Copyright (c) 2011
  **
@@ -8,8 +7,8 @@
  **
  **  Project: iTerm2
  **
- **  Description: Keeps an ancestorPid->foregroundJobName map and refreshes it
- **               in a separate thread.
+ **  Description: View controller for find view. Controls the UI layer of
+ **    searching a session.
  **
  **  This program is free software; you can redistribute it and/or modify
  **  it under the terms of the GNU General Public License as published by
@@ -26,23 +25,10 @@
  **  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
-
 #import <Cocoa/Cocoa.h>
+#import "FutureMethods.h"
+#import "iTermController.h"
+#import "iTermFindViewController.h"
 
-extern NSString *PID_INFO_IS_FOREGROUND;
-extern NSString *PID_INFO_NAME;
-
-@interface ProcessCache : NSObject
-
-+ (ProcessCache*)sharedInstance;
-+ (NSArray *)allPids;
-
-- (NSSet *)childrenOfPid:(pid_t)thePid levelsToSkip:(int)skip;
-- (NSString*)getNameOfPid:(pid_t)thePid isForeground:(BOOL*)isForeground;
-- (NSDictionary *)dictionaryOfTaskInfoForPid:(pid_t)thePid;
-
-// Get the name of the foreground job owned by pid.
-- (NSString*)jobNameWithPid:(int)pid;
-- (void)notifyNewOutput;
-
+@interface iTermDropDownFindViewController : NSViewController <iTermFindViewController, NSTextFieldDelegate>
 @end

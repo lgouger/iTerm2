@@ -58,6 +58,9 @@
     }];
     [_fragmentTextures enumerateKeysAndObjectsUsingBlock:^(NSNumber * _Nonnull key, id<MTLTexture>  _Nonnull obj, BOOL * _Nonnull stop) {
         [self->_formatter writeFragmentTexture:obj index:key.integerValue toFolder:folder];
+        NSString *description = [obj debugDescription];
+        NSString *file = [NSString stringWithFormat:@"texture-description.%@.txt", key];
+        [description writeToURL:[folder URLByAppendingPathComponent:file] atomically:NO encoding:NSUTF8StringEncoding error:nil];
     }];
     NSString *description = [NSString stringWithFormat:@"vertex count: %@\ninstance count: %@\nrenderPipelineState: %@\n",
                              @(_vertexCount),
@@ -70,6 +73,7 @@
 
 @implementation iTermMetalDebugInfo {
     MTLRenderPassDescriptor *_renderPassDescriptor;
+    MTLRenderPassDescriptor *_postmultipliedRenderPassDescriptor;
     MTLRenderPassDescriptor *_intermediateRenderPassDescriptor;
     MTLRenderPassDescriptor *_temporaryRenderPassDescriptor;
     NSMutableArray<iTermMetalRowData *> *_rowData;
@@ -92,6 +96,10 @@
 
 - (void)setRenderPassDescriptor:(MTLRenderPassDescriptor *)renderPassDescriptor {
     _renderPassDescriptor = renderPassDescriptor;
+}
+
+- (void)setPostmultipliedRenderPassDescriptor:(MTLRenderPassDescriptor *)renderPassDescriptor {
+    _postmultipliedRenderPassDescriptor = renderPassDescriptor;
 }
 
 - (void)setIntermediateRenderPassDescriptor:(MTLRenderPassDescriptor *)renderPassDescriptor {
@@ -161,6 +169,11 @@
     [self writeRenderPassDescriptor:_renderPassDescriptor
                                  to:[self newFolderNamed:@"RenderPassDescriptor"
                                                     root:root]];
+    if (_postmultipliedRenderPassDescriptor) {
+        [self writeRenderPassDescriptor:_postmultipliedRenderPassDescriptor
+                                     to:[self newFolderNamed:@"postmultipliedRenderPassDescriptor"
+                                                        root:root]];
+    }
     if (_intermediateRenderPassDescriptor) {
         [self writeRenderPassDescriptor:_intermediateRenderPassDescriptor
                                      to:[self newFolderNamed:@"IntermediateRenderPassDescriptor"

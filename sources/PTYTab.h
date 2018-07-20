@@ -12,6 +12,7 @@
 
 @class FakeWindow;
 @class iTermVariables;
+@class iTermVariableScope;
 @class PTYSession;
 @class PTYTab;
 @class SessionView;
@@ -34,19 +35,19 @@ extern NSString *const PTYTabVariableTitleOverride;
 @property(nonatomic, assign, getter=isBroadcasting) BOOL broadcasting;
 
 // Parent controller. Always set. Equals one of realParent or fakeParent.
-@property(nonatomic, assign) __unsafe_unretained id<WindowControllerInterface> parentWindow;
+@property(nonatomic, weak) id<WindowControllerInterface> parentWindow;
 
 // uniqueId lazily auto-assigns a unique id unless you assign it a value first. It is never 0.
 @property(nonatomic, assign) int uniqueId;
 @property(nonatomic, readonly) BOOL isMaximized;
 // Sessions ordered in a similar-to-reading-order fashion.
 @property(nonatomic, readonly) NSArray *orderedSessions;
-@property(nonatomic, assign) id<PTYTabDelegate> delegate;
+@property(nonatomic, weak) id<PTYTabDelegate> delegate;
 
 // While activeSession is not retained, it should only ever refer to a session that belongs to
 // this tab, and is thus retained through the view-to-session map.
-@property(nonatomic, assign) __unsafe_unretained PTYSession *activeSession;
-@property(nonatomic, retain) NSTabViewItem *tabViewItem;
+@property(nonatomic, weak) PTYSession *activeSession;
+@property(nonatomic, weak) NSTabViewItem *tabViewItem;
 
 // These values are observed by PSMTTabBarControl:
 // Tab number for display
@@ -60,12 +61,13 @@ extern NSString *const PTYTabVariableTitleOverride;
 @property (readonly, getter=isTmuxTab) BOOL tmuxTab;
 @property (nonatomic, readonly) PTYTabState state;
 @property (nonatomic, readonly) iTermVariables *variables;
+@property (nonatomic, readonly) iTermVariables *userVariables;
 
 // If non-nil, this session may not change size. This is useful when you want
 // to change a session's size. You can resize it, lock it, and then
 // adjustSubviews of the splitview (ordinarily done by a call to -[PTYTab
 // setSize:]).
-@property(nonatomic, assign) __unsafe_unretained PTYSession *lockedSession;
+@property(nonatomic, weak) PTYSession *lockedSession;
 
 // A string that overrides the default behavior of using the active session's title.
 // Set to nil to use the default behavior. This is a swifty string.
@@ -74,6 +76,8 @@ extern NSString *const PTYTabVariableTitleOverride;
 // titleOverride with inline expressions evaluated.
 // This value is in the variable PTYTabVariableTitleOverride.
 @property (nonatomic, readonly) NSString *evaluatedTitleOverride;
+
+@property (nonatomic, readonly) iTermVariableScope *variablesScope;
 
 // Save the contents of all sessions. Used during window restoration so that if
 // the sessions are later restored from a saved arrangement during startup
@@ -227,5 +231,6 @@ extern NSString *const PTYTabVariableTitleOverride;
 - (ITMSplitTreeNode *)rootSplitTreeNode;
 
 - (void)setSizesFromSplitTreeNode:(ITMSplitTreeNode *)node;
+- (void)arrangeSplitPanesEvenly;
 
 @end

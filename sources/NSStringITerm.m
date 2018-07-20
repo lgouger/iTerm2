@@ -104,6 +104,15 @@
         DLog(@"Pasteboard has a string.");
         info = [board stringForType:NSStringPboardType];
     }
+    if (!info) {
+        DLog(@"Using fallback technique of iterating pasteboard items %@", [[NSPasteboard generalPasteboard] pasteboardItems]);
+        for (NSPasteboardItem *item in [[NSPasteboard generalPasteboard] pasteboardItems]) {
+            info = [item stringForType:(NSString *)kUTTypeUTF8PlainText];
+            if (info) {
+                return info;
+            }
+        }
+    }
     return info;
 }
 
@@ -131,15 +140,18 @@
     return [self stringByReplacingOccurrencesOfString:@"\t" withString:replacement];
 }
 
-- (NSString*)stringWithPercentEscape
+- (NSString *)stringWithPercentEscape
 {
     // From
     // http://stackoverflow.com/questions/705448/iphone-sdk-problem-with-ampersand-in-the-url-string
-    return [(NSString *)CFURLCreateStringByAddingPercentEscapes(NULL,
-                                                                (CFStringRef)[[self mutableCopy] autorelease],
-                                                                NULL,
-                                                                CFSTR("￼=,!$&'()*+;@?\n\"<>#\t :/"),
-                                                                kCFStringEncodingUTF8) autorelease];
+    static NSMutableCharacterSet *allowedCharacters;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        allowedCharacters = [[NSCharacterSet URLHostAllowedCharacterSet] mutableCopy];
+        [allowedCharacters removeCharactersInString:@"￼=,!$&'()*+;@?\n\"<>#\t :/"];
+    });
+
+    return [self stringByAddingPercentEncodingWithAllowedCharacters:allowedCharacters];
 }
 
 - (NSString*)stringWithLinefeedNewlines
@@ -750,13 +762,14 @@ int decode_utf8_char(const unsigned char *datap,
 }
 
 - (NSString *)stringByEscapingForURL {
-    NSString *theString =
-        (NSString *) CFURLCreateStringByAddingPercentEscapes(NULL,
-                                                             (CFStringRef)self,
-                                                             (CFStringRef)@"!*'();:@&=+$,/?%#[]",
-                                                             NULL,
-                                                             kCFStringEncodingUTF8);
-    return [theString autorelease];
+    static NSMutableCharacterSet *allowedCharacters;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        allowedCharacters = [[NSCharacterSet URLHostAllowedCharacterSet] mutableCopy];
+        [allowedCharacters addCharactersInString:@"!*'();:@&=+$,/?%#[]"];
+    });
+
+    return [self stringByAddingPercentEncodingWithAllowedCharacters:allowedCharacters];
 }
 
 - (NSString *)stringByCapitalizingFirstLetter {
@@ -917,7 +930,7 @@ int decode_utf8_char(const unsigned char *datap,
     NSDateFormatter *dateFormatter = [[[NSDateFormatter alloc] init] autorelease];
     for (NSString *format in formats) {
         dateFormatter.dateFormat = format;
-        dateFormatter.locale = [[NSLocale alloc] initWithLocaleIdentifier:@"en_US_POSIX"];
+        dateFormatter.locale = [[[NSLocale alloc] initWithLocaleIdentifier:@"en_US_POSIX"] autorelease];
         NSDate *date = [dateFormatter dateFromString:self];
         if (date) {
             return date;
@@ -1492,16 +1505,16 @@ static TECObjectRef CreateTECConverterForUTF8Variants(TextEncodingVariant varian
 
 + (NSString *)stringForModifiersWithMask:(NSUInteger)keyMods {
     NSMutableString *theKeyString = [NSMutableString string];
-    if (keyMods & NSControlKeyMask) {
+    if (keyMods & NSEventModifierFlagControl) {
         [theKeyString appendString:@"^"];
     }
-    if (keyMods & NSAlternateKeyMask) {
+    if (keyMods & NSEventModifierFlagOption) {
         [theKeyString appendString:@"⌥"];
     }
-    if (keyMods & NSShiftKeyMask) {
+    if (keyMods & NSEventModifierFlagShift) {
         [theKeyString appendString:@"⇧"];
     }
-    if (keyMods & NSCommandKeyMask) {
+    if (keyMods & NSEventModifierFlagCommand) {
         [theKeyString appendString:@"⌘"];
     }
     return theKeyString;
@@ -1621,6 +1634,20 @@ static TECObjectRef CreateTECConverterForUTF8Variants(TextEncodingVariant varian
         }
         index = NSMaxRange(range);
     } while (NSMaxRange(range) < self.length);
+}
+
+- (NSString *)firstComposedCharacter:(NSString **)rest {
+    __block NSString *first = nil;
+    __block NSString *tail = self;
+    [self enumerateComposedCharacters:^(NSRange range, unichar simple, NSString *complexString, BOOL *stop) {
+        first = [self substringWithRange:range];
+        tail = [self substringFromIndex:NSMaxRange(range)];
+        *stop = YES;
+    }];
+    if (rest) {
+        *rest = tail;
+    }
+    return first;
 }
 
 - (void)reverseEnumerateSubstringsEqualTo:(NSString *)query
@@ -1868,6 +1895,8 @@ static TECObjectRef CreateTECConverterForUTF8Variants(TextEncodingVariant varian
 
         CTFrameDraw(textFrame, ctx);
 
+        CFRelease(textFrame);
+        
         CFRange fitRange;
 
         // Get the height of the line and translate the context down by it

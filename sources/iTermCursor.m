@@ -43,7 +43,7 @@
     }
 }
 
-+ (instancetype)copyModeCursorInSelectionState:(BOOL)selecting {
++ (instancetype)itermCopyModeCursorInSelectionState:(BOOL)selecting {
     iTermCopyModeCursor *cursor = [[[iTermCopyModeCursor alloc] init] autorelease];
     cursor.selecting = selecting;
     return cursor;
@@ -68,7 +68,7 @@
     rect.origin.y -= frameWidth;
     rect.size.width += frameWidth * 2;
     rect.size.height += frameWidth * 2;
-    NSFrameRectWithWidthUsingOperation(rect, 0.5, NSCompositeSourceOver);
+    NSFrameRectWithWidthUsingOperation(rect, 0.5, NSCompositingOperationSourceOver);
 }
 
 @end
@@ -139,7 +139,7 @@
                                    rect.size.height * heightFraction);
 
     const CGFloat r = self.selecting ? 2 : 1;
-    NSBezierPath *path = [[[NSBezierPath alloc] init] autorelease];
+    NSBezierPath *path;
     path = [[[NSBezierPath alloc] init] autorelease];
     [path moveToPoint:NSMakePoint(NSMinX(cursorRect), NSMinY(cursorRect))];
     [path lineToPoint:NSMakePoint(NSMidX(cursorRect) - r, NSMaxY(cursorRect))];

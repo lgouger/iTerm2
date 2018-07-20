@@ -164,7 +164,7 @@ didCompleteWithError:(nullable NSError *)error {
             if (dict[@"url"] && dict[@"signature"] && dict[@"version"]) {
                 int version = [dict[@"version"] intValue];
                 if (version > bestVersion) {
-                    NSString *minimumTermVersion = dict[@"mininum_iterm_version"];
+                    NSString *minimumTermVersion = dict[@"minimum_iterm_version"];
                     NSString *maximumTermVersion = dict[@"maximum_iterm_version"];
                     if ([self iTermVersionAtLeast:minimumTermVersion atMost:maximumTermVersion]) {
                         bestVersion = version;
@@ -228,10 +228,10 @@ didCompleteWithError:(nullable NSError *)error {
 @end
 
 @implementation iTermOptionalComponentDownloadWindowController {
-    __weak IBOutlet NSTextField *_titleLabel;
-    __weak IBOutlet NSTextField *_progressLabel;
-    __weak IBOutlet NSProgressIndicator *_progressIndicator;
-    __weak IBOutlet NSButton *_button;
+    IBOutlet NSTextField *_titleLabel;
+    IBOutlet NSTextField *_progressLabel;
+    IBOutlet NSProgressIndicator *_progressIndicator;
+    IBOutlet NSButton *_button;
     iTermOptionalComponentDownloadPhase *_firstPhase;
     BOOL _showingMessage;
 }

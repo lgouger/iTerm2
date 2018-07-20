@@ -296,37 +296,6 @@ typedef struct iTermTextColorContext {
     DLog(@"end drawRect:%@ in view %@", [NSValue valueWithRect:rect], _delegate);
 }
 
-- (NSImage *)imageForCoord:(VT100GridCoord)coord size:(CGSize)size {
-    NSData *rawMatches = [_delegate drawingHelperMatchesOnLine:coord.y];
-    screen_char_t *line = [_delegate drawingHelperLineAtIndex:coord.y];
-    iTermBackgroundColorRun backgroundRun = {
-        .range = { coord.x, 1 },
-        .bgColor = line[coord.x].backgroundColor,
-        .bgGreen = line[coord.x].bgGreen,
-        .bgBlue = line[coord.x].bgBlue,
-        .bgColorMode = line[coord.x].backgroundColorMode,
-        .selected = [[_selection selectedIndexesOnLine:coord.y] containsIndex:coord.x],
-        .isMatch = CheckFindMatchAtIndex(rawMatches, coord.x),
-    };
-    iTermBoxedBackgroundColorRun *boxedRun = [iTermBoxedBackgroundColorRun boxedBackgroundColorRunWithValue:backgroundRun];
-    NSColor *color = [self unprocessedColorForBackgroundRun:&backgroundRun];
-    // The unprocessed color is needed for minimum contrast computation for text color.
-    boxedRun.unprocessedBackgroundColor = color;
-    boxedRun.backgroundColor = [_colorMap processedBackgroundColorForBackgroundColor:color];
-    NSImage *image = [[NSImage alloc] initWithSize:size];
-
-    [image lockFocus];
-    [[NSColor redColor] set];
-    NSRectFill(NSMakeRect(0, 0, size.width, size.height));
-    [self drawForegroundForLineNumber:coord.y
-                                    y:0
-                       backgroundRuns:@[ boxedRun ]
-                              context:[[NSGraphicsContext currentContext] graphicsPort]];
-    [image unlockFocus];
-
-    return image;
-}
-
 - (NSInteger)numberOfEquivalentBackgroundColorLinesInRunArrays:(NSArray<iTermBackgroundColorRunsInLine *> *)backgroundRunArrays
                                                      fromIndex:(NSInteger)startIndex {
     NSInteger count = 1;
@@ -346,7 +315,7 @@ typedef struct iTermTextColorContext {
       boundingRect:(NSRect)boundingRect
       visibleLines:(NSRange)visibleLines {
     // Configure graphics
-    [[NSGraphicsContext currentContext] setCompositingOperation:NSCompositeCopy];
+    [[NSGraphicsContext currentContext] setCompositingOperation:NSCompositingOperationCopy];
 
     iTermTextExtractor *extractor = [self.delegate drawingHelperTextExtractor];
     _blinkingFound = NO;
@@ -508,7 +477,7 @@ typedef struct iTermTextColorContext {
 
         [box.backgroundColor set];
         NSRectFillUsingOperation(rect,
-                                 _hasBackgroundImage ? NSCompositeSourceOver : NSCompositeCopy);
+                                 _hasBackgroundImage ? NSCompositingOperationSourceOver : NSCompositingOperationCopy);
 
         if (_debug) {
             [[NSColor yellowColor] set];
@@ -649,7 +618,7 @@ typedef struct iTermTextColorContext {
 
     [NSGraphicsContext saveGraphicsState];
     [[NSGraphicsContext currentContext] setPatternPhase:NSMakePoint(0, 0)];
-    NSRectFillUsingOperation(rect, NSCompositeSourceOver);
+    NSRectFillUsingOperation(rect, NSCompositingOperationSourceOver);
     [NSGraphicsContext restoreGraphicsState];
 }
 
@@ -687,13 +656,13 @@ typedef struct iTermTextColorContext {
                              textOrigin.y,
                              range.length * _cellSize.width,
                              _cellSize.height);
-    NSRectFillUsingOperation(rect, NSCompositeSourceOver);
+    NSRectFillUsingOperation(rect, NSCompositingOperationSourceOver);
 
     rect.size.height = 1;
-    NSRectFillUsingOperation(rect, NSCompositeSourceOver);
+    NSRectFillUsingOperation(rect, NSCompositingOperationSourceOver);
 
     rect.origin.y += _cellSize.height - 1;
-    NSRectFillUsingOperation(rect, NSCompositeSourceOver);
+    NSRectFillUsingOperation(rect, NSCompositingOperationSourceOver);
 }
 
 + (NSRect)frameForMarkContainedInRect:(NSRect)container
@@ -784,7 +753,7 @@ typedef struct iTermTextColorContext {
         if (leftMargin.size.width == 1) {
             NSRect rect = NSInsetRect(leftMargin, 0, leftMargin.size.height * 0.25);
             [[color colorWithAlphaComponent:0.75] set];
-            NSRectFillUsingOperation(rect, NSCompositeSourceOver);
+            NSRectFillUsingOperation(rect, NSCompositingOperationSourceOver);
         } else {
             [color set];
             [path moveToPoint:top];
@@ -887,7 +856,7 @@ typedef struct iTermTextColorContext {
     }
     [_badgeImage drawInRect:intersection
                    fromRect:source
-                  operation:NSCompositeSourceOver
+                  operation:NSCompositingOperationSourceOver
                    fraction:1
              respectFlipped:YES
                       hints:nil];
@@ -934,7 +903,7 @@ typedef struct iTermTextColorContext {
         } else {
             [scrimColor set];
         }
-        NSRectFillUsingOperation(rect, NSCompositeSourceOver);
+        NSRectFillUsingOperation(rect, NSCompositingOperationSourceOver);
 
         [borderColor set];
         NSFrameRect(rect);
@@ -1371,7 +1340,7 @@ typedef struct iTermTextColorContext {
     BOOL antiAlias = !smear && [attributes[iTermAntiAliasAttribute] boolValue];
 
     [ctx saveGraphicsState];
-    [ctx setCompositingOperation:NSCompositeSourceOver];
+    [ctx setCompositingOperation:NSCompositingOperationSourceOver];
 
     // We used to use -[NSAttributedString drawWithRect:options] but
     // it does a lousy job rendering multiple combining marks. This is close
@@ -1988,7 +1957,6 @@ static BOOL iTermTextDrawingHelperShouldAntiAlias(screen_char_t *c,
         iTermPreciseTimerStatsStartTimer(&_stats[TIMER_SHOULD_SEGMENT]);
 
         NSDictionary *imageAttributes = [self imageAttributesForCharacter:&c displayColumn:i];
-        BOOL justSegmented = NO;
         BOOL combinedAttributesChanged = NO;
 
         // I tried segmenting when fastpath eligibility changes so we can use the fast path as much
@@ -2000,8 +1968,6 @@ static BOOL iTermTextDrawingHelperShouldAntiAlias(screen_char_t *c,
                            previousAttributes:&previousCharacterAttributes
                       previousImageAttributes:previousImageAttributes
                      combinedAttributesChanged:&combinedAttributesChanged]) {
-            justSegmented = YES;
-
             iTermPreciseTimerStatsStartTimer(&_stats[TIMER_STAT_BUILD_MUTABLE_ATTRIBUTED_STRING]);
             id<iTermAttributedString> builtString = builder.attributedString;
             if (previousCharacterAttributes.underline || previousCharacterAttributes.isURL) {
@@ -2254,7 +2220,7 @@ static BOOL iTermTextDrawingHelperShouldAntiAlias(screen_char_t *c,
                                  image.size.height - _cellSize.height - chunkSize.height * originInImage.y,
                                  chunkSize.width * length,
                                  chunkSize.height)
-            operation:NSCompositeSourceOver
+            operation:NSCompositingOperationSourceOver
              fraction:1];
     [NSGraphicsContext restoreGraphicsState];
 }
@@ -2422,7 +2388,7 @@ static BOOL iTermTextDrawingHelperShouldAntiAlias(screen_char_t *c,
 }
 
 - (void)drawCopyModeCursor {
-    iTermCursor *cursor = [iTermCursor copyModeCursorInSelectionState:self.copyModeSelecting];
+    iTermCursor *cursor = [iTermCursor itermCopyModeCursorInSelectionState:self.copyModeSelecting];
     cursor.delegate = self;
 
     [self reallyDrawCursor:cursor
@@ -2459,7 +2425,7 @@ static BOOL iTermTextDrawingHelperShouldAntiAlias(screen_char_t *c,
 
                 [image drawInRect:imageRect
                          fromRect:NSZeroRect
-                        operation:NSCompositeSourceOver
+                        operation:NSCompositingOperationSourceOver
                          fraction:1
                    respectFlipped:YES
                             hints:nil];
@@ -2503,7 +2469,7 @@ static BOOL iTermTextDrawingHelperShouldAntiAlias(screen_char_t *c,
         CGPoint point = rect.origin;
         [keyImage drawInRect:NSMakeRect(point.x, point.y, _cellSize.width, _cellSize.height)
                     fromRect:NSZeroRect
-                   operation:NSCompositeSourceOver
+                   operation:NSCompositingOperationSourceOver
                     fraction:1
               respectFlipped:YES
                        hints:nil];

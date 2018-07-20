@@ -48,11 +48,21 @@ NS_ASSUME_NONNULL_BEGIN
 @end
 
 #if ENABLE_USE_TEMPORARY_TEXTURE
+NS_CLASS_DEPRECATED_MAC(10_12, 10_14)
 @interface iTermCopyToDrawableRendererTransientState : iTermCopyRendererTransientState
 @end
 
+NS_CLASS_DEPRECATED_MAC(10_12, 10_14)
 @interface iTermCopyToDrawableRenderer : iTermCopyRenderer
 @end
 #endif
+
+NS_CLASS_AVAILABLE_MAC(10_14)
+@interface iTermPremultiplyAlphaRendererTransientState : iTermCopyRendererTransientState
+@end
+
+NS_CLASS_AVAILABLE_MAC(10_14)
+@interface iTermPremultiplyAlphaRenderer : iTermCopyRenderer
+@end
 
 NS_ASSUME_NONNULL_END

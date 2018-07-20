@@ -25,7 +25,9 @@
                                  id<MTLTexture>,
                                  vector_uint2,
                                  vector_uint2,
-                                 iTermMetalUnderlineDescriptor))block
+                                 iTermMetalUnderlineDescriptor,
+                                 BOOL underlined,
+                                 BOOL emoji))block
              copyBlock:(void (^)(void))copyBlock;
 
 @end

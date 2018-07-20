@@ -21,10 +21,12 @@ NS_CLASS_AVAILABLE(10_11, NA)
 @interface iTermRenderConfiguration : NSObject
 @property (nonatomic, readonly) vector_uint2 viewportSize;
 @property (nonatomic, readonly) CGFloat scale;
+@property (nonatomic, readonly) BOOL hasBackgroundImage;
 
 - (instancetype)init NS_UNAVAILABLE;
 - (instancetype)initWithViewportSize:(vector_uint2)viewportSize
-                               scale:(CGFloat)scale NS_DESIGNATED_INITIALIZER;
+                               scale:(CGFloat)scale
+                  hasBackgroundImage:(BOOL)hasBackgroundImage NS_DESIGNATED_INITIALIZER;
 @end
 
 NS_CLASS_AVAILABLE(10_11, NA)
@@ -35,8 +37,8 @@ NS_CLASS_AVAILABLE(10_11, NA)
 - (void)drawWithFrameData:(iTermMetalFrameData *)frameData
            transientState:(__kindof iTermMetalRendererTransientState *)transientState;
 
-- (__kindof iTermMetalRendererTransientState *)createTransientStateForConfiguration:(iTermRenderConfiguration *)configuration
-                                                                      commandBuffer:(id<MTLCommandBuffer>)commandBuffer;
+- (nullable __kindof iTermMetalRendererTransientState *)createTransientStateForConfiguration:(iTermRenderConfiguration *)configuration
+                                                                               commandBuffer:(id<MTLCommandBuffer>)commandBuffer;
 
 @end
 
@@ -50,6 +52,7 @@ NS_CLASS_AVAILABLE(10_11, NA)
 @property (nonatomic) NSUInteger sequenceNumber;
 
 // You don't generally need to assign to this unless you plan to make more than one draw call.
+// You can get a pipeline state from the iTermMetal[Cell]Renderer. See its comments for details.
 @property (nonatomic, strong) id<MTLRenderPipelineState> pipelineState;
 @property (nonatomic, readonly) BOOL skipRenderer;
 
@@ -57,7 +60,7 @@ NS_CLASS_AVAILABLE(10_11, NA)
 - (instancetype)init NS_UNAVAILABLE;
 
 - (void)measureTimeForStat:(int)index ofBlock:(void (^)(void))block;
-- (iTermPreciseTimerStats *)stats;
+- (nullable iTermPreciseTimerStats *)stats;
 - (int)numberOfStats;
 - (NSString *)nameForStat:(int)i;
 
@@ -80,6 +83,11 @@ NS_CLASS_AVAILABLE(10_11, NA)
 // Use this for premultiplied blending.
 + (instancetype)compositeSourceOver;
 
+#if ENABLE_TRANSPARENT_METAL_WINDOWS
+// Blends rgb according to source alpha but preserves destination alpha
++ (instancetype)backgroundColorCompositing;
+#endif
+
 @end
 
 NS_CLASS_AVAILABLE(10_11, NA)
@@ -87,6 +95,7 @@ NS_CLASS_AVAILABLE(10_11, NA)
 
 @property (nonatomic, readonly) id<MTLDevice> device;
 @property (nonatomic, readonly) Class transientStateClass;
+@property (nonatomic, copy) NSString *vertexFunctionName;
 @property (nonatomic, copy) NSString *fragmentFunctionName;
 @property (nonatomic, weak) id<iTermMetalDebugInfoFormatter> formatterDelegate;
 
@@ -103,6 +112,8 @@ NS_CLASS_AVAILABLE(10_11, NA)
 
 - (instancetype)init NS_UNAVAILABLE;
 
+// Returns the pipeline state based on the current value of `fragmentFunctionName`, which you can
+// change whenever you please.
 - (id<MTLRenderPipelineState>)pipelineState;
 
 #pragma mark - For subclasses
@@ -124,15 +135,15 @@ NS_CLASS_AVAILABLE(10_11, NA)
                fragmentBuffers:(NSDictionary<NSNumber *, id<MTLBuffer>> *)fragmentBuffers
                       textures:(NSDictionary<NSNumber *, id<MTLTexture>> *)textures;
 
-- (id<MTLTexture>)textureFromImage:(NSImage *)image context:(nullable iTermMetalBufferPoolContext *)context;
-- (id<MTLTexture>)textureFromImage:(NSImage *)image context:(nullable iTermMetalBufferPoolContext *)context pool:(nullable iTermTexturePool *)pool;
+- (nullable id<MTLTexture>)textureFromImage:(NSImage *)image context:(nullable iTermMetalBufferPoolContext *)context;
+- (nullable id<MTLTexture>)textureFromImage:(NSImage *)image context:(nullable iTermMetalBufferPoolContext *)context pool:(nullable iTermTexturePool *)pool;
 
 - (id<MTLRenderPipelineState>)newPipelineWithBlending:(nullable iTermMetalBlending *)blending
                                        vertexFunction:(id<MTLFunction>)vertexFunction
                                      fragmentFunction:(id<MTLFunction>)fragmentFunction;
 
-- (__kindof iTermMetalRendererTransientState *)createTransientStateForConfiguration:(iTermRenderConfiguration *)configuration
-                                                                      commandBuffer:(id<MTLCommandBuffer>)commandBuffer;
+- (nullable __kindof iTermMetalRendererTransientState *)createTransientStateForConfiguration:(iTermRenderConfiguration *)configuration
+                                                                               commandBuffer:(id<MTLCommandBuffer>)commandBuffer;
 
 @end
 

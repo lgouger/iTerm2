@@ -25,6 +25,9 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readonly, copy) void (^observer)(NSString *);
 @property (nonatomic, readonly) NSString *evaluatedString;
 
+// Variables the string depends on
+@property (nonatomic, readonly) NSSet<NSString *> *dependencies;
+
 - (instancetype)initWithString:(NSString *)swiftyString
                         source:(id (^)(NSString *name))source
                        mutates:(NSSet<NSString *> *)mutates
@@ -32,6 +35,18 @@ NS_ASSUME_NONNULL_BEGIN
 - (instancetype)init NS_UNAVAILABLE;
 - (void)variablesDidChange:(NSSet<NSString *> *)names;
 - (void)invalidate;
+
+@end
+
+// Just stores the swifty string and does nothing else. Evaluated string will always be empty.
+// Is free of side effects.
+@interface iTermSwiftyStringPlaceholder : iTermSwiftyString
+
+- (instancetype)initWithString:(NSString *)swiftyString NS_DESIGNATED_INITIALIZER;
+- (instancetype)initWithString:(NSString *)swiftyString
+                        source:(id (^)(NSString *name))source
+                       mutates:(NSSet<NSString *> *)mutates
+                      observer:(void (^)(NSString *newValue))observer NS_UNAVAILABLE;
 
 @end
 

@@ -409,9 +409,9 @@
         [[[NSParagraphStyle defaultParagraphStyle] mutableCopy] autorelease];
     [truncatingTailParagraphStyle setLineBreakMode:[cell truncationStyle]];
     if (_orientation == PSMTabBarHorizontalOrientation) {
-        [truncatingTailParagraphStyle setAlignment:NSCenterTextAlignment];
+        [truncatingTailParagraphStyle setAlignment:NSTextAlignmentCenter];
     } else {
-        [truncatingTailParagraphStyle setAlignment:NSLeftTextAlignment];
+        [truncatingTailParagraphStyle setAlignment:NSTextAlignmentLeft];
     }
 
     NSDictionary *attributes = @{ NSFontAttributeName: [NSFont systemFontOfSize:self.fontSize],
@@ -457,6 +457,9 @@
 
 - (NSColor *)backgroundColorSelected:(BOOL)selected highlightAmount:(CGFloat)highlightAmount {
     if (selected) {
+        if (@available(macOS 10.14, *)) {
+            return [NSColor windowBackgroundColor];
+        }
         if (_tabBar.window.backgroundColor) {
             return _tabBar.window.backgroundColor;
         } else {
@@ -539,7 +542,7 @@
         NSColor *color = [self cellBackgroundColorForTabColor:tabColor selected:selected];
         // Alpha the inactive tab's colors a bit to make it clear which tab is active.
         [color set];
-        NSRectFillUsingOperation(cellFrame, NSCompositeSourceOver);
+        NSRectFillUsingOperation(cellFrame, NSCompositingOperationSourceOver);
     }
 
     if (horizontal) {
@@ -691,7 +694,7 @@
         }
         [closeButton drawAtPoint:closeButtonRect.origin
                         fromRect:NSZeroRect
-                       operation:NSCompositeSourceOver
+                       operation:NSCompositingOperationSourceOver
                         fraction:fraction];
 
     }
@@ -713,7 +716,7 @@
 
         [icon drawInRect:iconRect
                 fromRect:NSZeroRect
-               operation:NSCompositeSourceOver
+               operation:NSCompositingOperationSourceOver
                 fraction:1.0
           respectFlipped:YES
                    hints:nil];
@@ -756,7 +759,7 @@
         if (_orientation == PSMTabBarHorizontalOrientation) {
             CGFloat effectiveLeftMargin = (labelRect.size.width - boundingSize.width) / 2;
             if (effectiveLeftMargin < reservedSpace) {
-                attributedString = [attributedString attributedStringWithTextAlignment:NSLeftTextAlignment];
+                attributedString = [attributedString attributedStringWithTextAlignment:NSTextAlignmentLeft];
 
                 labelRect.origin.x += reservedSpace;
                 labelRect.size.width -= reservedSpace;
@@ -786,7 +789,7 @@
     [[NSGraphicsContext currentContext] setShouldAntialias:NO];
 
     [backgroundColor set];
-    NSRectFillUsingOperation(rect, NSCompositeSourceAtop);
+    NSRectFillUsingOperation(rect, NSCompositingOperationSourceAtop);
 
     [[self bottomLineColorSelected:NO] set];
     if (_orientation == PSMTabBarHorizontalOrientation) {
@@ -854,7 +857,7 @@
 
     [self drawBackgroundInRect:rect color:[self tabBarColor] horizontal:horizontal];
     [[self topLineColorSelected:NO] set];
-    [self drawHorizontalLineInFrame:rect y:NSMinY(rect)];
+    [self drawHorizontalLineInFrame:rect y:0];
 
     // no tab view == not connected
     if (![bar tabView]){
@@ -870,7 +873,7 @@
                         range:range];
         NSMutableParagraphStyle *centeredParagraphStyle =
             [[[NSParagraphStyle defaultParagraphStyle] mutableCopy] autorelease];
-        [centeredParagraphStyle setAlignment:NSCenterTextAlignment];
+        [centeredParagraphStyle setAlignment:NSTextAlignmentCenter];
         [attrStr addAttribute:NSParagraphStyleAttributeName
                         value:centeredParagraphStyle
                         range:range];

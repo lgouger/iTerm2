@@ -2907,6 +2907,7 @@ basedAtAbsoluteLineNumber:(long long)absoluteLineNumber
 - (void)terminalPasteString:(NSString *)string {
     // check the configuration
     if (![iTermPreferences boolForKey:kPreferenceKeyAllowClipboardAccessFromTerminal]) {
+        [delegate_ screenTerminalAttemptedPasteboardAccess];
         return;
     }
 
@@ -4095,7 +4096,8 @@ basedAtAbsoluteLineNumber:(long long)absoluteLineNumber
     return result;
 }
 
-- (NSSize)terminalCellSizeInPoints {
+- (NSSize)terminalCellSizeInPoints:(double *)scaleOut {
+    *scaleOut = [delegate_ screenBackingScaleFactor];
     return [delegate_ screenCellSize];
 }
 

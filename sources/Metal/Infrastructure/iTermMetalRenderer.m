@@ -16,7 +16,7 @@ const NSInteger iTermMetalDriverMaximumNumberOfFramesInFlight = 3;
 
 + (instancetype)compositeSourceOver {
     iTermMetalBlending *blending = [[iTermMetalBlending alloc] init];
-    // I tried to make this the same as NSCompositeSourceOver. It's not quite right but I have
+    // I tried to make this the same as NSCompositingOperationSourceOver. It's not quite right but I have
     // no idea why.
     blending.rgbBlendOperation = MTLBlendOperationAdd;
     blending.sourceRGBBlendFactor = MTLBlendFactorOne;  // because it's premultiplied
@@ -28,6 +28,29 @@ const NSInteger iTermMetalDriverMaximumNumberOfFramesInFlight = 3;
 
     return blending;
 }
+
+#if ENABLE_TRANSPARENT_METAL_WINDOWS
++ (instancetype)backgroundColorCompositing {
+    // What I want:
+    // If bg's alpha is 0, destination shows through exactly, alpha and all
+    // If bg's alpha is 1, obscure destination's RGB but preserve its alpha
+    // Destination alpha is always preserved.
+    // RGB are mixed per bg's alpha. bg=source
+    //
+    // RGB=S*Sa+D*(1-Sa)
+    //   A=Da
+    iTermMetalBlending *blending = [[iTermMetalBlending alloc] init];
+    blending.rgbBlendOperation = MTLBlendOperationAdd;
+    blending.sourceRGBBlendFactor = MTLBlendFactorSourceAlpha;
+    blending.destinationRGBBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
+    
+    blending.alphaBlendOperation = MTLBlendOperationAdd;
+    blending.sourceAlphaBlendFactor = MTLBlendFactorZero;
+    blending.destinationAlphaBlendFactor = MTLBlendFactorOne;
+    
+    return blending;
+}
+#endif
 
 - (instancetype)init {
     self = [super init];
@@ -47,11 +70,14 @@ const NSInteger iTermMetalDriverMaximumNumberOfFramesInFlight = 3;
 
 @implementation iTermRenderConfiguration
 
-- (instancetype)initWithViewportSize:(vector_uint2)viewportSize scale:(CGFloat)scale {
+- (instancetype)initWithViewportSize:(vector_uint2)viewportSize
+                               scale:(CGFloat)scale
+                  hasBackgroundImage:(BOOL)hasBackgroundImage {
     self = [super init];
     if (self) {
         _viewportSize = viewportSize;
         _scale = scale;
+        _hasBackgroundImage = hasBackgroundImage;
     }
     return self;
 }
@@ -97,7 +123,7 @@ const NSInteger iTermMetalDriverMaximumNumberOfFramesInFlight = 3;
     iTermPreciseTimerStatsMeasureAndRecordTimer(stat);
 }
 
-- (iTermPreciseTimerStats *)stats {
+- (nullable iTermPreciseTimerStats *)stats {
     return NULL;
 }
 
@@ -163,9 +189,9 @@ const NSInteger iTermMetalDriverMaximumNumberOfFramesInFlight = 3;
 }
 
 - (NSDictionary *)keyForPipelineState {
-    // At the time of writing only the fragment function is mutable. If other inputs to the pipeline
-    // state descriptor become mutable, add them here.
-    return @{ @"fragment function": _fragmentFunctionName ?: @"" };
+    // This must contain all inputs to picking the pipeline state. These can be changed at runtime.
+    return @{ @"fragment function": _fragmentFunctionName ?: @"",
+              @"vertex function": _vertexFunctionName ?: @"" };
 }
 
 - (id<MTLRenderPipelineState>)pipelineState {
@@ -250,8 +276,8 @@ const NSInteger iTermMetalDriverMaximumNumberOfFramesInFlight = 3;
 
 #pragma mark - Protocol Methods
 
-- (__kindof iTermMetalRendererTransientState * _Nonnull)createTransientStateForConfiguration:(iTermRenderConfiguration *)configuration
-                               commandBuffer:(id<MTLCommandBuffer>)commandBuffer {
+- (nullable __kindof iTermMetalRendererTransientState *)createTransientStateForConfiguration:(iTermRenderConfiguration *)configuration
+                                                                               commandBuffer:(id<MTLCommandBuffer>)commandBuffer {
     iTermMetalRendererTransientState *tState = [[self.transientStateClass alloc] initWithConfiguration:configuration];
     tState.pipelineState = [self pipelineState];
     return tState;
@@ -344,7 +370,7 @@ const NSInteger iTermMetalDriverMaximumNumberOfFramesInFlight = 3;
     return pipeline;
 }
 
-- (id<MTLTexture>)textureFromImage:(NSImage *)image context:(nullable iTermMetalBufferPoolContext *)context {
+- (nullable id<MTLTexture>)textureFromImage:(NSImage *)image context:(nullable iTermMetalBufferPoolContext *)context {
     return [self textureFromImage:image context:context pool:nil];
 }
 
@@ -368,7 +394,7 @@ const NSInteger iTermMetalDriverMaximumNumberOfFramesInFlight = 3;
     }
 }
 
-- (id<MTLTexture>)textureFromImage:(NSImage *)image context:(iTermMetalBufferPoolContext *)context pool:(iTermTexturePool *)pool {
+- (nullable id<MTLTexture>)textureFromImage:(NSImage *)image context:(iTermMetalBufferPoolContext *)context pool:(iTermTexturePool *)pool {
     if (!image) {
         return nil;
     }
@@ -454,7 +480,7 @@ const NSInteger iTermMetalDriverMaximumNumberOfFramesInFlight = 3;
     [renderEncoder setRenderPipelineState:tState.pipelineState];
 
     // Add viewport size to vertex buffers
-    NSDictionary<NSNumber *, id<MTLBuffer>> *vertexBuffers = clientVertexBuffers ?: @{};
+    NSDictionary<NSNumber *, id<MTLBuffer>> *vertexBuffers;
     vertexBuffers =
         [clientVertexBuffers dictionaryBySettingObject:[self vertexBufferForViewportSize:tState.configuration.viewportSize]
                                                 forKey:@(iTermVertexInputIndexViewportSize)];

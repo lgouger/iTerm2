@@ -52,12 +52,7 @@ const float kItermExposeThumbMargin = 25;
     if (i == 0) {
         return @"Defunct Tab";
     }
-    NSString* jobName = [[aTab activeSession] jobName];
-    if (jobName) {
-        return [NSString stringWithFormat:@"%d/%d. %@", i, j, [[aTab activeSession] name]];
-    } else {
-        return [NSString stringWithFormat:@"%d/%d. %@", i, j, [[aTab activeSession] name]];
-    }
+    return [NSString stringWithFormat:@"%d/%d. %@", i, j, [[aTab activeSession] name]];
 }
 
 + (iTermExpose*)sharedInstance
@@ -452,7 +447,7 @@ static BOOL AdvanceCell(float* x, float* y, NSRect screenFrame, NSSize size) {
     screenFrame.origin = NSZeroPoint;
     // Create the window and its view.
     window_ = [[iTermExposeWindow alloc] initWithContentRect:screenFrame
-                                                   styleMask:NSBorderlessWindowMask
+                                                   styleMask:NSWindowStyleMaskBorderless
                                                      backing:NSBackingStoreBuffered
                                                        defer:YES
                                                       screen:theScreen];

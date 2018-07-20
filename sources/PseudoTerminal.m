@@ -9,7 +9,6 @@
 #import "Coprocess.h"
 #import "DirectoriesPopup.h"
 #import "FakeWindow.h"
-#import "FindViewController.h"
 #import "FutureMethods.h"
 #import "FutureMethods.h"
 #import "ITAddressBookMgr.h"
@@ -23,6 +22,7 @@
 #import "iTermCommandHistoryEntryMO+Additions.h"
 #import "iTermController.h"
 #import "iTermFindCursorView.h"
+#import "iTermFindDriver.h"
 #import "iTermFontPanel.h"
 #import "iTermFunctionCallTextFieldDelegate.h"
 #import "iTermNotificationController.h"
@@ -64,7 +64,6 @@
 #import "PopupModel.h"
 #import "PopupWindow.h"
 #import "PreferencePanel.h"
-#import "ProcessCache.h"
 #import "PseudoTerminalRestorer.h"
 #import "PSMDarkTabStyle.h"
 #import "PSMDarkHighContrastTabStyle.h"
@@ -102,6 +101,7 @@ NSString *const kTerminalWindowControllerWasCreatedNotification = @"kTerminalWin
 NSString *const iTermDidDecodeWindowRestorableStateNotification = @"iTermDidDecodeWindowRestorableStateNotification";
 NSString *const iTermTabDidChangePositionInWindowNotification = @"iTermTabDidChangePositionInWindowNotification";
 NSString *const iTermSelectedTabDidChange = @"iTermSelectedTabDidChange";
+NSString *const iTermBroadcastDomainsDidChangeNotification = @"iTermBroadcastDomainsDidChangeNotification";
 
 static NSString *const kWindowNameFormat = @"iTerm Window %d";
 
@@ -279,10 +279,10 @@ static NSRect iTermRectCenteredVerticallyWithinRect(NSRect frameToCenter, NSRect
     // In 10.7 style full screen mode
     BOOL lionFullScreen_;
 
-    __weak IBOutlet NSPanel *coprocesssPanel_;
-    __weak IBOutlet NSButton *coprocessOkButton_;
-    __weak IBOutlet NSComboBox *coprocessCommand_;
-    __weak IBOutlet NSButton *coprocessIgnoreErrors_;
+    IBOutlet NSPanel *coprocesssPanel_;
+    IBOutlet NSButton *coprocessOkButton_;
+    IBOutlet NSComboBox *coprocessCommand_;
+    IBOutlet NSButton *coprocessIgnoreErrors_;
 
     NSDictionary *lastArrangement_;
 
@@ -368,6 +368,8 @@ static NSRect iTermRectCenteredVerticallyWithinRect(NSRect frameToCenter, NSRect
 
     iTermSessionFactory *_sessionFactory;
     BOOL _openingPopupWindow;
+
+    NSInteger _fullScreenRetryCount;
 }
 
 + (void)registerSessionsInArrangement:(NSDictionary *)arrangement {
@@ -380,7 +382,7 @@ static NSRect iTermRectCenteredVerticallyWithinRect(NSRect frameToCenter, NSRect
                    hotkeyWindowType:(iTermHotkeyWindowType)hotkeyWindowType {
     NSInteger mask = 0;
     if (hotkeyWindowType == iTermHotkeyWindowTypeFloatingPanel) {
-        mask = NSNonactivatingPanelMask;
+        mask = NSWindowStyleMaskNonactivatingPanel;
     }
     switch (windowType) {
         case WINDOW_TYPE_TOP:
@@ -392,18 +394,18 @@ static NSRect iTermRectCenteredVerticallyWithinRect(NSRect frameToCenter, NSRect
         case WINDOW_TYPE_LEFT_PARTIAL:
         case WINDOW_TYPE_RIGHT_PARTIAL:
         case WINDOW_TYPE_NO_TITLE_BAR:
-            return mask | NSBorderlessWindowMask | NSResizableWindowMask;
+            return mask | NSWindowStyleMaskBorderless | NSWindowStyleMaskResizable;
 
         case WINDOW_TYPE_TRADITIONAL_FULL_SCREEN:
-            return mask | NSBorderlessWindowMask;
+            return mask | NSWindowStyleMaskBorderless;
 
         default:
             return (mask |
-                    NSTitledWindowMask |
-                    NSClosableWindowMask |
-                    NSMiniaturizableWindowMask |
-                    NSResizableWindowMask |
-                    NSTexturedBackgroundWindowMask);
+                    NSWindowStyleMaskTitled |
+                    NSWindowStyleMaskClosable |
+                    NSWindowStyleMaskMiniaturizable |
+                    NSWindowStyleMaskResizable |
+                    NSWindowStyleMaskTexturedBackground);
     }
 }
 
@@ -676,7 +678,7 @@ static NSRect iTermRectCenteredVerticallyWithinRect(NSRect frameToCenter, NSRect
         [self.ptyWindow setLayoutDone];
     }
 
-    if (styleMask & NSTitledWindowMask) {
+    if (styleMask & NSWindowStyleMaskTitled) {
         if ([[self window] respondsToSelector:@selector(setBottomCornerRounded:)]) {
             // TODO: Why is this here?
             self.window.bottomCornerRounded = NO;
@@ -752,7 +754,7 @@ static NSRect iTermRectCenteredVerticallyWithinRect(NSRect frameToCenter, NSRect
             [[iTermWindowShortcutLabelTitlebarAccessoryViewController alloc] initWithNibName:@"iTermWindowShortcutAccessoryView"
                                                                                       bundle:nil];
     }
-    if ((self.window.styleMask & NSTitledWindowMask) && _shortcutAccessoryViewController) {
+    if ((self.window.styleMask & NSWindowStyleMaskTitled) && _shortcutAccessoryViewController) {
         [self.window addTitlebarAccessoryViewController:_shortcutAccessoryViewController];
         [self updateWindowNumberVisibility:nil];
     }
@@ -882,7 +884,7 @@ ITERM_WEAKLY_REFERENCEABLE
     // if we're in fullscreen.
     return ([iTermPreferences boolForKey:kPreferenceKeyEnableDivisionView] &&
             !togglingFullScreen_ &&
-            (self.window.styleMask & NSTitledWindowMask) &&
+            (self.window.styleMask & NSWindowStyleMaskTitled) &&
             ![self anyFullScreen] &&
             ![self tabBarVisibleOnTop]);
 }
@@ -1684,11 +1686,11 @@ ITERM_WEAKLY_REFERENCEABLE
         NSString *windowNumber = @"";
 #if ENABLE_SHORTCUT_ACCESSORY
         if (!_shortcutAccessoryViewController ||
-            !(self.window.styleMask & NSTitledWindowMask)) {
+            !(self.window.styleMask & NSWindowStyleMaskTitled)) {
             windowNumber = [NSString stringWithFormat:@"%d. ", number_ + 1];
         }
 #else
-        if (self.window.styleMask & NSTitledWindowMask) {
+        if (self.window.styleMask & NSWindowStyleMaskTitled) {
             windowNumber = [NSString stringWithFormat:@"%d. ", number_ + 1];
         }
 #endif
@@ -2182,10 +2184,10 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (IBAction)findUrls:(id)sender {
-    FindViewController *findViewController = [[[self currentSession] view] findViewController];
+    iTermFindDriver *findDriver = self.currentSession.view.findDriver;
     NSString *regex = [iTermAdvancedSettingsModel findUrlsRegex];
-    [findViewController closeViewAndDoTemporarySearchForString:regex
-                                                          mode:iTermFindModeCaseSensitiveRegex];
+    [findDriver closeViewAndDoTemporarySearchForString:regex
+                                                  mode:iTermFindModeCaseSensitiveRegex];
 }
 
 - (IBAction)detachTmux:(id)sender {
@@ -2329,7 +2331,11 @@ ITERM_WEAKLY_REFERENCEABLE
         [[self window] setFrame:rect display:YES];
     }
 
-    if (![self restoreTabsFromArrangement:arrangement sessions:sessions]) {
+    const BOOL savedRestoringWindow = _restoringWindow;
+    _restoringWindow = YES;
+    const BOOL restoreTabsOK = [self restoreTabsFromArrangement:arrangement sessions:sessions];
+    _restoringWindow = savedRestoringWindow;
+    if (!restoreTabsOK) {
         return NO;
     }
     _contentView.shouldShowToolbelt = [arrangement[TERMINAL_ARRANGEMENT_HAS_TOOLBELT] boolValue];
@@ -3184,9 +3190,9 @@ ITERM_WEAKLY_REFERENCEABLE
 
     // Decide when to snap.  (We snap unless control, and only control, is held down.)
     const NSUInteger theMask =
-        (NSControlKeyMask | NSAlternateKeyMask | NSCommandKeyMask | NSShiftKeyMask);
+        (NSEventModifierFlagControl | NSEventModifierFlagOption | NSEventModifierFlagCommand | NSEventModifierFlagShift);
     BOOL modifierDown =
-        (([[NSApp currentEvent] modifierFlags] & theMask) == NSControlKeyMask);
+        (([[NSApp currentEvent] modifierFlags] & theMask) == NSEventModifierFlagControl);
     BOOL snapWidth = !modifierDown;
     BOOL snapHeight = !modifierDown;
     if (sender != [self window]) {
@@ -3225,7 +3231,7 @@ ITERM_WEAKLY_REFERENCEABLE
                   horizontalScrollerClass:nil
                     verticalScrollerClass:(hasScrollbar ? [PTYScroller class] : nil)
                                borderType:NSNoBorder
-                              controlSize:NSRegularControlSize
+                              controlSize:NSControlSizeRegular
                             scrollerStyle:[self scrollerStyle]];
 
     int screenWidth = (contentSize.width - [iTermAdvancedSettingsModel terminalMargin] * 2) / charWidth;
@@ -3242,7 +3248,7 @@ ITERM_WEAKLY_REFERENCEABLE
                        horizontalScrollerClass:nil
                          verticalScrollerClass:hasScrollbar ? [PTYScroller class] : nil
                                     borderType:NSNoBorder
-                                   controlSize:NSRegularControlSize
+                                   controlSize:NSControlSizeRegular
                                  scrollerStyle:[self scrollerStyle]];
     // Respect minimum tab sizes.
     for (NSTabViewItem* tabViewItem in [_contentView.tabView tabViewItems]) {
@@ -3491,11 +3497,11 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (BOOL)menuBarVisibleInFullScreen {
-    if (![iTermPreferences boolForKey:kPreferenceKeyHideMenuBarInFullscreen]) {
+    if ([iTermPreferences boolForKey:kPreferenceKeyUIElement]) {
+        // LSUIElement can't hide it.
         return YES;
     }
-    // LSUIElement cannot hide the menu bar, but floating panels have a very high level and overlap it.
-    if ([iTermPreferences boolForKey:kPreferenceKeyUIElement] && ![self.window isKindOfClass:[iTermPanel class]]) {
+    if (![iTermPreferences boolForKey:kPreferenceKeyHideMenuBarInFullscreen]) {
         return YES;
     }
     return NO;
@@ -3674,7 +3680,7 @@ ITERM_WEAKLY_REFERENCEABLE
         [self.window setFrame:oldFrame_ display:YES];
 #if ENABLE_SHORTCUT_ACCESSORY
         if ([self.window respondsToSelector:@selector(addTitlebarAccessoryViewController:)] &&
-            (self.window.styleMask & NSTitledWindowMask)) {
+            (self.window.styleMask & NSWindowStyleMaskTitled)) {
             [self.window addTitlebarAccessoryViewController:_shortcutAccessoryViewController];
             [self updateWindowNumberVisibility:nil];
         }
@@ -3909,6 +3915,7 @@ ITERM_WEAKLY_REFERENCEABLE
 
     zooming_ = NO;
     togglingLionFullScreen_ = NO;
+    _fullScreenRetryCount = 0;
     lionFullScreen_ = YES;
     [_contentView.tabBarControl setFlashing:YES];
     [_contentView updateToolbelt];
@@ -3929,6 +3936,26 @@ ITERM_WEAKLY_REFERENCEABLE
     }
     [self updateTouchBarIfNeeded:NO];
     [self updateUseMetalInAllTabs];
+}
+
+- (void)windowDidFailToEnterFullScreen:(NSWindow *)window {
+    DLog(@"windowDidFailToEnterFullScreen %@", self);
+    if (!togglingLionFullScreen_) {
+        DLog(@"It's ok though because togglingLionFullScreen is off");
+        return;
+    }
+    if (_fullScreenRetryCount < 3) {
+        _fullScreenRetryCount++;
+        DLog(@"Increment retry count to %@ and schedule an attempt after a delay %@", @(_fullScreenRetryCount), self);
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            DLog(@"About to retry entering full screen with count %@: %@", @(_fullScreenRetryCount), self);
+            [self.window toggleFullScreen:self];
+        });
+    } else {
+        DLog(@"Giving up after three retries: %@", self);
+        togglingLionFullScreen_ = NO;
+        _fullScreenRetryCount = 0;
+    }
 }
 
 - (void)windowWillExitFullScreen:(NSNotification *)notification
@@ -3995,7 +4022,7 @@ ITERM_WEAKLY_REFERENCEABLE
     } else {
         maxVerticallyPref = [iTermPreferences boolForKey:kPreferenceKeyMaximizeVerticallyOnly];
         if (maxVerticallyPref ^
-            (([[NSApp currentEvent] modifierFlags] & NSShiftKeyMask) != 0)) {
+            (([[NSApp currentEvent] modifierFlags] & NSEventModifierFlagShift) != 0)) {
             verticalOnly = YES;
         }
     }
@@ -4431,11 +4458,13 @@ ITERM_WEAKLY_REFERENCEABLE
 
 - (void)tabView:(NSTabView*)aTabView
     didDropTabViewItem:(NSTabViewItem *)tabViewItem
-              inTabBar:(PSMTabBarControl *)aTabBarControl
-{
+              inTabBar:(PSMTabBarControl *)aTabBarControl {
     PTYTab *aTab = [tabViewItem identifier];
     PseudoTerminal *term = (PseudoTerminal *)[aTabBarControl delegate];
+    [self didDonateTab:aTab toWindowController:term];
+}
 
+- (void)didDonateTab:(PTYTab *)aTab toWindowController:(PseudoTerminal *)term {
     if ([term numberOfTabs] == 1) {
         [term fitWindowToTabs];
     } else {
@@ -4511,7 +4540,7 @@ ITERM_WEAKLY_REFERENCEABLE
 
         [tabViewImage drawAtPoint:viewRect.origin
                          fromRect:NSZeroRect
-                        operation:NSCompositeSourceOver
+                        operation:NSCompositingOperationSourceOver
                          fraction:1.0];
         [viewImage unlockFocus];
 
@@ -4545,7 +4574,7 @@ ITERM_WEAKLY_REFERENCEABLE
             offset->height = 0;
             offset->width = 0;
         }
-        *styleMask = NSBorderlessWindowMask;
+        *styleMask = NSWindowStyleMaskBorderless;
     } else {
         // grabs whole tabview image
         viewImage = [[tabViewItem identifier] image:YES];
@@ -4566,7 +4595,7 @@ ITERM_WEAKLY_REFERENCEABLE
                 break;
         }
 
-        *styleMask = NSBorderlessWindowMask;
+        *styleMask = NSWindowStyleMaskBorderless;
     }
 
     return viewImage;
@@ -4987,7 +5016,11 @@ ITERM_WEAKLY_REFERENCEABLE
                 break;
         }
     }
-    [self.window setBackgroundColor:backgroundColor];
+    if (@available(macOS 10.14, *)) {
+        self.window.backgroundColor = [NSColor clearColor];
+    } else {
+        [self.window setBackgroundColor:backgroundColor];
+    }
     if (backgroundColor != nil && backgroundColor.perceivedBrightness < 0.5) {
         self.window.appearance = [NSAppearance appearanceNamed:NSAppearanceNameVibrantDark];
     } else {
@@ -6281,10 +6314,10 @@ ITERM_WEAKLY_REFERENCEABLE
 - (BroadcastMode)broadcastMode
 {
     if ([[self currentTab] isBroadcasting]) {
-                    return BROADCAST_TO_ALL_PANES;
-        } else {
-                    return broadcastMode_;
-        }
+        return BROADCAST_TO_ALL_PANES;
+    } else {
+        return broadcastMode_;
+    }
 }
 
 - (void)setBroadcastMode:(BroadcastMode)mode
@@ -6371,6 +6404,7 @@ ITERM_WEAKLY_REFERENCEABLE
     [self refreshTerminal:nil];
     iTermApplicationDelegate *itad = [iTermApplication.sharedApplication delegate];
     [itad updateBroadcastMenuState];
+    [[NSNotificationCenter defaultCenter] postNotificationName:iTermBroadcastDomainsDidChangeNotification object:nil];
 }
 
 - (void)setSplitSelectionMode:(BOOL)mode excludingSession:(PTYSession *)session move:(BOOL)move {
@@ -6388,10 +6422,13 @@ ITERM_WEAKLY_REFERENCEABLE
     }
 }
 
-- (IBAction)moveTabLeft:(id)sender
-{
+- (IBAction)moveTabLeft:(id)sender {
     NSInteger selectedIndex = [_contentView.tabView indexOfTabViewItem:[_contentView.tabView selectedTabViewItem]];
     NSInteger destinationIndex = selectedIndex - 1;
+    [self moveTabAtIndex:selectedIndex toIndex:destinationIndex];
+}
+
+- (void)moveTabAtIndex:(NSInteger)selectedIndex toIndex:(NSInteger)destinationIndex {
     if (destinationIndex < 0) {
         destinationIndex = [_contentView.tabView numberOfTabViewItems] - 1;
     }
@@ -6403,16 +6440,10 @@ ITERM_WEAKLY_REFERENCEABLE
     [self tabsDidReorder];
 }
 
-- (IBAction)moveTabRight:(id)sender
-{
+- (IBAction)moveTabRight:(id)sender {
     NSInteger selectedIndex = [_contentView.tabView indexOfTabViewItem:[_contentView.tabView selectedTabViewItem]];
     NSInteger destinationIndex = (selectedIndex + 1) % [_contentView.tabView numberOfTabViewItems];
-    if (selectedIndex == destinationIndex) {
-        return;
-    }
-    [_contentView.tabBarControl moveTabAtIndex:selectedIndex toIndex:destinationIndex];
-    [self _updateTabObjectCounts];
-    [self tabsDidReorder];
+    [self moveTabAtIndex:selectedIndex toIndex:destinationIndex];
 }
 
 - (IBAction)increaseHeight:(id)sender {
@@ -6535,7 +6566,8 @@ ITERM_WEAKLY_REFERENCEABLE
         if ([[self window] isKeyWindow]) {
             // In practice, this never happens because the prefs panel is
             // always key when this notification is posted.
-            if ([iTermPreferences boolForKey:kPreferenceKeyHideMenuBarInFullscreen]) {
+            if (![iTermPreferences boolForKey:kPreferenceKeyUIElement] &&
+                [iTermPreferences boolForKey:kPreferenceKeyHideMenuBarInFullscreen]) {
                 [self showMenuBarHideDock];
             } else {
                 [self hideMenuBar];
@@ -6642,7 +6674,8 @@ ITERM_WEAKLY_REFERENCEABLE
     if (currentScreen == menubarScreen || [NSScreen screensHaveSeparateSpaces]) {
         DLog(@"set flags to auto-hide dock");
         int flags = NSApplicationPresentationAutoHideDock;
-        if ([iTermPreferences boolForKey:kPreferenceKeyHideMenuBarInFullscreen]) {
+        if (![iTermPreferences boolForKey:kPreferenceKeyUIElement] &&
+            [iTermPreferences boolForKey:kPreferenceKeyHideMenuBarInFullscreen]) {
             DLog(@"Set flags to auto-hide menu bar");
             flags |= NSApplicationPresentationAutoHideMenuBar;
         }
@@ -6808,7 +6841,7 @@ ITERM_WEAKLY_REFERENCEABLE
     [_contentView.tabView cycleFlagsChanged:[theEvent modifierFlags]];
 
     NSUInteger modifierFlags = [theEvent modifierFlags];
-    if (!(modifierFlags & NSCommandKeyMask) &&
+    if (!(modifierFlags & NSEventModifierFlagCommand) &&
         [[[self currentSession] textview] isFindingCursor]) {
         // The cmd key was let up while finding the cursor
 
@@ -6821,7 +6854,7 @@ ITERM_WEAKLY_REFERENCEABLE
         }
     }
 
-    _contentView.tabBarControl.cmdPressed = ((modifierFlags & NSCommandKeyMask) == NSCommandKeyMask);
+    _contentView.tabBarControl.cmdPressed = ((modifierFlags & NSEventModifierFlagCommand) == NSEventModifierFlagCommand);
 }
 
 // Change position of window widgets.
@@ -6987,7 +7020,7 @@ ITERM_WEAKLY_REFERENCEABLE
                       horizontalScrollerClass:nil
                         verticalScrollerClass:(hasScrollbar ? [PTYScroller class] : nil)
                                    borderType:NSNoBorder
-                                  controlSize:NSRegularControlSize
+                                  controlSize:NSControlSizeRegular
                                 scrollerStyle:[self scrollerStyle]];
         rows = (contentSize.height - [iTermAdvancedSettingsModel terminalVMargin]*2) / charSize.height;
         columns = (contentSize.width - [iTermAdvancedSettingsModel terminalMargin]*2) / charSize.width;
@@ -7356,6 +7389,7 @@ ITERM_WEAKLY_REFERENCEABLE
                                                         object:self
                                                       userInfo:nil];
     [self setWindowTitle];
+    [[NSNotificationCenter defaultCenter] postNotificationName:iTermBroadcastDomainsDidChangeNotification object:nil];
 }
 
 - (IBAction)disableBroadcasting:(id)sender
@@ -7367,6 +7401,7 @@ ITERM_WEAKLY_REFERENCEABLE
                                                         object:self
                                                       userInfo:nil];
     [self setWindowTitle];
+    [[NSNotificationCenter defaultCenter] postNotificationName:iTermBroadcastDomainsDidChangeNotification object:nil];
 }
 
 // Turn on/off sending of input to all sessions. This causes a bunch of UI
@@ -7380,6 +7415,7 @@ ITERM_WEAKLY_REFERENCEABLE
                                                         object:self
                                                       userInfo:nil];
     [self setWindowTitle];
+    [[NSNotificationCenter defaultCenter] postNotificationName:iTermBroadcastDomainsDidChangeNotification object:nil];
 }
 
 // Push size changes to all sessions so they are all as large as possible while

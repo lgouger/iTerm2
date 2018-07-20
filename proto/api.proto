@@ -38,6 +38,9 @@ message ClientOriginatedMessage {
     RestartSessionRequest restart_session_request = 120;
     MenuItemRequest menu_item_request = 121;
     SetTabLayoutRequest set_tab_layout_request = 122;
+    GetBroadcastDomainsRequest get_broadcast_domains_request = 123;
+    TmuxRequest tmux_request = 124;
+    ReorderTabsRequest reorder_tabs_request = 125;
   }
 }
 
@@ -73,10 +76,90 @@ message ServerOriginatedMessage {
     RestartSessionResponse restart_session_response = 120;
     MenuItemResponse menu_item_response = 121;
     SetTabLayoutResponse set_tab_layout_response = 122;
+    GetBroadcastDomainsResponse get_broadcast_domains_response = 123;
+    TmuxResponse tmux_response = 124;
+    ReorderTabsResponse reorder_tabs_response = 125;
 
     // This is the only response that is sent spontaneously. The 'id' field will not be set.
     Notification notification = 1000;
   }
+}
+
+message ReorderTabsRequest {
+  message Assignment {
+    optional string window_id = 1;
+    repeated string tab_ids = 2;
+  }
+  repeated Assignment assignments = 3;
+}
+
+message ReorderTabsResponse {
+  enum Status {
+    OK = 0;
+    INVALID_ASSIGNMENT = 1;  // e.g., duplicate tab id
+    INVALID_WINDOW_ID = 2;
+    INVALID_TAB_ID = 3;
+  }
+  optional Status status = 4;
+}
+
+message TmuxRequest {
+  message ListConnections {
+  }
+  message SendCommand {
+    optional string connection_id = 1;
+    optional string command = 2;
+  }
+  message SetWindowVisible {
+    optional string connection_id = 1;
+    optional string window_id = 2;
+    optional bool visible = 3;
+  }
+  oneof payload {
+    ListConnections list_connections = 1;
+    SendCommand send_command = 2;
+    SetWindowVisible set_window_visible = 3;
+  }
+}
+
+message TmuxResponse {
+  message ListConnections {
+    message Connection {
+      optional string connection_id = 1;
+      optional string owning_session_id = 2;
+    }
+    repeated Connection connections = 1;
+  }
+  message SendCommand {
+    // If not set, an error occurred.
+    optional string output = 1;
+  }
+  message SetWindowVisible {
+  }
+  oneof payload {
+    ListConnections list_connections = 1;
+    SendCommand send_command = 2;
+    SetWindowVisible set_window_visible = 3;
+  }
+
+  enum Status{
+    OK = 0;
+    INVALID_REQUEST = 1;
+    INVALID_CONNECTION_ID = 2;
+    INVALID_WINDOW_ID = 3;
+  }
+  optional Status status = 4;
+}
+
+message GetBroadcastDomainsRequest {
+}
+
+message BroadcastDomain {
+  repeated string session_ids = 1;
+}
+
+message GetBroadcastDomainsResponse {
+  repeated BroadcastDomain broadcast_domains = 1;
 }
 
 message SetTabLayoutRequest {
@@ -207,14 +290,18 @@ message SavedArrangementResponse {
 }
 
 message VariableRequest {
-  optional string session_id = 1;  // "all" is allowed only if no gets (only sets allowed)
+  oneof scope {
+    string session_id = 1;  // "all" is allowed only if no gets (only sets allowed)
+    string tab_id = 4;  // "all" is allowed only if no gets (only sets allowed)
+    bool app = 5;
+  }
 
   message Set {
     optional string name = 1;
     optional string value = 2;  // JSON encoded
   }
   repeated Set set = 2;
-  repeated string get = 3;  // Set to special value "*" to get all in newline-delimited list.
+  repeated string get = 3;  // Set to special value "*" to get all in a JSON dictionary
 }
 
 message VariableResponse {
@@ -222,6 +309,9 @@ message VariableResponse {
     OK = 0;
     SESSION_NOT_FOUND = 1;
     INVALID_NAME = 2;  // Names you set must begin with "user."
+    MISSING_SCOPE = 3;  // None of the scope oneof fields was set
+    TAB_NOT_FOUND = 4;
+    MULTI_GET_DISALLOWED = 5;
   }
   optional Status status = 1;
   repeated string values = 2;  // 1:1 with get field in request.  JSON encoded, with null for unset variables.
@@ -378,11 +468,44 @@ message RPCRegistrationRequest {
   enum Role {
     GENERIC = 1;
     SESSION_TITLE = 2;
+    STATUS_BAR_COMPONENT = 3;
   }
   optional Role role = 5 [default=GENERIC];
 
-  // Used by SESSION_TITLE to control name in Preferences menu
-  optional string display_name = 6;
+  message SessionTitleAttributes {
+    // Used by SESSION_TITLE to control name in Preferences menu
+    optional string display_name = 1;
+  }
+  message StatusBarComponentAttributes {
+    // Used by STATUS_BAR_COMPONENT
+    optional string short_description = 1;
+    optional string detailed_description = 2;
+
+    message Knob {
+      optional string name = 1;
+      enum Type {
+        Checkbox = 1;
+        String = 2;
+        PositiveFloatingPoint = 3;
+        Color = 4;
+      }
+      optional Type type = 2;
+      optional string placeholder = 3;
+      optional string json_default_value = 4;
+      optional string key = 5;
+    }
+    repeated Knob knobs = 3;
+
+    optional string exemplar = 4;
+    optional float update_cadence = 5;
+  }
+
+  oneof RoleSpecificAttributes {
+    SessionTitleAttributes session_title_attributes = 7;
+    StatusBarComponentAttributes status_bar_component_attributes = 8;
+  }
+
+  optional string display_name = 6 [deprecated=true];
 }
 
 message RegisterToolResponse {
@@ -409,6 +532,7 @@ enum NotificationType {
   NOTIFY_ON_LAYOUT_CHANGE = 8;
   NOTIFY_ON_FOCUS_CHANGE = 9;
   NOTIFY_ON_SERVER_ORIGINATED_RPC = 10;
+  NOTIFY_ON_BROADCAST_CHANGE = 11;
 }
 
 enum Modifiers {
@@ -482,6 +606,11 @@ message Notification {
   optional LayoutChangedNotification layout_changed_notification = 8;
   optional FocusChangedNotification focus_changed_notification = 9;
   optional ServerOriginatedRPCNotification server_originated_rpc_notification = 10;
+  optional BroadcastDomainsChangedNotification broadcast_domains_changed = 11;
+}
+
+message BroadcastDomainsChangedNotification {
+  repeated BroadcastDomain broadcast_domains = 1;
 }
 
 message ServerOriginatedRPC {
@@ -958,6 +1087,9 @@ message SendTextRequest {
   // The text to send. As usual for proto buffers, this should be UTF-8
   // encoded. It will be converted to the session's encoding before being sent.
   optional string text = 2;
+
+  // If set, input will not be broadcast when broadcasting is on.
+  optional bool suppress_broadcast = 3;
 }
 
 message SendTextResponse {
@@ -1012,6 +1144,7 @@ message ListSessionsResponse {
   message Tab {
     optional SplitTreeNode root = 3;
     optional string tab_id = 2;
+    optional string tmux_window_id = 4;
   }
   repeated Window windows = 1;
   repeated SessionSummary buried_sessions = 2;

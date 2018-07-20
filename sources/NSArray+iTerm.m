@@ -67,7 +67,7 @@
     return temp;
 }
 
-- (NSArray *)filteredArrayUsingBlock:(BOOL (^)(id anObject))block {
+- (NSArray *)filteredArrayUsingBlock:(BOOL (^NS_NOESCAPE)(id anObject))block {
     NSIndexSet *indexes = [self indexesOfObjectsPassingTest:^BOOL(id  _Nonnull obj,
                                                                   NSUInteger idx,
                                                                   BOOL * _Nonnull stop) {
@@ -369,6 +369,36 @@
     } else {
         return [self objectAtIndex:index];
     }
+}
+
+- (id)maxWithBlock:(NSComparisonResult (^)(id, id))block {
+    id max = nil;
+    for (id object in self) {
+        if (max) {
+            NSComparisonResult result = block(max, object);
+            if (result == NSOrderedAscending) {
+                max = object;
+            }
+        } else {
+            max = object;
+        }
+    }
+    return max;
+}
+
+- (id)minWithBlock:(NSComparisonResult (^)(id, id))block {
+    id min = nil;
+    for (id object in self) {
+        if (min) {
+            NSComparisonResult result = block(min, object);
+            if (result == NSOrderedDescending) {
+                min = object;
+            }
+        } else {
+            min = object;
+        }
+    }
+    return min;
 }
 
 @end

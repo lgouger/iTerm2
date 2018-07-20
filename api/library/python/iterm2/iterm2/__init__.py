@@ -9,13 +9,17 @@ from iterm2.profile import Profile, Color, PartialProfile, BadGUIDException, Loc
 
 from iterm2.session import SplitPaneException, Splitter, Session, InvalidSessionId
 
+from iterm2.statusbar import StatusBarComponent, CheckboxKnob, StringKnob, PositiveFloatingPointKnob, ColorKnob
+
 from iterm2.transaction import Transaction
 
 from iterm2.tab import Tab
 
+from iterm2.tmux import TmuxException, TmuxConnection, async_get_tmux_connections
+
 from iterm2.tool import async_register_web_view_tool
 
-from iterm2.util import frame_str, size_str, Size
+from iterm2.util import frame_str, size_str, Size, Point, Frame
 
 from iterm2.window import CreateTabException, SetPropertyException, GetPropertyException, SavedArrangementException, Window
 

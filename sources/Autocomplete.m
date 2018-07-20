@@ -1,6 +1,5 @@
 #include <wctype.h>
 #import "Autocomplete.h"
-#import "FindViewController.h"
 #import "iTermAdvancedSettingsModel.h"
 #import "iTermApplicationDelegate.h"
 #import "iTermCommandHistoryEntryMO+Additions.h"
@@ -22,7 +21,7 @@ const int kMaxResultContextWords = 4;
 @implementation AutocompleteView
 {
     // Table view that displays choices.
-    __weak IBOutlet NSTableView* table_;
+    IBOutlet NSTableView* table_;
 
     // Word before cursor.
     NSMutableString* prefix_;
@@ -388,7 +387,7 @@ const int kMaxResultContextWords = 4;
         unichar c = [keystr characterAtIndex:0];
         AcLog(@"c=%d", (int)c);
         unsigned int modflag = [event modifierFlags];
-        if ((modflag & NSShiftKeyMask) && c == 25) {
+        if ((modflag & NSEventModifierFlagShift) && c == 25) {
             // backtab
             [self less];
             return;

@@ -1,8 +1,8 @@
 #import <Cocoa/Cocoa.h>
-#import "FindViewController.h"
 #import "ITAddressBookMgr.h"
 #import "iTerm.h"
 #import "iTermColorMap.h"
+#import "iTermFindDriver.h"
 #import "iTermIndicatorsHelper.h"
 #import "iTermSemanticHistoryController.h"
 #import "iTermTextDrawingHelper.h"
@@ -33,8 +33,8 @@
 @class VT100Screen;
 @class VT100Terminal;
 
-#define NSLeftAlternateKeyMask  (0x000020 | NSAlternateKeyMask)
-#define NSRightAlternateKeyMask (0x000040 | NSAlternateKeyMask)
+#define NSLeftAlternateKeyMask  (0x000020 | NSEventModifierFlagOption)
+#define NSRightAlternateKeyMask (0x000040 | NSEventModifierFlagOption)
 
 // Types of characters. Used when classifying characters for word selection.
 typedef NS_ENUM(NSInteger, PTYCharType) {

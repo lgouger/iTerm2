@@ -209,6 +209,8 @@ static NSString *kListWindowsFormat = @"\"#{session_name}\t#{window_id}\t"
     [_profileModel release];
     [_fontOverrides release];
     [_pendingNewWindows release];
+    [sessionName_ release];
+    [sessions_ release];
     [super dealloc];
 }
 
@@ -1106,6 +1108,10 @@ static NSString *kListWindowsFormat = @"\"#{session_name}\t#{window_id}\t"
     }
 }
 
+- (BOOL)windowIsHidden:(int)windowId {
+    return [hiddenWindows_ containsObject:@(windowId)];
+}
+
 - (void)hideWindow:(int)windowId
 {
     NSLog(@"hideWindow: Add these window IDS to hidden: %d", windowId);
@@ -1456,6 +1462,27 @@ static NSString *kListWindowsFormat = @"\"#{session_name}\t#{window_id}\t"
                          KEY_NON_ASCII_FONT: [nonAsciiFont stringValue],
                          KEY_HORIZONTAL_SPACING: @(hs),
                          KEY_VERTICAL_SPACING: @(vs) } retain];
+}
+
+- (void)setLayoutInWindowPane:(int)windowPane toLayoutNamed:(NSString *)name {
+    NSArray *commands = @[ [gateway_ dictionaryForCommand:[NSString stringWithFormat:@"select-layout -t %%%@ %@", @(windowPane), name]
+                                           responseTarget:self
+                                         responseSelector:@selector(didSetLayout:)
+                                           responseObject:nil
+                                                    flags:0],
+                           [gateway_ dictionaryForCommand:[NSString stringWithFormat:@"list-windows -F \"#{window_id} #{window_layout} #{window_flags}\" -t \"%@\"", sessionName_]
+                                           responseTarget:self
+                                         responseSelector:@selector(didListWindowsSubsequentToSettingLayout:)
+                                           responseObject:nil
+                                                    flags:0] ];
+    [gateway_ sendCommandList:commands];
+}
+
+- (void)didSetLayout:(NSString *)response {
+}
+
+- (void)didListWindowsSubsequentToSettingLayout:(NSString *)response {
+    [self parseListWindowsResponseAndUpdateLayouts:response];
 }
 
 #pragma mark - Private

@@ -27,6 +27,9 @@ typedef enum {
     iTermFragmentInputIndexTextureDimensions = 2,  // Points at iTermTextureDimensions
     iTermFragmentBufferIndexIndicatorAlpha = 3, // Points at a single float giving alpha value
     iTermFragmentBufferIndexFullScreenFlashColor = 4, // Points at a float4
+#if ENABLE_TRANSPARENT_METAL_WINDOWS
+    iTermFragmentInputIndexAlpha = 5,  // float4 pointer
+#endif
 } iTermFragmentBufferIndex;
 
 typedef enum {
@@ -58,11 +61,8 @@ typedef struct iTermTextPIU {
     vector_float4 backgroundColor;
     vector_float4 textColor;
 
-    // This is true for text and false for emoji.
-    bool remapColors;
-
     // Passed through to the solid background color fragment shader.
-    vector_int3 colorModelIndex;
+    vector_int3 colorModelIndex;  // deprecated for macOS 10.14+
 
     // What kind of underline to draw. The offset is provided in iTermTextureDimensions.
     iTermMetalGlyphAttributesUnderline underlineStyle;
@@ -104,7 +104,6 @@ typedef struct {
     float underlineOffset;  // Distance from bottom of cell to underline in pixels
     float underlineThickness;  // Thickness of underline in pixels
     float scale;  // 2 for retina, 1 for non retina
-    bool disableExactColorModels;  // Use interpolated color models if set
 } iTermTextureDimensions;
 
 #endif
