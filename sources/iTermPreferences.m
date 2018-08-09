@@ -132,6 +132,7 @@ NSString *const kPreferenceKeyPasteWarningNumberOfSpacesPerTab = @"PasteTabToStr
 NSString *const kPreferenceKeyShowFullscreenTabBar = @"ShowFullScreenTabBar";
 NSString *const kPreferenceKeyHotkeyMigratedFromSingleToMulti = @"HotkeyMigratedFromSingleToMulti";
 NSString *const kPreferenceKeyDefaultToolbeltWidth = @"Default Toolbelt Width";
+// NOTE: If you update this list, also update preferences.py.
 
 static NSMutableDictionary *gObservers;
 static NSString *sPreviousVersion;
@@ -231,7 +232,7 @@ static NSString *sPreviousVersion;
                   kPreferenceKeyAutoHideTmuxClientSession: @NO,
                   kPreferenceKeyUseMetal: @YES,
                   kPreferenceKeyDisableMetalWhenUnplugged: @YES,
-                  kPreferenceKeyPreferIntegratedGPU: @NO,
+                  kPreferenceKeyPreferIntegratedGPU: @YES,
                   kPreferenceKeyMetalMaximizeThroughput: @YES,
 
                   kPreferenceKeyTabStyle: @(TAB_STYLE_LIGHT),

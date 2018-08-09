@@ -216,7 +216,7 @@ static iTermController *gSharedInstance;
 
 - (void)updateWindowTitles {
     for (PseudoTerminal *terminal in _terminalWindows) {
-        if ([terminal currentSessionName]) {
+        if ([terminal undecoratedWindowTitle]) {
             [terminal setWindowTitle];
         }
     }
@@ -397,9 +397,7 @@ static iTermController *gSharedInstance;
                 [terminalArrangements addObject:arrangement];
             }
         }
-        if (terminalArrangements.count) {
-            [WindowArrangements setArrangement:terminalArrangements withName:name];
-        }
+        [WindowArrangements setArrangement:terminalArrangements withName:name];
     } else {
         PseudoTerminal *currentTerminal = [self currentTerminal];
         if (!currentTerminal) {
@@ -1042,7 +1040,13 @@ static iTermController *gSharedInstance;
 }
 
 - (Profile *)profileByModifyingProfile:(NSDictionary *)prototype toSshTo:(NSURL *)url {
-    NSMutableString *tempString = [NSMutableString stringWithString:@"ssh "];
+    NSMutableString *tempString = [NSMutableString stringWithString:[iTermAdvancedSettingsModel sshSchemePath]];
+    NSCharacterSet *alphanumericSet = [NSMutableCharacterSet alphanumericCharacterSet];
+    if ([tempString rangeOfCharacterFromSet:alphanumericSet].location == NSNotFound) {
+        // if the setting is set to an empty string, we will default to "ssh" for safety reasons
+        tempString = [NSMutableString stringWithString:@"ssh"];
+    }
+    [tempString appendString:@" "];
     NSString *username = url.user;
     BOOL cd = ([iTermAdvancedSettingsModel sshURLsSupportPath] && url.path.length > 1);
     if (username) {
@@ -1226,7 +1230,7 @@ static iTermController *gSharedInstance;
         session = block(aDict, term);
     } else if (url) {
         DLog(@"Creating a new session");
-        session = [term.sessionFactory newSessionWithProfile:aDict];
+        session = [[term.sessionFactory newSessionWithProfile:aDict] autorelease];
         [term addSessionInNewTab:session];
         const BOOL ok = [term.sessionFactory attachOrLaunchCommandInSession:session
                                                                   canPrompt:YES

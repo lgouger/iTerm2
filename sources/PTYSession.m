@@ -12,6 +12,7 @@
 #import "iTermApplication.h"
 #import "iTermApplicationDelegate.h"
 #import "iTermAutomaticProfileSwitcher.h"
+#import "iTermBackgroundDrawingHelper.h"
 #import "iTermBuriedSessions.h"
 #import "iTermBuiltInFunctions.h"
 #import "iTermCarbonHotKeyController.h"
@@ -21,6 +22,7 @@
 #import "iTermController.h"
 #import "iTermCopyModeState.h"
 #import "iTermDisclosableView.h"
+#import "iTermEchoProbe.h"
 #import "iTermFindDriver.h"
 #import "iTermNotificationController.h"
 #import "iTermHistogram.h"
@@ -236,7 +238,9 @@ static NSString *const iTermSessionTitleSession = @"session";
 
 @interface PTYSession () <
     iTermAutomaticProfileSwitcherDelegate,
+    iTermBackgroundDrawingHelperDelegate,
     iTermCoprocessDelegate,
+    iTermEchoProbeDelegate,
     iTermHotKeyNavigableSession,
     iTermMetalGlueDelegate,
     iTermPasteHelperDelegate,
@@ -386,17 +390,6 @@ static NSString *const iTermSessionTitleSession = @"session";
     // If so, then the profile setting will be disregarded.
     BOOL _cursorGuideSettingHasChanged;
 
-    // Number of bytes received since an echo probe was sent.
-    enum {
-        iTermEchoProbeOff = 0,
-        iTermEchoProbeWaiting = 1,
-        iTermEchoProbeOneAsterisk = 2,
-        iTermEchoProbeBackspaceOverAsterisk = 3,
-        iTermEchoProbeSpaceOverAsterisk = 4,
-        iTermEchoProbeBackspaceOverSpace = 5,
-        iTermEchoProbeFailed = 6,
-    } _echoProbeState;
-
     // The last time at which a partial-line trigger check occurred. This keeps us from wasting CPU
     // checking long lines over and over.
     NSTimeInterval _lastPartialLineTriggerCheck;
@@ -482,6 +475,9 @@ static NSString *const iTermSessionTitleSession = @"session";
     iTermVariables *_userVariables;
     iTermSwiftyString *_badgeSwiftyString;
     iTermStatusBarViewController *_statusBarViewController;
+    iTermEchoProbe *_echoProbe;
+    
+    iTermBackgroundDrawingHelper *_backgroundDrawingHelper;
 }
 
 + (NSMapTable<NSString *, PTYSession *> *)sessionMap {
@@ -549,7 +545,7 @@ static NSString *const iTermSessionTitleSession = @"session";
                                                            host:host
                                                            tmux:tmux
                                                      components:titleComponents];
-             DLog(@"Title for session %@ is %@", self, result);
+             DLog(@"Title for session %@ is %@", session, result);
              completion(result, nil);
          }];
     [[iTermBuiltInFunctions sharedInstance] registerFunction:[func autorelease]
@@ -660,7 +656,9 @@ static NSString *const iTermSessionTitleSession = @"session";
             _metalGlue.delegate = self;
             _metalGlue.screen = _screen;
         }
-
+        _echoProbe = [[iTermEchoProbe alloc] init];
+        _echoProbe.delegate = self;
+        
         [[NSNotificationCenter defaultCenter] addObserver:self
                                                  selector:@selector(coprocessChanged)
                                                      name:@"kCoprocessStatusChangeNotification"
@@ -800,6 +798,8 @@ ITERM_WEAKLY_REFERENCEABLE
     [_metalDisabledTokens release];
     [_badgeSwiftyString release];
     [_statusBarViewController release];
+    [_echoProbe release];
+    [_backgroundDrawingHelper release];
 
     [[NSNotificationCenter defaultCenter] removeObserver:self];
 
@@ -2605,65 +2605,9 @@ ITERM_WEAKLY_REFERENCEABLE
     [self performSelectorOnMainThread:@selector(release) withObject:nil waitUntilDone:NO];
 }
 
-- (void)updateEchoProbeStateWithBuffer:(char *)buffer length:(int)length {
-    for (int i = 0; i < length; i++) {
-        switch (_echoProbeState) {
-            case iTermEchoProbeOff:
-            case iTermEchoProbeFailed:
-                return;
-
-            case iTermEchoProbeWaiting:
-                if (buffer[i] == '*') {
-                    _echoProbeState = iTermEchoProbeOneAsterisk;
-                } else {
-                    _echoProbeState = iTermEchoProbeFailed;
-                    return;
-                }
-                break;
-
-            case iTermEchoProbeOneAsterisk:
-                if (buffer[i] == '\b') {
-                    _echoProbeState = iTermEchoProbeBackspaceOverAsterisk;
-                } else {
-                    _echoProbeState = iTermEchoProbeFailed;
-                    return;
-                }
-                break;
-
-            case iTermEchoProbeBackspaceOverAsterisk:
-                if (buffer[i] == ' ') {
-                    _echoProbeState = iTermEchoProbeSpaceOverAsterisk;
-                } else {
-                    _echoProbeState = iTermEchoProbeFailed;
-                    return;
-                }
-                break;
-
-            case iTermEchoProbeSpaceOverAsterisk:
-                if (buffer[i] == '\b') {
-                    _echoProbeState = iTermEchoProbeBackspaceOverSpace;
-                } else {
-                    _echoProbeState = iTermEchoProbeFailed;
-                    return;
-                }
-                break;
-
-            case iTermEchoProbeBackspaceOverSpace:
-                _echoProbeState = iTermEchoProbeFailed;
-                return;
-        }
-    }
-}
-
 // This is run in PTYTask's thread. It parses the input here and then queues an async task to run
 // in the main thread to execute the parsed tokens.
 - (void)threadedReadTask:(char *)buffer length:(int)length {
-    @synchronized (self) {
-        if (_echoProbeState != iTermEchoProbeOff) {
-            [self updateEchoProbeStateWithBuffer:buffer length:length];
-        }
-    }
-
     // Pass the input stream to the parser.
     [_terminal.parser putStreamData:buffer length:length];
 
@@ -2675,6 +2619,10 @@ ITERM_WEAKLY_REFERENCEABLE
     if (CVectorCount(&vector) == 0) {
         CVectorDestroy(&vector);
         return;
+    }
+
+    @synchronized (self) {
+        [_echoProbe updateEchoProbeStateWithTokenCVector:&vector];
     }
 
     // This limits the number of outstanding execution blocks to prevent the main thread from
@@ -2962,7 +2910,7 @@ ITERM_WEAKLY_REFERENCEABLE
         [_terminal resetByUserRequest:NO];
         [self appendBrokenPipeMessage:@"Session Restarted"];
         [self replaceTerminatedShellWithNewInstance];
-    } else if ([self autoClose]) {
+    } else if ([self autoClose] && [_delegate sessionShouldAutoClose:self]) {
         [self appendBrokenPipeMessage:@"Broken Pipe"];
         [_delegate closeSession:self];
     } else {
@@ -3515,7 +3463,6 @@ ITERM_WEAKLY_REFERENCEABLE
         [self setProfile:updatedProfile];
         return;
     }
-    [self sanityCheck];
 
     // Copy non-overridden fields over.
     NSMutableDictionary *temp = [NSMutableDictionary dictionaryWithDictionary:_profile];
@@ -3554,36 +3501,6 @@ ITERM_WEAKLY_REFERENCEABLE
     [[ProfileModel sessionsInstance] setBookmark:temp withGuid:temp[KEY_GUID]];
     [self setPreferencesFromAddressBookEntry:temp];
     [self setProfile:temp];
-    [self sanityCheck];
-}
-
-- (void)sanityCheck {
-    if (_isDivorced) {
-        NSDictionary *sessionsProfile =
-            [[ProfileModel sessionsInstance] bookmarkWithGuid:_profile[KEY_GUID]];
-        NSArray *trimCallStack = [NSThread trimCallStackSymbols];
-        if (sessionsProfile || !_profile) {
-            [[ProfileModel debugHistory] addObject:[NSString stringWithFormat:@"%@: OK with guid %@, original guid %@ at\n%@",
-                                                    self,
-                                                    _profile[KEY_GUID],
-                                                    _profile[KEY_ORIGINAL_GUID],
-                                                    [trimCallStack componentsJoinedByString:@"\n"]]];
-        } else {
-            [[ProfileModel debugHistory] addObject:[NSString stringWithFormat:@"%@: NOT OK with guid %@, original guid %@ at\n%@",
-                                                    self,
-                                                    _profile[KEY_GUID],
-                                                    _profile[KEY_ORIGINAL_GUID],
-                                                    [trimCallStack componentsJoinedByString:@"\n"]]];
-            CrashLog(@"Sanity check failed:\n%@", [[ProfileModel debugHistory] componentsJoinedByString:@"\n"]);
-            const BOOL sane = NO;
-            ITBetaAssert(sane, @"Sanity check failed");
-        }
-    } else {
-        [[ProfileModel debugHistory] addObject:[NSString stringWithFormat:@"%@: not divorced. guid is %@ at\%@",
-                                                self,
-                                                _profile[KEY_GUID],
-                                                [NSThread callStackSymbols]]];
-    }
 }
 
 - (void)sessionProfileDidChange
@@ -3593,7 +3510,6 @@ ITERM_WEAKLY_REFERENCEABLE
     }
     NSDictionary *updatedProfile =
         [[ProfileModel sessionsInstance] bookmarkWithGuid:_profile[KEY_GUID]];
-    [self sanityCheck];
 
     NSMutableSet *keys = [NSMutableSet setWithArray:[updatedProfile allKeys]];
     [keys addObjectsFromArray:[_profile allKeys]];
@@ -3615,11 +3531,9 @@ ITERM_WEAKLY_REFERENCEABLE
     [self setProfile:updatedProfile];
     [[NSNotificationCenter defaultCenter] postNotificationName:kSessionProfileDidChange
                                                         object:_profile[KEY_GUID]];
-    [self sanityCheck];
 }
 
 - (BOOL)reloadProfile {
-    [self sanityCheck];
     DLog(@"Reload profile for %@", self);
     BOOL didChange = NO;
     NSDictionary *sharedProfile = [[ProfileModel sharedInstance] bookmarkWithGuid:_originalProfile[KEY_GUID]];
@@ -3641,7 +3555,6 @@ ITERM_WEAKLY_REFERENCEABLE
     }
 
     [self profileNameDidChangeTo:self.profile[KEY_NAME]];
-    [self sanityCheck];
     return didChange;
 }
 
@@ -3709,8 +3622,8 @@ ITERM_WEAKLY_REFERENCEABLE
 
     // background image
     [self setBackgroundImagePath:aDict[KEY_BACKGROUND_IMAGE_LOCATION]];
-    [self setBackgroundImageTiled:[iTermProfilePreferences boolForKey:KEY_BACKGROUND_IMAGE_TILED
-                                                            inProfile:aDict]];
+    [self setBackgroundImageMode:[iTermProfilePreferences unsignedIntegerForKey:KEY_BACKGROUND_IMAGE_MODE
+                                                                      inProfile:aDict]];
 
     // Color scheme
     // ansiColosMatchingForeground:andBackground:inBookmark does an equality comparison, so
@@ -3965,9 +3878,8 @@ ITERM_WEAKLY_REFERENCEABLE
     return [_shell tty];
 }
 
-- (void)setBackgroundImageTiled:(BOOL)set
-{
-    _backgroundImageTiled = set;
+- (void)setBackgroundImageMode:(iTermBackgroundImageMode)mode {
+    _backgroundImageMode = mode;
     [self setBackgroundImagePath:_backgroundImagePath];
 }
 
@@ -4198,6 +4110,7 @@ ITERM_WEAKLY_REFERENCEABLE
 - (void)setProfile:(Profile *)newProfile {
     assert(newProfile);
     DLog(@"Set profile to one with guid %@", newProfile[KEY_GUID]);
+
     NSMutableDictionary *mutableProfile = [[newProfile mutableCopy] autorelease];
     // This is the most practical way to migrate the bopy of a
     // profile that's stored in a saved window arrangement. It doesn't get
@@ -4566,7 +4479,6 @@ ITERM_WEAKLY_REFERENCEABLE
                                      toName:profile[KEY_NAME]];
         _tmuxTitleOutOfSync = NO;
     }
-    [self sanityCheck];
 }
 
 - (void)sessionHotkeyDidChange:(NSNotification *)notification {
@@ -4577,7 +4489,6 @@ ITERM_WEAKLY_REFERENCEABLE
         NSDictionary *dict = [iTermProfilePreferences objectForKey:KEY_SESSION_HOTKEY inProfile:profile];
         [_tmuxController setHotkeyForWindowPane:self.tmuxPane to:dict];
     }
-    [self sanityCheck];
 }
 
 - (void)apiServerUnsubscribe:(NSNotification *)notification {
@@ -4713,8 +4624,7 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (void)setSessionSpecificProfileValues:(NSDictionary *)newValues {
-    [self sanityCheck];
-    if (!_isDivorced) {
+    if (!self.isDivorced) {
         [self divorceAddressBookEntryFromPreferences];
     }
     NSMutableDictionary* temp = [NSMutableDictionary dictionaryWithDictionary:_profile];
@@ -4775,7 +4685,6 @@ ITERM_WEAKLY_REFERENCEABLE
     [_overriddenFields removeAllObjects];
     [_overriddenFields addObjectsFromArray:@[ KEY_GUID, KEY_ORIGINAL_GUID] ];
     [self setProfile:[[ProfileModel sessionsInstance] bookmarkWithGuid:guid]];
-    [self sanityCheck];
     return guid;
 }
 
@@ -4946,50 +4855,82 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (BOOL)metalAllowed {
+    return [self metalAllowed:nil];
+}
+
+- (BOOL)metalAllowed:(out NSString **)reason {
     // While Metal is supported on macOS 10.11, it crashes a lot. It seems to have a memory stomping
     // bug (lots of crashes in dtoa during printf formatting) and assertions in -[MTKView initCommon].
     // All metal code except this is available on macOS 10.11, so this is the one place that
     // restricts it to 10.12+.
-    if (@available(macOS 10.12, *)) {
-        static dispatch_once_t onceToken;
-        static BOOL machineSupportsMetal;
-        dispatch_once(&onceToken, ^{
-            NSArray<id<MTLDevice>> *devices = MTLCopyAllDevices();
-            machineSupportsMetal = devices.count > 0;
-            [devices release];
-        });
-        if (!machineSupportsMetal) {
-            return NO;
+    if (@available(macOS 10.12, *)) { } else {
+        if (reason) {
+            *reason = @"macOS version 10.12 required";
         }
-        if (![iTermPreferences boolForKey:kPreferenceKeyUseMetal]) {
-            return NO;
+        return NO;
+    }
+
+    static dispatch_once_t onceToken;
+    static BOOL machineSupportsMetal;
+    dispatch_once(&onceToken, ^{
+        NSArray<id<MTLDevice>> *devices = MTLCopyAllDevices();
+        machineSupportsMetal = devices.count > 0;
+        [devices release];
+    });
+    if (!machineSupportsMetal) {
+        if (reason) {
+            *reason = @"no usable GPU found on this machine.";
         }
-        if ([self ligaturesEnabledInEitherFont]) {
-            return NO;
+        return NO;
+    }
+    if (![iTermPreferences boolForKey:kPreferenceKeyUseMetal]) {
+        if (reason) {
+            *reason = @"GPU Renderer is disabled in Preferences > General.";
         }
-        if (_metalDeviceChanging) {
-            return NO;
+        return NO;
+    }
+    if ([self ligaturesEnabledInEitherFont]) {
+        if (reason) {
+            *reason = @"ligatures are enabled. You can disable them in Prefs>Profiles>Text>Use ligatures.";
         }
-        if (![self metalViewSizeIsLegal]) {
-            return NO;
+        return NO;
+    }
+    if (_metalDeviceChanging) {
+        if (reason) {
+            *reason = @"the GPU renderer is initializing. It should be ready soon.";
         }
-        if ([_textview verticalSpacing] < 1) {
+        return NO;
+    }
+    if (![self metalViewSizeIsLegal]) {
+        if (reason) {
+            *reason = @"the session is too large or too small.";
+        }
+        return NO;
+    }
+    if ([_textview verticalSpacing] < 1) {
 #warning TODO: In 10.14 I should be able to render glyphs over each other, making this possible.
-           // Metal cuts off the tops of letters when line height reduced
-            return NO;
+        if (reason) {
+            *reason = @"the font's vertical spacing set to less than 100%. You can change it in Prefs>Profiles>Text>Change Font.";
         }
+       // Metal cuts off the tops of letters when line height reduced
+        return NO;
+    }
+    if (_textview.transparencyAlpha < 1) {
+        BOOL transparencyAllowed = NO;
+#if ENABLE_TRANSPARENT_METAL_WINDOWS
         if (@available(macOS 10.14, *)) {
-            // View compositing works in Mojave but not at all before it.
-#if !ENABLE_TRANSPARENT_METAL_WINDOWS
-            if (_textview.transparencyAlpha < 1) {
-                return NO;
-            }
-#endif
-            return YES;
+            transparencyAllowed = YES;
         }
-        if (_textview.transparencyAlpha < 1) {
+#endif
+        if (!transparencyAllowed && _textview.transparencyAlpha < 1) {
+            if (reason) {
+                *reason = @"transparent windows not supported. You can change window transparency in Prefs>Profiles>Window>Transparency";
+            }
             return NO;
         }
+    }
+    // Composting works on macOS 10.14
+    if (@available(macOS 10.14, *)) { } else {
         // Metal's not allowed when other views are composited over the metal view because that just
         // doesn't seem to work, even if you use presentsWithTransaction (even if it did work, it
         // requires presenting the drawable on the main thread which defeats the purpose of the metal
@@ -5003,23 +4944,45 @@ ITERM_WEAKLY_REFERENCEABLE
                                 [iTermAdvancedSettingsModel terminalMargin] >= 1);  // Smaller margins break rounded window corners
         const BOOL safeForWindowCorners = (hasSquareCorners || marginsOk);
         if (!safeForWindowCorners) {
+            if (reason) {
+                *reason = @"terminal window margins are too small. You can edit them in Prefs>Advanced.";
+            }
             return NO;
         }
         
-        const BOOL safeForCompositing = (![PTYNoteViewController anyNoteVisible] &&
-                                         !_pasteHelper.pasteViewIsVisible &&
-                                         !_view.findDriver.isVisible &&
-                                         !_view.isDropDownSearchVisible &&
-                                         _view.currentAnnouncement == nil &&
-                                         !_view.hasHoverURL);
-        if (!safeForCompositing) {
+        if ([PTYNoteViewController anyNoteVisible]) {
+            if (reason) {
+                *reason = @"annotations are open. Find the session with visible annotations and close them with View>Show Annotations.";
+            }
             return NO;
         }
-        
-        return YES;
-    } else {
-        return NO;
+#warning TODO: This is wrong. Is it called too soon when closing the dropdown find panel?
+        if (_view.isDropDownSearchVisible) {
+            if (reason) {
+                *reason = @"the find panel is open.";
+            }
+            return NO;
+        }
+        if (_pasteHelper.dropDownPasteViewIsVisible) {
+            if (reason) {
+                *reason = @"the paste progress indicator is open.";
+            }
+            return NO;
+        }
+        if (_view.currentAnnouncement) {
+            if (reason) {
+                *reason = @"an announcement (yellow bar) is visible.";
+            }
+            return NO;
+        }
+        if (_view.hasHoverURL) {
+            if (reason) {
+                *reason = @"a URL preview is visible.";
+            }
+            return NO;
+        }
     }
+    return YES;
 }
 
 - (BOOL)canProduceMetalFramecap {
@@ -5189,62 +5152,8 @@ ITERM_WEAKLY_REFERENCEABLE
 #pragma mark - Password Management
 
 - (void)enterPassword:(NSString *)password {
-    NSData *backspace = [self backspaceData];
-    if (backspace) {
-        // Try to figure out if we're at a shell prompt. Send a space character and immediately
-        // backspace over it. If no output is received within a specified timeout, then go ahead and
-        // send the password. Otherwise, ask for confirmation.
-        [self writeTaskNoBroadcast:@" "];
-        [self writeLatin1EncodedData:backspace broadcastAllowed:NO];
-        @synchronized(self) {
-            _echoProbeState = iTermEchoProbeWaiting;
-        }
-        [self performSelector:@selector(enterPasswordIfEchoProbeOk:)
-                   withObject:password
-                   afterDelay:[iTermAdvancedSettingsModel echoProbeDuration]];
-    } else {
-        // Rare case: we don't know how to send a backspace. Just enter the password.
-        [self enterPasswordNoProbe:password];
-    }
-}
-
-- (void)enterPasswordIfEchoProbeOk:(NSString *)password {
-    BOOL ok = NO;
-    BOOL prompt = NO;
-    @synchronized (self) {
-        switch (_echoProbeState) {
-            case iTermEchoProbeWaiting:
-            case iTermEchoProbeBackspaceOverSpace:
-                // It looks like we're at a password prompt. Send the password.
-                ok = YES;
-                break;
-
-            case iTermEchoProbeFailed:
-            case iTermEchoProbeOff:
-            case iTermEchoProbeSpaceOverAsterisk:
-            case iTermEchoProbeBackspaceOverAsterisk:
-            case iTermEchoProbeOneAsterisk:
-                prompt = YES;
-                break;
-        }
-        _echoProbeState = iTermEchoProbeOff;
-    }
-
-    if (prompt) {
-        ok = ([iTermWarning showWarningWithTitle:@"Are you really at a password prompt? It looks "
-                                                 @"like what you're typing is echoed to the screen."
-                                         actions:@[ @"Cancel", @"Enter Password" ]
-                                      identifier:nil
-                                     silenceable:kiTermWarningTypePersistent] == kiTermWarningSelection1);
-    }
-    if (ok) {
-        [self enterPasswordNoProbe:password];
-    }
-}
-
-- (void)enterPasswordNoProbe:(NSString *)password {
-    [self writeTaskNoBroadcast:password];
-    [self writeTaskNoBroadcast:@"\n"];
+    [_echoProbe beginProbeWithBackspace:[self backspaceData]
+                               password:password];
 }
 
 - (NSImage *)dragImage
@@ -6138,6 +6047,7 @@ ITERM_WEAKLY_REFERENCEABLE
         case KEY_ACTION_SWAP_PANE_BELOW:
         case KEY_ACTION_TOGGLE_MOUSE_REPORTING:
         case KEY_ACTION_DUPLICATE_TAB:
+        case KEY_ACTION_MOVE_TO_SPLIT_PANE:
             return NO;
 
         case KEY_ACTION_INVOKE_SCRIPT_FUNCTION:
@@ -6443,6 +6353,9 @@ ITERM_WEAKLY_REFERENCEABLE
             break;
         case KEY_ACTION_DUPLICATE_TAB:
             [self.delegate sessionDuplicateTab];
+            break;
+        case KEY_ACTION_MOVE_TO_SPLIT_PANE:
+            [self textViewMovePane];
             break;
         default:
             XLog(@"Unknown key action %d", keyBindingAction);
@@ -6924,24 +6837,6 @@ ITERM_WEAKLY_REFERENCEABLE
     return _backgroundImage != nil;
 }
 
-- (NSImage *)patternedImage {
-    // If there is a tiled background image, tesselate _backgroundImage onto
-    // _patternedImage, which will be the source for future background image
-    // drawing operations.
-    if (!_patternedImage || !NSEqualSizes(_patternedImage.size, _view.contentRect.size)) {
-        [_patternedImage release];
-        _patternedImage = [[NSImage alloc] initWithSize:_view.contentRect.size];
-        [_patternedImage lockFocus];
-        NSColor *pattern = [NSColor colorWithPatternImage:_backgroundImage];
-        [pattern drawSwatchInRect:NSMakeRect(0,
-                                             0,
-                                             _patternedImage.size.width,
-                                             _patternedImage.size.height)];
-        [_patternedImage unlockFocus];
-    }
-    return _patternedImage;
-}
-
 // Lots of different views need to draw the background image.
 // - Obviously, PTYTextView uses it for the area where text appears.
 // - SessionView will draw it for an area below the scroll view when the cell size doesn't evenly
@@ -6959,40 +6854,13 @@ ITERM_WEAKLY_REFERENCEABLE
 - (void)textViewDrawBackgroundImageInView:(NSView *)view
                                  viewRect:(NSRect)rect
                    blendDefaultBackground:(BOOL)blendDefaultBackground {
-    const float alpha = _textview.useTransparency ? (1.0 - _textview.transparency) : 1.0;
-    if (_backgroundImage) {
-        NSRect localRect = [_view convertRect:rect fromView:view];
-        NSImage *image;
-        if (_backgroundImageTiled) {
-            image = [self patternedImage];
-        } else {
-            image = _backgroundImage;
-        }
-        const NSRect contentRect = _view.contentRect;
-        double dx = image.size.width / contentRect.size.width;
-        double dy = image.size.height / contentRect.size.height;
-
-        NSRect sourceRect = NSMakeRect(localRect.origin.x * dx,
-                                       localRect.origin.y * dy,
-                                       localRect.size.width * dx,
-                                       localRect.size.height * dy);
-        [image drawInRect:rect
-                 fromRect:sourceRect
-                operation:NSCompositingOperationCopy
-                 fraction:alpha
-           respectFlipped:YES
-                    hints:nil];
-
-        if (blendDefaultBackground) {
-            // Blend default background color over background image.
-            [[[self processedBackgroundColor] colorWithAlphaComponent:1 - _textview.blend] set];
-            NSRectFillUsingOperation(rect, NSCompositingOperationSourceOver);
-        }
-    } else if (blendDefaultBackground) {
-        // No image, so just draw background color.
-        [[[self processedBackgroundColor] colorWithAlphaComponent:alpha] set];
-        NSRectFillUsingOperation(rect, NSCompositingOperationCopy);
+    if (!_backgroundDrawingHelper) {
+        _backgroundDrawingHelper = [[iTermBackgroundDrawingHelper alloc] init];
+        _backgroundDrawingHelper.delegate = self;
     }
+    [_backgroundDrawingHelper drawBackgroundImageInView:view
+                                               viewRect:rect
+                                 blendDefaultBackground:blendDefaultBackground];
 }
 
 - (NSImage *)textViewBackgroundImage {
@@ -7437,7 +7305,7 @@ ITERM_WEAKLY_REFERENCEABLE
 - (iTermVariableScope *)variablesScope {
     iTermVariableScope *scope = [[iTermVariableScope alloc] init];
     [scope addVariables:self.variables toScopeNamed:nil];
-    [scope addVariables:[iTermVariables globalInstance] toScopeNamed:@"iterm2"];
+    [scope addVariables:[iTermVariables globalInstance] toScopeNamed:iTermVariableKeyGlobalScopeName];
     return scope;
 }
 
@@ -9600,6 +9468,10 @@ ITERM_WEAKLY_REFERENCEABLE
     return _view;
 }
 
+- (iTermStatusBarViewController *)pasteHelperStatusBarViewController {
+    return _statusBarViewController;
+}
+
 - (BOOL)pasteHelperShouldWaitForPrompt {
     if (!_shellIntegrationEverUsed) {
         return NO;
@@ -9649,7 +9521,6 @@ ITERM_WEAKLY_REFERENCEABLE
         }
         [self setSessionSpecificProfileValues:overrides];
     }
-    [self sanityCheck];
 }
 
 - (NSArray<NSDictionary *> *)automaticProfileSwitcherAllProfiles {
@@ -10306,6 +10177,57 @@ ITERM_WEAKLY_REFERENCEABLE
     [_badgeSwiftyString variablesDidChange:changedNames];
     [_textview setBadgeLabel:[self badgeLabel]];
     [_statusBarViewController variablesDidChange:changedNames];
+}
+
+#pragma mark - iTermEchoProbeDelegate
+
+- (void)echoProbeWriteString:(NSString *)string {
+    [self writeTaskNoBroadcast:string];
+}
+
+- (void)echoProbeWriteData:(NSData *)data {
+    [self writeLatin1EncodedData:data broadcastAllowed:NO];
+}
+
+- (void)echoProbeDidFail {
+    BOOL ok = ([iTermWarning showWarningWithTitle:@"Are you really at a password prompt? It looks "
+                @"like what you're typing is echoed to the screen."
+                                          actions:@[ @"Cancel", @"Enter Password" ]
+                                       identifier:nil
+                                      silenceable:kiTermWarningTypePersistent] == kiTermWarningSelection1);
+    if (ok) {
+        [_echoProbe enterPassword];
+    }
+}
+
+#pragma mark - iTermBackgroundDrawingHelperDelegate
+
+- (SessionView *)backgroundDrawingHelperView {
+    return _view;
+}
+
+- (NSImage *)backgroundDrawingHelperImage {
+    return _backgroundImage;
+}
+
+- (BOOL)backgroundDrawingHelperUseTransparency {
+    return _textview.useTransparency;
+}
+
+- (CGFloat)backgroundDrawingHelperTransparency {
+    return _textview.transparency;
+}
+
+- (iTermBackgroundImageMode)backgroundDrawingHelperBackgroundImageMode {
+    return _backgroundImageMode;
+}
+
+- (NSColor *)backgroundDrawingHelperDefaultBackgroundColor {
+    return [self processedBackgroundColor];
+}
+
+- (CGFloat)backgroundDrawingHelperBlending {
+    return _textview.blend;
 }
 
 @end

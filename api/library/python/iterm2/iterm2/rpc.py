@@ -472,6 +472,16 @@ async def async_rpc_set_tmux_window_visible(connection, tmux_connection_id, wind
     request.tmux_request.set_window_visible.visible = visible
     return await _async_call(connection, request)
 
+async def async_rpc_create_tmux_window(connection, tmux_connection_id, affinity=None):
+    """Creates a new tmux window."""
+    request = _alloc_request()
+    request.tmux_request.SetInParent()
+    request.tmux_request.create_window.SetInParent()
+    request.tmux_request.create_window.connection_id = tmux_connection_id
+    if affinity:
+        request.tmux_request.create_window.affinity = affinity
+    return await _async_call(connection, request)
+
 async def async_reorder_tabs(connection, assignments):
     """Reassigns tabs to windows and specifies their orders.
 
@@ -488,6 +498,26 @@ async def async_reorder_tabs(connection, assignments):
 
     protos = list(map(lambda a: make_assignment(a[0], a[1]), assignments))
     request.reorder_tabs_request.assignments.extend(protos)
+    return await _async_call(connection, request)
+
+async def async_set_default_profile(connection, guid):
+    """Sets the default profile."""
+    request = _alloc_request()
+    request.preferences_request.SetInParent()
+    my_request = iterm2.api_pb2.PreferencesRequest.Request()
+    my_request.set_default_profile_request.SetInParent()
+    my_request.set_default_profile_request.guid = guid
+    request.preferences_request.requests.extend([my_request])
+    return await _async_call(connection, request)
+
+async def async_get_preference(connection, key):
+    """Sets the default profile."""
+    request = _alloc_request()
+    request.preferences_request.SetInParent()
+    my_request = iterm2.api_pb2.PreferencesRequest.Request()
+    my_request.get_preference_request.SetInParent()
+    my_request.get_preference_request.key = key
+    request.preferences_request.requests.extend([my_request])
     return await _async_call(connection, request)
 
 ## Private --------------------------------------------------------------------

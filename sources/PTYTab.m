@@ -191,6 +191,8 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 
     BOOL _resizingSplit;
     iTermSwiftyString *_tabTitleOverrideSwiftyString;
+
+    NSInteger _numberOfSplitViewDragsInProgress;
 }
 
 @synthesize parentWindow = parentWindow_;
@@ -304,7 +306,8 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 
 #pragma mark - NSObject
 
-- (instancetype)initWithSession:(PTYSession *)session {
+- (instancetype)initWithSession:(PTYSession *)session
+                   parentWindow:(NSWindowController<iTermWindowController> *)parentWindow {
     self = [super init];
     if (self) {
         PtyLog(@"PTYTab initWithSession %p", self);
@@ -319,6 +322,9 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
             tmuxController_ = [oldTab tmuxController];
             parseTree_ = oldTab->parseTree_;
             [tmuxController_ changeWindow:self.tmuxWindow tabTo:self];
+        }
+        if (parentWindow) {
+            [self setParentWindow:parentWindow];
         }
         session.delegate = self;
         [root_ addSubview:[session view]];
@@ -3968,7 +3974,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 - (iTermVariableScope *)variablesScope {
     iTermVariableScope *scope = [[iTermVariableScope alloc] init];
     [scope addVariables:_variables toScopeNamed:nil];
-    [scope addVariables:[iTermVariables globalInstance] toScopeNamed:@"iterm2"];
+    [scope addVariables:[iTermVariables globalInstance] toScopeNamed:iTermVariableKeyGlobalScopeName];
     return scope;
 }
 
@@ -4016,6 +4022,9 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 }
 
 - (void)splitView:(PTYSplitView *)splitView draggingWillBeginOfSplit:(int)splitterIndex {
+    DLog(@"%@: draggingWillBeginOfSplit:%@", self, @(splitterIndex));
+    _numberOfSplitViewDragsInProgress++;
+    DLog(@"%@ split drags in progress", @(_numberOfSplitViewDragsInProgress));
     if (![self isTmuxTab]) {
         // Don't care for non-tmux tabs.
         return;
@@ -4027,6 +4036,9 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 - (void)splitView:(PTYSplitView *)splitView
   draggingDidEndOfSplit:(int)splitterIndex
            pixels:(NSSize)pxMoved {
+    DLog(@"%@: draggingDidEndOfSplit:%@", self, @(splitterIndex));
+    _numberOfSplitViewDragsInProgress--;
+    DLog(@"%@ split drags in progress", @(_numberOfSplitViewDragsInProgress));
     if (![self isTmuxTab]) {
         // Don't care for non-tmux tabs.
         return;
@@ -4738,9 +4750,14 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
         return proposedPosition;
     }
     PtyLog(@"PTYTab splitView:constraintSplitPosition%f divider:%d case ", (float)proposedPosition, (int)dividerIndex);
-    NSArray* subviews = [splitView subviews];
-    NSView* childBefore = [subviews objectAtIndex:dividerIndex];
-    NSView* childAfter = [subviews objectAtIndex:dividerIndex + 1];
+    NSArray<NSView *> *subviews = [splitView subviews];
+    if (dividerIndex < 0 ||
+        subviews.count < dividerIndex + 2) {
+        DLog(@"Have %@ subviews. Aborting.", @(subviews.count));
+        return proposedPosition;
+    }
+    NSView *childBefore = subviews[dividerIndex];
+    NSView *childAfter = subviews[dividerIndex + 1];
     CGFloat beforeStep = [self _recursiveStepSize:childBefore wantWidth:[splitView isVertical]];
     CGFloat afterStep = [self _recursiveStepSize:childAfter wantWidth:[splitView isVertical]];
     CGFloat step = MAX(beforeStep, afterStep);
@@ -4905,8 +4922,9 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 - (void)updateUseMetal NS_AVAILABLE_MAC(10_11) {
     const BOOL resizing = self.realParentWindow.windowIsResizing;
     const BOOL powerOK = [[iTermPowerManager sharedInstance] metalAllowed];
+    __block NSString *sessionReason;
     const BOOL allSessionsAllowMetal = [self.sessions allWithBlock:^BOOL(PTYSession *anObject) {
-        return anObject.metalAllowed;
+        return [anObject metalAllowed:&sessionReason];
     }];
     const BOOL allSessionsIdle = (allSessionsAllowMetal &&
                                   [iTermAdvancedSettingsModel disableMetalWhenIdle] &&
@@ -4919,16 +4937,40 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     const NSInteger maxNumberOfSplitPanesForMetal = 6;
     const BOOL numberOfSplitPanesIsReasonable = self.sessions.count < maxNumberOfSplitPanesForMetal;
 
-    const BOOL allowed = (!resizing &&
-                          powerOK &&
-                          allSessionsAllowMetal &&
-                          !allSessionsIdle &&
-                          numberOfSplitPanesIsReasonable &&
-                          [_delegate tabCanUseMetal:self]);
+    NSString *reason = nil;
+    BOOL allowed = NO;
+    if (resizing) {
+        _metalUnavailableReason = @"the window is being resized.";
+    } else if (!powerOK) {
+        _metalUnavailableReason = @"the computer is not connected to power. You can enable GPU rendering while disconnected from power in Prefs>General>Advanced GPU Settings.";
+    } else if (!allSessionsAllowMetal) {
+        _metalUnavailableReason = sessionReason;
+    } else if (allSessionsIdle) {
+        _metalUnavailableReason = @"the session is idle. You can enable Metal while idle in Prefs>Advanced.";
+    } else if (!numberOfSplitPanesIsReasonable) {
+        static NSString *tooManyPanesReason;
+        static dispatch_once_t onceToken;
+        dispatch_once(&onceToken, ^{
+            tooManyPanesReason = [NSString stringWithFormat:@"there are more than %@ split frames in this tab.",
+                                  @(maxNumberOfSplitPanesForMetal - 1)];
+        });
+        _metalUnavailableReason = tooManyPanesReason;
+    } else if (![_delegate tabCanUseMetal:self reason:&reason]) {
+        _metalUnavailableReason = reason;
+    } else {
+        _metalUnavailableReason = nil;
+        allowed = YES;
+    }
     const BOOL ONLY_KEY_WINDOWS_USE_METAL = NO;
     const BOOL isKey = [[[self realParentWindow] window] isKeyWindow];
     const BOOL satisfiesKeyRequirement = (isKey || !ONLY_KEY_WINDOWS_USE_METAL);
+    if (!satisfiesKeyRequirement) {
+        _metalUnavailableReason = @"the window does not have keyboard focus.";
+    }
     const BOOL foregroundTab = [self isForegroundTab];
+    if (!foregroundTab) {
+        _metalUnavailableReason = @"this tab is not active.";
+    }
     const BOOL useMetal = allowed && satisfiesKeyRequirement && foregroundTab;
     [self.sessions enumerateObjectsUsingBlock:^(PTYSession * _Nonnull obj, NSUInteger idx, BOOL * _Nonnull stop) {
         obj.useMetal = useMetal;
@@ -5088,6 +5130,10 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 - (void)variables:(iTermVariables *)variables didChangeValuesForNames:(NSSet<NSString *> *)changedNames
             group:(dispatch_group_t)group {
     [_tabTitleOverrideSwiftyString variablesDidChange:changedNames];
+}
+
+- (BOOL)sessionShouldAutoClose:(PTYSession *)session {
+    return _numberOfSplitViewDragsInProgress == 0;
 }
 
 @end

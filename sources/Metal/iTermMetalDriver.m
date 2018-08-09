@@ -34,10 +34,12 @@
 #import "MovingAverage.h"
 #import "NSArray+iTerm.h"
 #import "NSMutableData+iTerm.h"
+#import <stdatomic.h>
 
 @interface iTermMetalDriverAsyncContext : NSObject
 @property (nonatomic, strong) dispatch_group_t group;
 @property (nonatomic) BOOL aborted;
+@property (nonatomic) int count;
 @end
 
 @implementation iTermMetalDriverAsyncContext
@@ -113,7 +115,7 @@ typedef struct {
 
     // This one is special because it's debug only
     iTermCopyOffscreenRenderer *_copyOffscreenRenderer;
-
+    iTermTexturePool *_fullSizeTexturePool;
 
 
     // The command Queue from which we'll obtain command buffers
@@ -152,6 +154,8 @@ typedef struct {
         _startToStartHistogram = [[iTermHistogram alloc] init];
         _inFlightHistogram = [[iTermHistogram alloc] init];
         _startTime = [NSDate timeIntervalSinceReferenceDate];
+        _fullSizeTexturePool = [[iTermTexturePool alloc] init];
+        
         _marginRenderer = [[iTermMarginRenderer alloc] initWithDevice:device];
         _backgroundImageRenderer = [[iTermBackgroundImageRenderer alloc] initWithDevice:device];
         _textRenderer = [[iTermTextRenderer alloc] initWithDevice:device];
@@ -293,9 +297,10 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
     return iTermMetalDriverMaximumNumberOfFramesInFlight;
 }
 
-- (iTermMetalDriverAsyncContext *)newContextForDrawInView:(MTKView *)view {
+- (iTermMetalDriverAsyncContext *)newContextForDrawInView:(MTKView *)view count:(int)count {
     iTermMetalDriverAsyncContext *context = [[iTermMetalDriverAsyncContext alloc] init];
     _context = context;
+    context.count = count;
     context.group = dispatch_group_create();
     dispatch_group_enter(context.group);
     [view draw];
@@ -307,20 +312,25 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
     if (!view || !view.delegate) {
         return NO;
     }
-    DLog(@"Start synchronous draw");
-    iTermMetalDriverAsyncContext *context = [self newContextForDrawInView:view];
+    static _Atomic int count;
+    int thisCount = -atomic_fetch_add_explicit(&count, 1, memory_order_relaxed);
+
+    DLog(@"Start synchronous draw of %d", thisCount);
+    iTermMetalDriverAsyncContext *context = [self newContextForDrawInView:view count:-thisCount];
     self.waitingOnSynchronousDraw = YES;
     dispatch_group_wait(context.group, DISPATCH_TIME_FOREVER);
     self.waitingOnSynchronousDraw = NO;
-    DLog(@"Synchronous draw completed.");
+    DLog(@"Synchronous draw completed of %d.", thisCount);
     return !context.aborted;
 }
 
 - (void)drawAsynchronouslyInView:(MTKView *)view completion:(void (^)(BOOL))completion {
-    DLog(@"Start asynchronous draw of %@", view);
-    iTermMetalDriverAsyncContext *context = [self newContextForDrawInView:view];
+    static _Atomic int count;
+    int thisCount = atomic_fetch_add_explicit(&count, 1, memory_order_relaxed);
+    DLog(@"Start asynchronous draw of %@ count=%d", view, thisCount);
+    iTermMetalDriverAsyncContext *context = [self newContextForDrawInView:view count:count];
     dispatch_group_notify(context.group, dispatch_get_main_queue(), ^{
-        DLog(@"Asynchronous draw of %@ completed", view);
+        DLog(@"Asynchronous draw of %@ completed count=%d", view, thisCount);
         completion(!context.aborted);
     });
 }
@@ -356,6 +366,7 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
     }
 
     iTermMetalFrameData *frameData = [self newFrameDataForView:view];
+    DLog(@"allocated metal frame %@", frameData);
     if (VT100GridSizeEquals(frameData.gridSize, VT100GridSizeMake(0, 0))) {
         DLog(@"  abort: 0x0 grid");
         return NO;
@@ -402,6 +413,9 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
     }
 
     frameData.group = _context.group;
+    if (frameData.group) {
+        DLog(@"Frame %@ has a group. The context's count is %d", frameData, _context.count);
+    }
     _context = nil;
 
     void (^block)(void) = ^{
@@ -426,7 +440,8 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
 
 // Called on the main queue
 - (iTermMetalFrameData *)newFrameDataForView:(MTKView *)view {
-    iTermMetalFrameData *frameData = [[iTermMetalFrameData alloc] initWithView:view];
+    iTermMetalFrameData *frameData = [[iTermMetalFrameData alloc] initWithView:view
+                                                           fullSizeTexturePool:_fullSizeTexturePool];
 
     [frameData measureTimeForStat:iTermMetalFrameDataStatMtExtractFromApp ofBlock:^{
         frameData.viewportSize = self.mainThreadState->viewportSize;
@@ -454,6 +469,7 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
 // Runs in private queue
 - (void)performPrivateQueueSetupForFrameData:(iTermMetalFrameData *)frameData
                                         view:(nonnull MTKView *)view {
+    DLog(@"Begin private queue setup for frame %@", frameData);
     if ([iTermAdvancedSettingsModel showMetalFPSmeter]) {
         [frameData.perFrameState setDebugString:[self fpsMeterStringForFrameNumber:frameData.frameNumber]];
     }
@@ -568,7 +584,7 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
     if (@available(macOS 10.14, *)) {
         return NO;
     }
-    if (!_backgroundImageRenderer.rendererDisabled && [frameData.perFrameState metalBackgroundImageGetTiled:NULL]) {
+    if (!_backgroundImageRenderer.rendererDisabled && [frameData.perFrameState metalBackgroundImageGetMode:NULL]) {
         return YES;
     }
     if (!_badgeRenderer.rendererDisabled && [frameData.perFrameState badgeImage]) {
@@ -829,9 +845,9 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
     if (_backgroundImageRenderer.rendererDisabled) {
         return;
     }
-    BOOL tiled;
-    NSImage *backgroundImage = [frameData.perFrameState metalBackgroundImageGetTiled:&tiled];
-    [_backgroundImageRenderer setImage:backgroundImage tiled:tiled context:frameData.framePoolContext];
+    iTermBackgroundImageMode mode;
+    NSImage *backgroundImage = [frameData.perFrameState metalBackgroundImageGetMode:&mode];
+    [_backgroundImageRenderer setImage:backgroundImage mode:mode context:frameData.framePoolContext];
 }
 
 - (void)updateCopyBackgroundRendererForFrameData:(iTermMetalFrameData *)frameData {
@@ -1617,6 +1633,7 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
         void (^scheduledBlock)(void) = [^{
             const double duration = iTermPreciseTimerStatsMeasureAndRecordTimer(scheduleWaitStat);
             [scheduleWaitHist addValue:duration * 1000];
+            DLog(@"did schedule %@", frameData);
             [frameData class];  // force a reference to frameData to be kept
         } copy];
         [commandBuffer addScheduledHandler:^(id<MTLCommandBuffer> _Nonnull commandBuffer) {
@@ -1649,6 +1666,7 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
 }
 
 - (BOOL)didComplete:(BOOL)completed withFrameData:(iTermMetalFrameData *)frameData {
+    DLog(@"did complete (completed=%@) %@", @(completed), frameData);
     if (!completed) {
         if (frameData.debugInfo) {
             NSData *archive = [frameData.debugInfo newArchive];

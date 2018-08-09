@@ -441,7 +441,7 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
 }
 
 - (void)setSize:(VT100GridSize)newSize {
-    [self.temporaryDoubleBuffer reset];
+    [self.temporaryDoubleBuffer resetExplicitly];
 
     DLog(@"Resize session to %@", VT100GridSizeDescription(newSize));
     DLog(@"Before:\n%@", [currentGrid_ compactLineDumpWithContinuationMarks]);
@@ -2247,20 +2247,20 @@ basedAtAbsoluteLineNumber:(long long)absoluteLineNumber
     return range;
 }
 
-- (BOOL)setUseSavedGridIfAvailable:(BOOL)useSavedGrid {
-    if (useSavedGrid && !realCurrentGrid_ && self.temporaryDoubleBuffer.savedGrid) {
+- (PTYTextViewSynchronousUpdateState *)setUseSavedGridIfAvailable:(BOOL)useSavedGrid {
+    if (useSavedGrid && !realCurrentGrid_ && self.temporaryDoubleBuffer.savedState) {
         realCurrentGrid_ = [currentGrid_ retain];
         [currentGrid_ release];
-        currentGrid_ = [self.temporaryDoubleBuffer.savedGrid retain];
+        currentGrid_ = [self.temporaryDoubleBuffer.savedState.grid retain];
         self.temporaryDoubleBuffer.drewSavedGrid = YES;
-        return YES;
+        return self.temporaryDoubleBuffer.savedState;
     } else if (!useSavedGrid && realCurrentGrid_) {
         [currentGrid_ release];
         currentGrid_ = [realCurrentGrid_ retain];
         [realCurrentGrid_ release];
         realCurrentGrid_ = nil;
     }
-    return NO;
+    return nil;
 }
 
 - (iTermStringLine *)stringLineAsStringAtAbsoluteLineNumber:(long long)absoluteLineNumber
@@ -3148,6 +3148,14 @@ basedAtAbsoluteLineNumber:(long long)absoluteLineNumber
 
 - (BOOL)terminalInTmuxMode {
     return [delegate_ screenInTmuxMode];
+}
+
+- (void)terminalSynchronizedUpdate:(BOOL)begin {
+    if (begin) {
+        [_temporaryDoubleBuffer startExplicitly];
+    } else {
+        [_temporaryDoubleBuffer resetExplicitly];
+    }
 }
 
 - (int)terminalWidth {
@@ -4418,6 +4426,7 @@ static void SwapInt(int *a, int *b) {
     VT100GridCoord end = VT100GridRunMax(run, width);
     x = end.x;
     y = end.y;
+    ITBetaAssert(y >= 0, @"Negative y to from max of run %@", VT100GridRunDescription(run));
     line = [self getLineAtIndex:y];
     while (result.length > 0 && line[x].code == 0 && y < numberOfLines) {
         x--;
@@ -4467,8 +4476,8 @@ static void SwapInt(int *a, int *b) {
     VT100GridRun run = VT100GridRunFromCoords(VT100GridCoordMake(startX, startY),
                                               VT100GridCoordMake(endX, endY),
                                               currentGrid_.size.width);
-    if (run.length == 0) {
-        DLog(@"Run has length 0 given start and end of %@ and %@", VT100GridCoordDescription(start),
+    if (run.length <= 0) {
+        DLog(@"Run has length %@ given start and end of %@ and %@", @(run.length), VT100GridCoordDescription(start),
              VT100GridCoordDescription(end));
         return NO;
     }
@@ -5124,7 +5133,7 @@ static void SwapInt(int *a, int *b) {
 }
 
 - (iTermTemporaryDoubleBufferedGridController *)temporaryDoubleBuffer {
-    if ([delegate_ screenShouldReduceFlicker]) {
+    if ([delegate_ screenShouldReduceFlicker] || _temporaryDoubleBuffer.explicit) {
         return _temporaryDoubleBuffer;
     } else {
         return nil;
@@ -5137,6 +5146,23 @@ static void SwapInt(int *a, int *b) {
     VT100Grid *copy = [[currentGrid_ copy] autorelease];
     copy.delegate = nil;
     return copy;
+}
+
+- (PTYTextViewSynchronousUpdateState *)temporaryDoubleBufferedGridSavedState {
+    PTYTextViewSynchronousUpdateState *state = [[[PTYTextViewSynchronousUpdateState alloc] init] autorelease];
+
+    state.grid = [currentGrid_.copy autorelease];
+    state.grid.delegate = nil;
+
+    state.colorMap = [self.delegate.screenColorMap.copy autorelease];
+    state.cursorVisible = self.temporaryDoubleBuffer.explicit ? _cursorVisible : YES;
+
+    return state;
+
+}
+
+- (iTermColorMap *)temporaryDoubleBufferedGridColorMapCopy {
+    return [[delegate_ screenColorMap] copy];
 }
 
 - (void)temporaryDoubleBufferedGridDidExpire {

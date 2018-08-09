@@ -9,6 +9,7 @@
 
 #import "DebugLogging.h"
 #import "iTermStatusBarContainerView.h"
+#import "iTermStatusBarFixedSpacerComponent.h"
 #import "iTermStatusBarLayout.h"
 #import "iTermStatusBarSpringComponent.h"
 #import "iTermStatusBarView.h"
@@ -21,6 +22,9 @@ NS_ASSUME_NONNULL_BEGIN
 static const CGFloat iTermStatusBarViewControllerMargin = 5;
 static const CGFloat iTermStatusBarViewControllerTopMargin = 1;
 static const CGFloat iTermStatusBarViewControllerContainerHeight = 21;
+
+// NOTE: SessionView's kTitleHeight must equal this value
+const CGFloat iTermStatusBarHeight = 22;
 
 @interface iTermStatusBarViewController ()<
     iTermStatusBarComponentDelegate,
@@ -69,6 +73,7 @@ static const CGFloat iTermStatusBarViewControllerContainerHeight = 21;
                                  view.desiredWidth,
                                  iTermStatusBarViewControllerContainerHeight);
          [view.component statusBarComponentWidthDidChangeTo:view.desiredWidth];
+         view.rightSeparatorOffset = -1;
      }];
     // Remove defunct views
     for (iTermStatusBarContainerView *view in previouslyVisible) {
@@ -82,6 +87,42 @@ static const CGFloat iTermStatusBarViewControllerContainerHeight = 21;
             [self.view addSubview:view];
         }
     }
+    iTermStatusBarView *view = (iTermStatusBarView *)self.view;
+    __block BOOL haveFoundNonSpacer = NO;
+    __block NSColor *lastColor = nil;
+    __block NSNumber *lastFixedSpacerOffset = nil;
+    __block iTermStatusBarContainerView *previousObject = nil;
+    view.sections = [[_visibleContainerViews flatMapWithBlock:^id(iTermStatusBarContainerView *anObject) {
+        const BOOL isSpring = [anObject.component isKindOfClass:[iTermStatusBarSpringComponent class]];
+        CGFloat margin = isSpring ? 0 : iTermStatusBarViewControllerMargin / 2.0;
+        NSNumber *offset = @(anObject.desiredOrigin + anObject.desiredWidth + margin);
+        if ([anObject.component isKindOfClass:[iTermStatusBarFixedSpacerComponent class]]) {
+            lastFixedSpacerOffset = offset;
+            previousObject = anObject;
+            return nil;
+        } else if (lastFixedSpacerOffset && haveFoundNonSpacer) {
+            haveFoundNonSpacer = YES;
+            previousObject.rightSeparatorOffset = lastFixedSpacerOffset.doubleValue;
+            anObject.rightSeparatorOffset = offset.doubleValue;
+            previousObject = anObject;
+            NSArray *result = @[ [iTermTuple tupleWithObject:lastColor andObject:lastFixedSpacerOffset],
+                                 [iTermTuple tupleWithObject:anObject.backgroundColor andObject:offset] ];
+            lastFixedSpacerOffset = nil;
+            lastColor = nil;
+            return result;
+        } else {
+            haveFoundNonSpacer = YES;
+            anObject.rightSeparatorOffset = offset.doubleValue;
+            lastFixedSpacerOffset = nil;
+            previousObject = anObject;
+            lastColor = nil;// anObject.backgroundColor;
+            return @[ [iTermTuple tupleWithObject:anObject.backgroundColor andObject:offset] ];
+        }
+    }] uniqWithComparator:^BOOL(iTermTuple<NSColor *, NSNumber *> *obj1, iTermTuple<NSColor *, NSNumber *> *obj2) {
+        return [NSObject object:obj1.secondObject isEqualToObject:obj2.secondObject];
+    }];
+
+    [view setNeedsDisplay:YES];
     DLog(@"--- end status bar layout ---");
 }
 
@@ -116,41 +157,29 @@ static const CGFloat iTermStatusBarViewControllerContainerHeight = 21;
 
 - (void)updateMargins:(NSArray<iTermStatusBarContainerView *> *)views {
     __block BOOL foundMargin = NO;
-    __block BOOL previousHadMargin = NO;
     [views enumerateObjectsUsingBlock:^(iTermStatusBarContainerView * _Nonnull view, NSUInteger idx, BOOL * _Nonnull stop) {
         const BOOL hasMargins = view.component.statusBarComponentHasMargins;
         if (hasMargins && !foundMargin) {
-            view.leftMargin = iTermStatusBarViewControllerMargin;
+            view.leftMargin = iTermStatusBarViewControllerMargin + 1;
             foundMargin = YES;
         } else if (hasMargins) {
-            if (previousHadMargin) {
-                view.leftMargin = iTermStatusBarViewControllerMargin / 2;
-            } else {
-                view.leftMargin = 0;
-            }
+            view.leftMargin = iTermStatusBarViewControllerMargin / 2 + 1;
         } else {
             view.leftMargin = 0;
         }
-        previousHadMargin = hasMargins;
     }];
     
     foundMargin = NO;
-    previousHadMargin = NO;
     [views enumerateObjectsWithOptions:NSEnumerationReverse usingBlock:^(iTermStatusBarContainerView * _Nonnull view, NSUInteger idx, BOOL * _Nonnull stop) {
         const BOOL hasMargins = view.component.statusBarComponentHasMargins;
         if (hasMargins && !foundMargin) {
             view.rightMargin = iTermStatusBarViewControllerMargin;
             foundMargin = YES;
         } else if (hasMargins) {
-            if (previousHadMargin) {
-                view.rightMargin = iTermStatusBarViewControllerMargin / 2;
-            } else {
-                view.rightMargin = 0;
-            }
+            view.rightMargin = iTermStatusBarViewControllerMargin / 2;
         } else {
             view.rightMargin = 0;
         }
-        previousHadMargin = hasMargins;
     }];
 }
 
@@ -328,6 +357,7 @@ static const CGFloat iTermStatusBarViewControllerContainerHeight = 21;
 }
 
 - (void)statusBarComponentPreferredSizeDidChange:(id<iTermStatusBarComponent>)component {
+    DLog(@"Preferred size did change for %@", component);
     [self.view setNeedsLayout:YES];
 }
 

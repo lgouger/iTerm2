@@ -117,7 +117,7 @@ static NSColor *ColorForVector(vector_float4 v) {
     NSTimeInterval _timeSinceCursorMoved;
 
     CGFloat _backgroundImageBlending;
-    BOOL _backgroundImageTiled;
+    iTermBackgroundImageMode _backgroundImageMode;
     NSImage *_backgroundImage;
     BOOL _asciiAntialias;
     BOOL _nonasciiAntialias;
@@ -515,7 +515,7 @@ static NSColor *ColorForVector(vector_float4 v) {
 
 - (void)loadBackgroundImageWithTextView:(PTYTextView *)textView {
     _backgroundImageBlending = textView.blend;
-    _backgroundImageTiled = textView.delegate.backgroundImageTiled;
+    _backgroundImageMode = textView.delegate.backgroundImageMode;
     _backgroundImage = [textView.delegate textViewBackgroundImage];
 
     _edgeInsets = textView.delegate.textViewEdgeInsets;
@@ -863,9 +863,9 @@ ambiguousIsDoubleWidth:(BOOL)ambiguousIsDoubleWidth
 }
 
 // Private queue
-- (NSImage *)metalBackgroundImageGetTiled:(nullable BOOL *)tiled {
-    if (tiled) {
-        *tiled = _backgroundImageTiled;
+- (NSImage *)metalBackgroundImageGetMode:(nullable iTermBackgroundImageMode *)mode {
+    if (mode) {
+        *mode = _backgroundImageMode;
     }
     return _backgroundImage;
 }
@@ -1485,16 +1485,21 @@ ambiguousIsDoubleWidth:(BOOL)ambiguousIsDoubleWidth
     NSMutableData *data = [NSImage argbDataForImageOfSize:size drawBlock:^(CGContextRef context) {
         NSAffineTransform *transform = [NSAffineTransform transform];
         [transform concat];
+        [backgroundColor set];
+        NSRectFill(NSMakeRect(0, 0, size.width, size.height));
+        [foregroundColor set];
 
+        BOOL solid = NO;
         for (NSBezierPath *path in [iTermBoxDrawingBezierCurveFactory bezierPathsForBoxDrawingCode:code
                                                                                           cellSize:size
-                                                                                             scale:scale]) {
-            [backgroundColor set];
-            NSRectFill(NSMakeRect(0, 0, size.width, size.height));
-
-            [foregroundColor set];
-            [path setLineWidth:scale];
-            [path stroke];
+                                                                                             scale:scale
+                                                                                             solid:&solid]) {
+            if (solid) {
+                [path fill];
+            } else {
+                [path setLineWidth:scale];
+                [path stroke];
+            }
         }
     }];
 

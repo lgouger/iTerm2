@@ -172,6 +172,8 @@ DEFINE_FLOAT(verticalBarCursorWidth, 1, @"Terminal: Width of vertical bar cursor
 DEFINE_BOOL(acceptOSC7, YES, @"Terminal: Accept OSC 7 to set username, hostname, and path.");
 DEFINE_BOOL(detectPasswordInput, YES, @"Terminal: Show key at cursor at password prompt?");
 DEFINE_BOOL(tabsWrapAround, NO, @"Terminal: Tabs wrap around to the next line.\nThis is useful for preserving tabs for later copying to the pasteboard. It breaks backward compatibility and may cause layout problems with programs that don’t expect this behavior.");
+DEFINE_STRING(sshSchemePath, @"ssh", @"Terminal: Command to run when handling an ssh:// URL.");
+
 #pragma mark Hotkey
 DEFINE_FLOAT(hotkeyTermAnimationDuration, 0.25, @"Hotkey: Duration in seconds of the hotkey window animation.\nWarning: reducing this value may cause problems if you have multiple displays.");
 DEFINE_BOOL(dockIconTogglesWindow, NO, @"Hotkey: If the only window is a hotkey window, then clicking the dock icon shows or hides it.");
@@ -202,7 +204,7 @@ DEFINE_STRING(viewManPageCommand, @"man %@ || sleep 3", @"General: Command to vi
 DEFINE_BOOL(hideStuckTooltips, YES, @"General: Hide stuck tooltips.\nWhen you hide iTerm2 using a hotkey while a tooltip is fading out it gets stuck because of an OS bug. Work around it with a nasty hack by enabling this feature.")
 DEFINE_BOOL(openFileOverridesSendText, YES, @"General: Should opening a script with iTerm2 disable the default profile's “Send Text at Start” setting?\nIf you use “open iTerm2 file.command” or drag a script onto iTerm2's icon and this setting is enabled then the script will be executed in lieu of the profile's “Send Text at Start” setting. If this setting is off then both will be executed.");
 DEFINE_BOOL(statusBarIcon, YES, @"General: Add status bar icon when excluded from dock?\nWhen you turn on “Exclude from Dock and ⌘-Tab Application Switcher” a status bar icon is added to the menu bar so you can switch the setting back off. Disable this to remove the status bar icon. Doing so makes it very hard to get to Preferences. You must restart iTerm2 after changing this setting.");
-DEFINE_BOOL(wrapFocus, YES, @"General: Should the directional focus hotkeys wrap");
+DEFINE_BOOL(wrapFocus, YES, @"General: Should split pane navigation by direction wrap around?");
 DEFINE_BOOL(disableGrowl, YES, @"General: Disable Growl notifications.\nSend notifications directly to Notification Center instead of relying on Growl to deliver them. Enables sound alerts on notifications.");
 DEFINE_BOOL(openUntitledFile, YES, @"General: Open a new window when you click the dock icon and no windows are already open?");
 DEFINE_BOOL(openNewWindowAtStartup, YES, @"General: Open a window at startup?\nThis is useful if you wish to use the system window restoration settings but not create a new window if none would be restored.");
@@ -225,6 +227,7 @@ DEFINE_BOOL(useGCDUpdateTimer, YES, @"Drawing: Use GCD-based update timer instea
 DEFINE_BOOL(drawOutlineAroundCursor, NO, @"Drawing: Draw outline around underline and vertical bar cursors using background color.");
 DEFINE_BOOL(disableCustomBoxDrawing, NO, @"Drawing: Use your typeface’s box-drawing characters instead of iTerm2’s custom drawing code.\nYou must restart iTerm2 after changing this setting.");
 DEFINE_INT(minimumWeightDifferenceForBoldFont, 4, @"Drawing: Minimum weight difference between regular and bold font.\nThis affects selection of the bold version of a font. Font weights go from 0 to 9. If no font can be found that has a high enough weight then the regular font will be double-struck with a small offset.");
+DEFINE_FLOAT(underlineCursorHeight, 2, @"Drawing: Thickness of underline cursor.");
 
 #if ENABLE_LOW_POWER_GPU_DETECTION
 DEFINE_BOOL(useLowPowerGPUWhenUnplugged, NO, @"Drawing: Metal renderer uses integrated GPU when not connected to power?\nFor this to be effective you must disable “Disable Metal renderer when not connected to power”.");

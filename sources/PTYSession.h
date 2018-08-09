@@ -206,6 +206,9 @@ typedef enum {
 
 - (iTermVariables *)sessionTabVariables;
 - (void)sessionDuplicateTab;
+
+- (BOOL)sessionShouldAutoClose:(PTYSession *)session;
+
 @end
 
 @class SessionView;
@@ -319,8 +322,7 @@ typedef enum {
 // tty device
 @property(nonatomic, readonly) NSString *tty;
 
-// True if background image should be tiled
-@property(nonatomic, assign) BOOL backgroundImageTiled;
+@property(nonatomic, assign) iTermBackgroundImageMode backgroundImageMode;
 
 // Filename of background image.
 @property(nonatomic, copy) NSString *backgroundImagePath;  // Used by scripting
@@ -744,6 +746,7 @@ typedef enum {
 - (id)temporarilyDisableMetal NS_AVAILABLE_MAC(10_11);
 - (void)drawFrameAndRemoveTemporarilyDisablementOfMetalForToken:(id)token NS_AVAILABLE_MAC(10_11);
 
+- (BOOL)metalAllowed:(out NSString **)reason;
 - (void)executeTokens:(const CVector *)vector bytesHandled:(int)length;
 - (void)injectData:(NSData *)data;
 

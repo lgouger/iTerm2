@@ -215,6 +215,7 @@
 + (double)activeUpdateCadence;
 + (BOOL)openNewWindowAtStartup;
 + (BOOL)resetSGROnPrompt;
++ (NSString *)sshSchemePath;
 
 #if ENABLE_LOW_POWER_GPU_DETECTION
 + (BOOL)useLowPowerGPUWhenUnplugged;
@@ -232,5 +233,6 @@
 + (NSString *)pathToFTP;
 + (NSString *)pathToTelnet;
 + (BOOL)sshURLsSupportPath;
++ (double)underlineCursorHeight;
 
 @end

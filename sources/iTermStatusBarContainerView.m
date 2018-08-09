@@ -20,15 +20,12 @@ NS_ASSUME_NONNULL_BEGIN
 }
 
 - (nullable instancetype)initWithComponent:(id<iTermStatusBarComponent>)component {
-    self = [super initWithFrame:NSZeroRect];
+    self = [super initWithFrame:NSMakeRect(0, 0, 200, 21)];
     if (self) {
         self.wantsLayer = YES;
         _component = component;
         _dependencies = [component statusBarComponentVariableDependencies];
-        NSColor *backgroundColor = [component.configuration[iTermStatusBarComponentConfigurationKeyKnobValues][iTermStatusBarSharedBackgroundColorKey] colorValue];
-        if (backgroundColor) {
-            self.layer.backgroundColor = backgroundColor.CGColor;
-        }
+        _backgroundColor = [component.configuration[iTermStatusBarComponentConfigurationKeyKnobValues][iTermStatusBarSharedBackgroundColorKey] colorValue];
         _view = component.statusBarComponentCreateView;
         [self addSubview:_view];
         _view.frame = NSMakeRect(0, 0, self.frame.size.width, self.frame.size.height);

@@ -78,6 +78,7 @@ extern NSString *const PTYTabVariableTitleOverride;
 @property (nonatomic, readonly) NSString *evaluatedTitleOverride;
 
 @property (nonatomic, readonly) iTermVariableScope *variablesScope;
+@property(nonatomic, readonly) NSString *metalUnavailableReason;
 
 // Save the contents of all sessions. Used during window restoration so that if
 // the sessions are later restored from a saved arrangement during startup
@@ -112,7 +113,8 @@ extern NSString *const PTYTabVariableTitleOverride;
                           withProfile:(Profile *)goodProfile;
 
 // init/dealloc
-- (instancetype)initWithSession:(PTYSession*)session;
+- (instancetype)initWithSession:(PTYSession *)session
+                   parentWindow:(NSWindowController<iTermWindowController> *)parentWindow;
 - (instancetype)initWithRoot:(NSSplitView *)root
                     sessions:(NSMapTable<SessionView *, PTYSession *> *)sessions;
 

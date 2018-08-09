@@ -250,6 +250,8 @@ static const int kDragThreshold = 3;
 
     // Used to report scroll wheel mouse events.
     iTermScrollAccumulator *_scrollAccumulator;
+
+    BOOL _haveSeenScrollWheelEvent;
 }
 
 
@@ -1080,17 +1082,26 @@ static const int kDragThreshold = 3;
 }
 
 - (void)performBlockWithFlickerFixerGrid:(void (NS_NOESCAPE ^)(void))block {
-    // Try to use a saved grid if one is available. If it succeeds, that implies that the cursor was
-    // recently hidden and what we're drawing is how the screen looked just before the cursor was
-    // hidden. Therefore, we'll temporarily show the cursor, but we'll need to restore cursorVisible's
-    // value when we're done.
-    BOOL savedCursorVisible = _drawingHelper.cursorVisible;
-    if ([_dataSource setUseSavedGridIfAvailable:YES]) {
-        _drawingHelper.cursorVisible = YES;
+    PTYTextViewSynchronousUpdateState *originalState = nil;
+    PTYTextViewSynchronousUpdateState *savedState = [_dataSource setUseSavedGridIfAvailable:YES];
+    if (savedState) {
+        originalState = [[[PTYTextViewSynchronousUpdateState alloc] init] autorelease];
+        originalState.colorMap = _colorMap;
+        originalState.cursorVisible = _drawingHelper.cursorVisible;
+
+        _drawingHelper.cursorVisible = savedState.cursorVisible;
+        _drawingHelper.colorMap = savedState.colorMap;
+        _colorMap = savedState.colorMap;
     }
+
     block();
+
     [_dataSource setUseSavedGridIfAvailable:NO];
-    _drawingHelper.cursorVisible = savedCursorVisible;
+    if (originalState) {
+        _drawingHelper.colorMap = originalState.colorMap;
+        _colorMap = originalState.colorMap;
+        _drawingHelper.cursorVisible = originalState.cursorVisible;
+    }
 }
 
 - (iTermTextDrawingHelper *)drawingHelper {
@@ -1648,9 +1659,24 @@ static const int kDragThreshold = 3;
     }
 }
 
+- (void)jiggle {
+    [self scrollLineUp:nil];
+    [self scrollLineDown:nil];
+}
+
 - (void)scrollWheel:(NSEvent *)event {
     DLog(@"scrollWheel:%@", event);
 
+    if (!_haveSeenScrollWheelEvent) {
+        // Work around a weird bug. Commit 9e4b97b18fac24bea6147c296b65687f0523ad83 caused it.
+        // When you restore a window and have an inline scroller (but not a legacy scroller!) then
+        // it will be at the top, even though we're scrolled to the bottom. You can either jiggle
+        // it after a delay to fix it, or after thousands of dispatch_async calls, or here. None of
+        // these make any sense, nor does the bug itself. I get the feeling that a giant rats' nest
+        // of insanity underlies scroll wheels on macOS.
+        _haveSeenScrollWheelEvent = YES;
+        [self jiggle];
+    }
     NSPoint point = [self convertPoint:[event locationInWindow] fromView:nil];
     if ([self scrollWheelShouldSendDataForEvent:event at:point]) {
         DLog(@"Scroll wheel sending data");
@@ -6101,7 +6127,9 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
              respectingHardNewlines:(BOOL)respectHardNewlines {
     DLog(@"urlActionForClickAt:%@,%@ respectingHardNewlines:%@",
          @(x), @(y), @(respectHardNewlines));
-
+    if (y < 0) {
+        return nil;
+    }
     const VT100GridCoord coord = VT100GridCoordMake(x, y);
     iTermImageInfo *imageInfo = [self imageInfoAtCoord:coord];
     if (imageInfo) {

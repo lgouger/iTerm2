@@ -28,7 +28,7 @@
     IBOutlet NSSlider *_blurRadius;
     IBOutlet NSButton *_useBackgroundImage;
     IBOutlet iTermImageWell *_backgroundImagePreview;
-    IBOutlet NSButton *_backgroundImageTiled;
+    IBOutlet NSButton *_backgroundImageMode;
     IBOutlet NSSlider *_blendAmount;
     IBOutlet NSTextField *_columnsField;
     IBOutlet NSTextField *_rowsField;
@@ -45,6 +45,7 @@
     IBOutlet NSButton *_preventTab;
     IBOutlet NSButton *_transparencyAffectsOnlyDefaultBackgroundColor;
     IBOutlet NSButton *_openToolbelt;
+    IBOutlet NSMenuItem *_compactWindowStyleMenuItem;
 }
 
 - (void)dealloc {
@@ -52,6 +53,10 @@
 }
 
 - (void)awakeFromNib {
+    if (@available(macOS 10.14, *)) { } else {
+        // Compact style requires sane layers support so it's 10.14+.
+        [_compactWindowStyleMenuItem.menu removeItem:_compactWindowStyleMenuItem];
+    }
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(reloadProfile)  // In superclass
                                                  name:kReloadAllProfiles
@@ -87,10 +92,10 @@
     [self defineControl:_blurRadius
                     key:KEY_BLUR_RADIUS
                    type:kPreferenceInfoTypeSlider];
-
-    [self defineControl:_backgroundImageTiled
-                    key:KEY_BACKGROUND_IMAGE_TILED
-                   type:kPreferenceInfoTypeCheckbox];
+#warning TODO: Add this to python preferences once I get the source off my other machine
+    [self defineControl:_backgroundImageMode
+                    key:KEY_BACKGROUND_IMAGE_MODE
+                   type:kPreferenceInfoTypePopup];
 
     [self defineControl:_blendAmount
                     key:KEY_BLEND

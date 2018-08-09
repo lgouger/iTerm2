@@ -76,6 +76,17 @@ CF_EXTERN_C_BEGIN
 @class ITMNotificationRequest;
 @class ITMNotificationResponse;
 @class ITMPoint;
+@class ITMPreferencesRequest;
+@class ITMPreferencesRequest_Request;
+@class ITMPreferencesRequest_Request_GetPreference;
+@class ITMPreferencesRequest_Request_SetDefaultProfile;
+@class ITMPreferencesRequest_Request_SetPreference;
+@class ITMPreferencesResponse;
+@class ITMPreferencesResponse_Result;
+@class ITMPreferencesResponse_Result_GetPreferenceResult;
+@class ITMPreferencesResponse_Result_SetDefaultProfileResult;
+@class ITMPreferencesResponse_Result_SetPreferenceResult;
+@class ITMPreferencesResponse_Result_UnrecognizedResult;
 @class ITMProfileProperty;
 @class ITMPromptNotification;
 @class ITMRPCRegistrationRequest;
@@ -117,10 +128,12 @@ CF_EXTERN_C_BEGIN
 @class ITMSplitTreeNode_SplitTreeLink;
 @class ITMTerminateSessionNotification;
 @class ITMTmuxRequest;
+@class ITMTmuxRequest_CreateWindow;
 @class ITMTmuxRequest_ListConnections;
 @class ITMTmuxRequest_SendCommand;
 @class ITMTmuxRequest_SetWindowVisible;
 @class ITMTmuxResponse;
+@class ITMTmuxResponse_CreateWindow;
 @class ITMTmuxResponse_ListConnections;
 @class ITMTmuxResponse_ListConnections_Connection;
 @class ITMTmuxResponse_SendCommand;
@@ -178,6 +191,39 @@ GPBEnumDescriptor *ITMModifiers_EnumDescriptor(void);
  * the time this source was generated.
  **/
 BOOL ITMModifiers_IsValidValue(int32_t value);
+
+#pragma mark - Enum ITMPreferencesResponse_Result_SetPreferenceResult_Status
+
+typedef GPB_ENUM(ITMPreferencesResponse_Result_SetPreferenceResult_Status) {
+  ITMPreferencesResponse_Result_SetPreferenceResult_Status_Ok = 0,
+  ITMPreferencesResponse_Result_SetPreferenceResult_Status_BadJson = 1,
+
+  /** Not legal for a plist */
+  ITMPreferencesResponse_Result_SetPreferenceResult_Status_InvalidValue = 2,
+};
+
+GPBEnumDescriptor *ITMPreferencesResponse_Result_SetPreferenceResult_Status_EnumDescriptor(void);
+
+/**
+ * Checks to see if the given value is defined by the enum or was not known at
+ * the time this source was generated.
+ **/
+BOOL ITMPreferencesResponse_Result_SetPreferenceResult_Status_IsValidValue(int32_t value);
+
+#pragma mark - Enum ITMPreferencesResponse_Result_SetDefaultProfileResult_Status
+
+typedef GPB_ENUM(ITMPreferencesResponse_Result_SetDefaultProfileResult_Status) {
+  ITMPreferencesResponse_Result_SetDefaultProfileResult_Status_Ok = 0,
+  ITMPreferencesResponse_Result_SetDefaultProfileResult_Status_BadGuid = 1,
+};
+
+GPBEnumDescriptor *ITMPreferencesResponse_Result_SetDefaultProfileResult_Status_EnumDescriptor(void);
+
+/**
+ * Checks to see if the given value is defined by the enum or was not known at
+ * the time this source was generated.
+ **/
+BOOL ITMPreferencesResponse_Result_SetDefaultProfileResult_Status_IsValidValue(int32_t value);
 
 #pragma mark - Enum ITMReorderTabsResponse_Status
 
@@ -735,6 +781,7 @@ typedef GPB_ENUM(ITMClientOriginatedMessage_FieldNumber) {
   ITMClientOriginatedMessage_FieldNumber_GetBroadcastDomainsRequest = 123,
   ITMClientOriginatedMessage_FieldNumber_TmuxRequest = 124,
   ITMClientOriginatedMessage_FieldNumber_ReorderTabsRequest = 125,
+  ITMClientOriginatedMessage_FieldNumber_PreferencesRequest = 126,
 };
 
 typedef GPB_ENUM(ITMClientOriginatedMessage_Submessage_OneOfCase) {
@@ -765,6 +812,7 @@ typedef GPB_ENUM(ITMClientOriginatedMessage_Submessage_OneOfCase) {
   ITMClientOriginatedMessage_Submessage_OneOfCase_GetBroadcastDomainsRequest = 123,
   ITMClientOriginatedMessage_Submessage_OneOfCase_TmuxRequest = 124,
   ITMClientOriginatedMessage_Submessage_OneOfCase_ReorderTabsRequest = 125,
+  ITMClientOriginatedMessage_Submessage_OneOfCase_PreferencesRequest = 126,
 };
 
 /**
@@ -830,6 +878,8 @@ typedef GPB_ENUM(ITMClientOriginatedMessage_Submessage_OneOfCase) {
 
 @property(nonatomic, readwrite, strong, null_resettable) ITMReorderTabsRequest *reorderTabsRequest;
 
+@property(nonatomic, readwrite, strong, null_resettable) ITMPreferencesRequest *preferencesRequest;
+
 @end
 
 /**
@@ -868,6 +918,7 @@ typedef GPB_ENUM(ITMServerOriginatedMessage_FieldNumber) {
   ITMServerOriginatedMessage_FieldNumber_GetBroadcastDomainsResponse = 123,
   ITMServerOriginatedMessage_FieldNumber_TmuxResponse = 124,
   ITMServerOriginatedMessage_FieldNumber_ReorderTabsResponse = 125,
+  ITMServerOriginatedMessage_FieldNumber_PreferencesResponse = 126,
   ITMServerOriginatedMessage_FieldNumber_Notification = 1000,
 };
 
@@ -900,6 +951,7 @@ typedef GPB_ENUM(ITMServerOriginatedMessage_Submessage_OneOfCase) {
   ITMServerOriginatedMessage_Submessage_OneOfCase_GetBroadcastDomainsResponse = 123,
   ITMServerOriginatedMessage_Submessage_OneOfCase_TmuxResponse = 124,
   ITMServerOriginatedMessage_Submessage_OneOfCase_ReorderTabsResponse = 125,
+  ITMServerOriginatedMessage_Submessage_OneOfCase_PreferencesResponse = 126,
   ITMServerOriginatedMessage_Submessage_OneOfCase_Notification = 1000,
 };
 
@@ -970,6 +1022,8 @@ typedef GPB_ENUM(ITMServerOriginatedMessage_Submessage_OneOfCase) {
 
 @property(nonatomic, readwrite, strong, null_resettable) ITMReorderTabsResponse *reorderTabsResponse;
 
+@property(nonatomic, readwrite, strong, null_resettable) ITMPreferencesResponse *preferencesResponse;
+
 /** This is the only response that is sent spontaneously. The 'id' field will not be set. */
 @property(nonatomic, readwrite, strong, null_resettable) ITMNotification *notification;
 
@@ -979,6 +1033,196 @@ typedef GPB_ENUM(ITMServerOriginatedMessage_Submessage_OneOfCase) {
  * Clears whatever value was set for the oneof 'submessage'.
  **/
 void ITMServerOriginatedMessage_ClearSubmessageOneOfCase(ITMServerOriginatedMessage *message);
+
+#pragma mark - ITMPreferencesRequest
+
+typedef GPB_ENUM(ITMPreferencesRequest_FieldNumber) {
+  ITMPreferencesRequest_FieldNumber_RequestsArray = 1,
+};
+
+@interface ITMPreferencesRequest : GPBMessage
+
+@property(nonatomic, readwrite, strong, null_resettable) NSMutableArray<ITMPreferencesRequest_Request*> *requestsArray;
+/** The number of items in @c requestsArray without causing the array to be created. */
+@property(nonatomic, readonly) NSUInteger requestsArray_Count;
+
+@end
+
+#pragma mark - ITMPreferencesRequest_Request
+
+typedef GPB_ENUM(ITMPreferencesRequest_Request_FieldNumber) {
+  ITMPreferencesRequest_Request_FieldNumber_SetPreferenceRequest = 1,
+  ITMPreferencesRequest_Request_FieldNumber_GetPreferenceRequest = 2,
+  ITMPreferencesRequest_Request_FieldNumber_SetDefaultProfileRequest = 3,
+};
+
+typedef GPB_ENUM(ITMPreferencesRequest_Request_Request_OneOfCase) {
+  ITMPreferencesRequest_Request_Request_OneOfCase_GPBUnsetOneOfCase = 0,
+  ITMPreferencesRequest_Request_Request_OneOfCase_SetPreferenceRequest = 1,
+  ITMPreferencesRequest_Request_Request_OneOfCase_GetPreferenceRequest = 2,
+  ITMPreferencesRequest_Request_Request_OneOfCase_SetDefaultProfileRequest = 3,
+};
+
+@interface ITMPreferencesRequest_Request : GPBMessage
+
+@property(nonatomic, readonly) ITMPreferencesRequest_Request_Request_OneOfCase requestOneOfCase;
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMPreferencesRequest_Request_SetPreference *setPreferenceRequest;
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMPreferencesRequest_Request_GetPreference *getPreferenceRequest;
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMPreferencesRequest_Request_SetDefaultProfile *setDefaultProfileRequest;
+
+@end
+
+/**
+ * Clears whatever value was set for the oneof 'request'.
+ **/
+void ITMPreferencesRequest_Request_ClearRequestOneOfCase(ITMPreferencesRequest_Request *message);
+
+#pragma mark - ITMPreferencesRequest_Request_SetPreference
+
+typedef GPB_ENUM(ITMPreferencesRequest_Request_SetPreference_FieldNumber) {
+  ITMPreferencesRequest_Request_SetPreference_FieldNumber_Key = 1,
+  ITMPreferencesRequest_Request_SetPreference_FieldNumber_JsonValue = 2,
+};
+
+@interface ITMPreferencesRequest_Request_SetPreference : GPBMessage
+
+@property(nonatomic, readwrite, copy, null_resettable) NSString *key;
+/** Test to see if @c key has been set. */
+@property(nonatomic, readwrite) BOOL hasKey;
+
+@property(nonatomic, readwrite, copy, null_resettable) NSString *jsonValue;
+/** Test to see if @c jsonValue has been set. */
+@property(nonatomic, readwrite) BOOL hasJsonValue;
+
+@end
+
+#pragma mark - ITMPreferencesRequest_Request_GetPreference
+
+typedef GPB_ENUM(ITMPreferencesRequest_Request_GetPreference_FieldNumber) {
+  ITMPreferencesRequest_Request_GetPreference_FieldNumber_Key = 1,
+};
+
+@interface ITMPreferencesRequest_Request_GetPreference : GPBMessage
+
+@property(nonatomic, readwrite, copy, null_resettable) NSString *key;
+/** Test to see if @c key has been set. */
+@property(nonatomic, readwrite) BOOL hasKey;
+
+@end
+
+#pragma mark - ITMPreferencesRequest_Request_SetDefaultProfile
+
+typedef GPB_ENUM(ITMPreferencesRequest_Request_SetDefaultProfile_FieldNumber) {
+  ITMPreferencesRequest_Request_SetDefaultProfile_FieldNumber_Guid = 1,
+};
+
+@interface ITMPreferencesRequest_Request_SetDefaultProfile : GPBMessage
+
+@property(nonatomic, readwrite, copy, null_resettable) NSString *guid;
+/** Test to see if @c guid has been set. */
+@property(nonatomic, readwrite) BOOL hasGuid;
+
+@end
+
+#pragma mark - ITMPreferencesResponse
+
+typedef GPB_ENUM(ITMPreferencesResponse_FieldNumber) {
+  ITMPreferencesResponse_FieldNumber_ResultsArray = 1,
+};
+
+@interface ITMPreferencesResponse : GPBMessage
+
+@property(nonatomic, readwrite, strong, null_resettable) NSMutableArray<ITMPreferencesResponse_Result*> *resultsArray;
+/** The number of items in @c resultsArray without causing the array to be created. */
+@property(nonatomic, readonly) NSUInteger resultsArray_Count;
+
+@end
+
+#pragma mark - ITMPreferencesResponse_Result
+
+typedef GPB_ENUM(ITMPreferencesResponse_Result_FieldNumber) {
+  ITMPreferencesResponse_Result_FieldNumber_UnrecognizedRequest = 1,
+  ITMPreferencesResponse_Result_FieldNumber_SetPreferenceResult = 2,
+  ITMPreferencesResponse_Result_FieldNumber_GetPreferenceResult = 3,
+  ITMPreferencesResponse_Result_FieldNumber_SetDefaultProfileResult = 4,
+};
+
+typedef GPB_ENUM(ITMPreferencesResponse_Result_Result_OneOfCase) {
+  ITMPreferencesResponse_Result_Result_OneOfCase_GPBUnsetOneOfCase = 0,
+  ITMPreferencesResponse_Result_Result_OneOfCase_UnrecognizedRequest = 1,
+  ITMPreferencesResponse_Result_Result_OneOfCase_SetPreferenceResult = 2,
+  ITMPreferencesResponse_Result_Result_OneOfCase_GetPreferenceResult = 3,
+  ITMPreferencesResponse_Result_Result_OneOfCase_SetDefaultProfileResult = 4,
+};
+
+@interface ITMPreferencesResponse_Result : GPBMessage
+
+@property(nonatomic, readonly) ITMPreferencesResponse_Result_Result_OneOfCase resultOneOfCase;
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMPreferencesResponse_Result_UnrecognizedResult *unrecognizedRequest;
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMPreferencesResponse_Result_SetPreferenceResult *setPreferenceResult;
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMPreferencesResponse_Result_GetPreferenceResult *getPreferenceResult;
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMPreferencesResponse_Result_SetDefaultProfileResult *setDefaultProfileResult;
+
+@end
+
+/**
+ * Clears whatever value was set for the oneof 'result'.
+ **/
+void ITMPreferencesResponse_Result_ClearResultOneOfCase(ITMPreferencesResponse_Result *message);
+
+#pragma mark - ITMPreferencesResponse_Result_SetPreferenceResult
+
+typedef GPB_ENUM(ITMPreferencesResponse_Result_SetPreferenceResult_FieldNumber) {
+  ITMPreferencesResponse_Result_SetPreferenceResult_FieldNumber_Status = 1,
+};
+
+@interface ITMPreferencesResponse_Result_SetPreferenceResult : GPBMessage
+
+@property(nonatomic, readwrite) ITMPreferencesResponse_Result_SetPreferenceResult_Status status;
+
+@property(nonatomic, readwrite) BOOL hasStatus;
+@end
+
+#pragma mark - ITMPreferencesResponse_Result_GetPreferenceResult
+
+typedef GPB_ENUM(ITMPreferencesResponse_Result_GetPreferenceResult_FieldNumber) {
+  ITMPreferencesResponse_Result_GetPreferenceResult_FieldNumber_JsonValue = 1,
+};
+
+@interface ITMPreferencesResponse_Result_GetPreferenceResult : GPBMessage
+
+/** Will be unset if no value assigned. Will always be set if there is a default value. */
+@property(nonatomic, readwrite, copy, null_resettable) NSString *jsonValue;
+/** Test to see if @c jsonValue has been set. */
+@property(nonatomic, readwrite) BOOL hasJsonValue;
+
+@end
+
+#pragma mark - ITMPreferencesResponse_Result_SetDefaultProfileResult
+
+typedef GPB_ENUM(ITMPreferencesResponse_Result_SetDefaultProfileResult_FieldNumber) {
+  ITMPreferencesResponse_Result_SetDefaultProfileResult_FieldNumber_Status = 1,
+};
+
+@interface ITMPreferencesResponse_Result_SetDefaultProfileResult : GPBMessage
+
+@property(nonatomic, readwrite) ITMPreferencesResponse_Result_SetDefaultProfileResult_Status status;
+
+@property(nonatomic, readwrite) BOOL hasStatus;
+@end
+
+#pragma mark - ITMPreferencesResponse_Result_UnrecognizedResult
+
+@interface ITMPreferencesResponse_Result_UnrecognizedResult : GPBMessage
+
+@end
 
 #pragma mark - ITMReorderTabsRequest
 
@@ -1032,6 +1276,7 @@ typedef GPB_ENUM(ITMTmuxRequest_FieldNumber) {
   ITMTmuxRequest_FieldNumber_ListConnections = 1,
   ITMTmuxRequest_FieldNumber_SendCommand = 2,
   ITMTmuxRequest_FieldNumber_SetWindowVisible = 3,
+  ITMTmuxRequest_FieldNumber_CreateWindow = 4,
 };
 
 typedef GPB_ENUM(ITMTmuxRequest_Payload_OneOfCase) {
@@ -1039,6 +1284,7 @@ typedef GPB_ENUM(ITMTmuxRequest_Payload_OneOfCase) {
   ITMTmuxRequest_Payload_OneOfCase_ListConnections = 1,
   ITMTmuxRequest_Payload_OneOfCase_SendCommand = 2,
   ITMTmuxRequest_Payload_OneOfCase_SetWindowVisible = 3,
+  ITMTmuxRequest_Payload_OneOfCase_CreateWindow = 4,
 };
 
 @interface ITMTmuxRequest : GPBMessage
@@ -1050,6 +1296,8 @@ typedef GPB_ENUM(ITMTmuxRequest_Payload_OneOfCase) {
 @property(nonatomic, readwrite, strong, null_resettable) ITMTmuxRequest_SendCommand *sendCommand;
 
 @property(nonatomic, readwrite, strong, null_resettable) ITMTmuxRequest_SetWindowVisible *setWindowVisible;
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMTmuxRequest_CreateWindow *createWindow;
 
 @end
 
@@ -1106,6 +1354,25 @@ typedef GPB_ENUM(ITMTmuxRequest_SetWindowVisible_FieldNumber) {
 @property(nonatomic, readwrite) BOOL hasVisible;
 @end
 
+#pragma mark - ITMTmuxRequest_CreateWindow
+
+typedef GPB_ENUM(ITMTmuxRequest_CreateWindow_FieldNumber) {
+  ITMTmuxRequest_CreateWindow_FieldNumber_ConnectionId = 1,
+  ITMTmuxRequest_CreateWindow_FieldNumber_Affinity = 2,
+};
+
+@interface ITMTmuxRequest_CreateWindow : GPBMessage
+
+@property(nonatomic, readwrite, copy, null_resettable) NSString *connectionId;
+/** Test to see if @c connectionId has been set. */
+@property(nonatomic, readwrite) BOOL hasConnectionId;
+
+@property(nonatomic, readwrite, copy, null_resettable) NSString *affinity;
+/** Test to see if @c affinity has been set. */
+@property(nonatomic, readwrite) BOOL hasAffinity;
+
+@end
+
 #pragma mark - ITMTmuxResponse
 
 typedef GPB_ENUM(ITMTmuxResponse_FieldNumber) {
@@ -1113,6 +1380,7 @@ typedef GPB_ENUM(ITMTmuxResponse_FieldNumber) {
   ITMTmuxResponse_FieldNumber_SendCommand = 2,
   ITMTmuxResponse_FieldNumber_SetWindowVisible = 3,
   ITMTmuxResponse_FieldNumber_Status = 4,
+  ITMTmuxResponse_FieldNumber_CreateWindow = 5,
 };
 
 typedef GPB_ENUM(ITMTmuxResponse_Payload_OneOfCase) {
@@ -1120,6 +1388,7 @@ typedef GPB_ENUM(ITMTmuxResponse_Payload_OneOfCase) {
   ITMTmuxResponse_Payload_OneOfCase_ListConnections = 1,
   ITMTmuxResponse_Payload_OneOfCase_SendCommand = 2,
   ITMTmuxResponse_Payload_OneOfCase_SetWindowVisible = 3,
+  ITMTmuxResponse_Payload_OneOfCase_CreateWindow = 5,
 };
 
 @interface ITMTmuxResponse : GPBMessage
@@ -1131,6 +1400,8 @@ typedef GPB_ENUM(ITMTmuxResponse_Payload_OneOfCase) {
 @property(nonatomic, readwrite, strong, null_resettable) ITMTmuxResponse_SendCommand *sendCommand;
 
 @property(nonatomic, readwrite, strong, null_resettable) ITMTmuxResponse_SetWindowVisible *setWindowVisible;
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMTmuxResponse_CreateWindow *createWindow;
 
 @property(nonatomic, readwrite) ITMTmuxResponse_Status status;
 
@@ -1193,6 +1464,21 @@ typedef GPB_ENUM(ITMTmuxResponse_SendCommand_FieldNumber) {
 #pragma mark - ITMTmuxResponse_SetWindowVisible
 
 @interface ITMTmuxResponse_SetWindowVisible : GPBMessage
+
+@end
+
+#pragma mark - ITMTmuxResponse_CreateWindow
+
+typedef GPB_ENUM(ITMTmuxResponse_CreateWindow_FieldNumber) {
+  ITMTmuxResponse_CreateWindow_FieldNumber_TabId = 1,
+};
+
+@interface ITMTmuxResponse_CreateWindow : GPBMessage
+
+/** This is an iTerm2 tab ID. */
+@property(nonatomic, readwrite, copy, null_resettable) NSString *tabId;
+/** Test to see if @c tabId has been set. */
+@property(nonatomic, readwrite) BOOL hasTabId;
 
 @end
 
@@ -3282,6 +3568,7 @@ typedef GPB_ENUM(ITMListSessionsResponse_Window_FieldNumber) {
   ITMListSessionsResponse_Window_FieldNumber_TabsArray = 1,
   ITMListSessionsResponse_Window_FieldNumber_WindowId = 2,
   ITMListSessionsResponse_Window_FieldNumber_Frame = 3,
+  ITMListSessionsResponse_Window_FieldNumber_Number = 4,
 };
 
 @interface ITMListSessionsResponse_Window : GPBMessage
@@ -3298,6 +3585,9 @@ typedef GPB_ENUM(ITMListSessionsResponse_Window_FieldNumber) {
 /** Test to see if @c frame has been set. */
 @property(nonatomic, readwrite) BOOL hasFrame;
 
+@property(nonatomic, readwrite) int32_t number;
+
+@property(nonatomic, readwrite) BOOL hasNumber;
 @end
 
 #pragma mark - ITMListSessionsResponse_Tab
@@ -3306,6 +3596,7 @@ typedef GPB_ENUM(ITMListSessionsResponse_Tab_FieldNumber) {
   ITMListSessionsResponse_Tab_FieldNumber_TabId = 2,
   ITMListSessionsResponse_Tab_FieldNumber_Root = 3,
   ITMListSessionsResponse_Tab_FieldNumber_TmuxWindowId = 4,
+  ITMListSessionsResponse_Tab_FieldNumber_TmuxConnectionId = 5,
 };
 
 @interface ITMListSessionsResponse_Tab : GPBMessage
@@ -3321,6 +3612,10 @@ typedef GPB_ENUM(ITMListSessionsResponse_Tab_FieldNumber) {
 @property(nonatomic, readwrite, copy, null_resettable) NSString *tmuxWindowId;
 /** Test to see if @c tmuxWindowId has been set. */
 @property(nonatomic, readwrite) BOOL hasTmuxWindowId;
+
+@property(nonatomic, readwrite, copy, null_resettable) NSString *tmuxConnectionId;
+/** Test to see if @c tmuxConnectionId has been set. */
+@property(nonatomic, readwrite) BOOL hasTmuxConnectionId;
 
 @end
 

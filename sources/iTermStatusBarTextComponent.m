@@ -7,6 +7,7 @@
 
 #import "iTermStatusBarTextComponent.h"
 
+#import "DebugLogging.h"
 #import "iTermStatusBarSetupKnobsViewController.h"
 #import "iTermTuple.h"
 #import "NSArray+iTerm.h"
@@ -42,6 +43,7 @@ static NSString *const iTermStatusBarTextComponentTextColorKey = @"text: text co
 
 - (NSTextField *)newTextField {
     NSTextField *textField = [[NSTextField alloc] initWithFrame:NSZeroRect];
+    textField.font = [NSFont fontWithName:@"Menlo" size:12];
     textField.drawsBackground = NO;
     textField.bordered = NO;
     textField.editable = NO;
@@ -67,14 +69,19 @@ static NSString *const iTermStatusBarTextComponentTextColorKey = @"text: text co
 
 - (BOOL)shouldUpdateValue:(NSString *)proposed inField:(NSTextField *)textField {
     const BOOL textFieldHasString = textField.stringValue.length > 0;
-    const BOOL iHaveString = proposed != nil;
+    const BOOL iHaveString = proposed.length > 0;
 
     if (textFieldHasString != iHaveString) {
+        DLog(@"%@ updating because nilness changed. textfield=%@ proposed=%@", self, textField.stringValue, proposed);
         return YES;
     }
     if (textFieldHasString || iHaveString) {
-        return !([NSObject object:textField.stringValue isEqualToObject:proposed] &&
-                 [NSObject object:textField.textColor isEqualToObject:self.textColor]);
+        BOOL result = !([NSObject object:textField.stringValue isEqualToObject:proposed] &&
+                        [NSObject object:textField.textColor isEqualToObject:self.textColor]);
+        if (result) {
+            DLog(@"%@ updating because %@ != %@", self, textField.stringValue, proposed);
+        }
+        return result;
     }
     
     return NO;
@@ -93,7 +100,6 @@ static NSString *const iTermStatusBarTextComponentTextColorKey = @"text: text co
     }
 
     textField.stringValue = proposed ?: @"";
-    textField.alignment = NSTextAlignmentLeft;
     textField.textColor = self.textColor;
 
     [textField sizeToFit];
@@ -143,6 +149,9 @@ static NSString *const iTermStatusBarTextComponentTextColorKey = @"text: text co
 
 - (CGFloat)statusBarComponentPreferredWidth {
     NSString *longest = [self longestStringValue];
+    if (!longest) {
+        return 0;
+    }
     return [self widthForString:longest];
 }
 
@@ -159,7 +168,6 @@ static NSString *const iTermStatusBarTextComponentTextColorKey = @"text: text co
         _measuringField = [self newTextField];
     }
     _measuringField.stringValue = string;
-    _measuringField.alignment = NSTextAlignmentLeft;
     _measuringField.textColor = self.textColor;
     [_measuringField sizeToFit];
     return [_measuringField frame].size.width;

@@ -58,6 +58,10 @@
 // May reorder the whole array.
 - (NSArray<ObjectType> *)arrayByRemovingDuplicates;
 
+// Removes consecutive duplicates. Is stable.
+- (NSArray<ObjectType> *)uniq;
+- (NSArray<ObjectType> *)uniqWithComparator:(BOOL (^)(ObjectType obj1, ObjectType obj2))block;
+
 // This must be an array of NSNumber*s with 32-bit int values.
 // If self is @[ 1, 18 ] the output is @"0x1 0x12"
 - (NSString *)numbersAsHexStrings;
@@ -91,6 +95,7 @@
 
 - (ObjectType)maxWithBlock:(NSComparisonResult (^)(ObjectType obj1, ObjectType obj2))block;
 - (ObjectType)minWithBlock:(NSComparisonResult (^)(ObjectType obj1, ObjectType obj2))block;
+- (NSArray<ObjectType> *)it_arrayByDroppingLastN:(NSUInteger)n;
 
 @end
 

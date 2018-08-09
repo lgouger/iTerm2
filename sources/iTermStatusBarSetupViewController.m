@@ -9,10 +9,15 @@
 
 #import "iTermAPIHelper.h"
 #import "iTermStatusBarComponent.h"
+#import "iTermStatusBarCPUUtilizationComponent.h"
 #import "iTermStatusBarClockComponent.h"
 #import "iTermStatusBarFixedSpacerComponent.h"
 #import "iTermStatusBarFunctionCallComponent.h"
+#import "iTermStatusBarGitComponent.h"
+#import "iTermStatusBarGraphicComponent.h"
 #import "iTermStatusBarJobComponent.h"
+#import "iTermStatusBarMemoryUtilizationComponent.h"
+#import "iTermStatusBarNetworkUtilizationComponent.h"
 #import "iTermStatusBarRPCProvidedTextComponent.h"
 #import "iTermStatusBarSearchFieldComponent.h"
 #import "iTermStatusBarSpringComponent.h"
@@ -56,16 +61,21 @@ NS_ASSUME_NONNULL_BEGIN
 }
 
 - (void)awakeFromNib {
-    NSArray<Class> *classes = @[ [iTermStatusBarSwiftyStringComponent class],
+    NSArray<Class> *classes = @[
+                                 [iTermStatusBarSwiftyStringComponent class],
                                  [iTermStatusBarFunctionCallComponent class],
                                  [iTermStatusBarFixedSpacerComponent class],
                                  [iTermStatusBarSpringComponent class],
                                  [iTermStatusBarClockComponent class],
+                                 [iTermStatusBarGitComponent class],
                                  [iTermStatusBarHostnameComponent class],
+                                 [iTermStatusBarMemoryUtilizationComponent class],
+                                 [iTermStatusBarNetworkUtilizationComponent class],
                                  [iTermStatusBarUsernameComponent class],
                                  [iTermStatusBarWorkingDirectoryComponent class],
                                  [iTermStatusBarSearchFieldComponent class],
-                                 [iTermStatusBarJobComponent class] ];
+                                 [iTermStatusBarJobComponent class],
+                                 [iTermStatusBarCPUUtilizationComponent class] ];
     _elements = [classes mapWithBlock:^id(Class theClass) {
         iTermStatusBarBuiltInComponentFactory *factory =
             [[iTermStatusBarBuiltInComponentFactory alloc] initWithClass:theClass];
