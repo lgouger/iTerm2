@@ -31,6 +31,7 @@ NS_CLASS_AVAILABLE(10_11, NA)
 // This is a "frame" cursor, as seen when the view does not have focus.
 @property (nonatomic) BOOL frameOnly;
 @property (nonatomic) BOOL copyMode;
+@property (nonatomic) BOOL password;
 @property (nonatomic) BOOL copyModeCursorSelecting;
 @property (nonatomic) VT100GridCoord copyModeCursorCoord;
 @end
@@ -140,13 +141,9 @@ NS_CLASS_AVAILABLE(10_11, NA)
 
 - (void)setCellSize:(CGSize)cellSize
 cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
+          glyphSize:(CGSize)glyphSize
            gridSize:(VT100GridSize)gridSize
               scale:(CGFloat)scale;
-
-// Draw and return after the GPU's completion callback is run.
-// enableSetNeedsDisplay should be NO.
-// Returns YES on success, NO if resources were insufficient
-- (BOOL)drawSynchronouslyInView:(MTKView *)view;
 
 // Draw and return immediately, calling completion block after GPU's completion
 // block is called.

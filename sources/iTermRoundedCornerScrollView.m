@@ -27,10 +27,10 @@
 }
 
 - (void)initializeRoundedCornerScrollView {
-  self.wantsLayer = YES;
-  [self makeBackingLayer];
-  self.layer.cornerRadius = 4;
-  self.borderType = NSNoBorder;
+    self.wantsLayer = YES;
+    [self makeBackingLayer];
+    self.layer.cornerRadius = 4;
+    self.borderType = NSNoBorder;
 }
 
 @end

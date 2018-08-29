@@ -22,7 +22,6 @@ NSString *const kPSMModifierChangedNotification = @"kPSMModifierChangedNotificat
 NSString *const kPSMTabModifierKey = @"TabModifier";
 NSString *const PSMTabDragDidEndNotification = @"PSMTabDragDidEndNotification";
 NSString *const PSMTabDragDidBeginNotification = @"PSMTabDragDidBeginNotification";
-const CGFloat kPSMTabBarControlHeight = 24;
 const CGFloat kSPMTabBarCellInternalXMargin = 6;
 
 const CGFloat kPSMTabBarCellPadding = 4;
@@ -38,6 +37,13 @@ const NSInteger kPSMIsNotBeingResized = -1;
 
 // Value used in _currentStep when a resizing operation has just been started
 const NSInteger kPSMStartResizeAnimation = 0;
+
+PSMTabBarControlOptionKey PSMTabBarControlOptionColoredSelectedTabOutlineStrength = @"PSMTabBarControlOptionColoredSelectedTabOutlineStrength";
+PSMTabBarControlOptionKey PSMTabBarControlOptionMinimalStyleBackgroundColorDifference =
+    @"PSMTabBarControlOptionMinimalStyleBackgroundColorDifference";
+PSMTabBarControlOptionKey PSMTabBarControlOptionColoredMinimalOutlineStrength =
+    @"PSMTabBarControlOptionColoredMinimalOutlineStrength";
+PSMTabBarControlOptionKey PSMTabBarControlOptionColoredUnselectedTabTextProminence = @"PSMTabBarControlOptionColoredUnselectedTabTextProminence";
 
 @interface PSMTabBarControl ()<PSMTabBarControlProtocol>
 @end
@@ -97,7 +103,7 @@ const NSInteger kPSMStartResizeAnimation = 0;
     aRect.origin.x = [_style leftMarginForTabBarControl];
     aRect.origin.y = 0.0;
     aRect.size.width = [self availableCellWidth];
-    aRect.size.height = kPSMTabBarControlHeight;
+    aRect.size.height = self.height;
     return aRect;
 }
 
@@ -110,6 +116,8 @@ const NSInteger kPSMStartResizeAnimation = 0;
         // Initialization
         _cells = [[NSMutableArray alloc] initWithCapacity:10];
         _animationTimer = nil;
+        const CGFloat defaultHeight = 24;
+        _height = defaultHeight;
 
         // default config
         _currentStep = kPSMIsNotBeingResized;
@@ -429,8 +437,8 @@ const NSInteger kPSMStartResizeAnimation = 0;
         if (lastCell.isInOverflowMenu) {
             return YES;
         }
-        const CGFloat minY = NSMinY(lastCell.frame);
-        return point.y < minY;
+        const CGFloat maxY = NSMaxY(lastCell.frame);
+        return point.y < maxY;
     }
 }
 
@@ -1165,7 +1173,8 @@ const NSInteger kPSMStartResizeAnimation = 0;
                 overflowMenu = [[[NSMenu alloc] initWithTitle:@"TITLE"] autorelease];
                 [overflowMenu insertItemWithTitle:@"FIRST" action:nil keyEquivalent:@"" atIndex:0]; // Because the overflowPupUpButton is a pull down menu
             }
-            menuItem = [[NSMenuItem alloc] initWithTitle:[[cell attributedStringValue] string] action:@selector(overflowMenuAction:) keyEquivalent:@""];
+            NSString *title = [[cell attributedStringValue] string] ?: @"";
+            menuItem = [[NSMenuItem alloc] initWithTitle:title action:@selector(overflowMenuAction:) keyEquivalent:@""];
             [menuItem setTarget:self];
             [menuItem setRepresentedObject:[cell representedObject]];
             [cell setIsInOverflowMenu:YES];
@@ -1195,14 +1204,14 @@ const NSInteger kPSMStartResizeAnimation = 0;
     NSRect cellRect;
     int i;
 
-    cellRect.size.height = kPSMTabBarControlHeight;
+    cellRect.size.height = self.height;
     cellRect.size.width = [_style rightMarginForTabBarControl];
     if ([self orientation] == PSMTabBarHorizontalOrientation) {
         cellRect.origin.y = 0;
         cellRect.origin.x = [self frame].size.width - [_style rightMarginForTabBarControl] + (_resizeAreaCompensation ? -_resizeAreaCompensation : 1);
     } else {
         cellRect.origin.x = 0;
-        cellRect.origin.y = [self frame].size.height - kPSMTabBarControlHeight;
+        cellRect.origin.y = [self frame].size.height - self.height;
         cellRect.size.width = [self frame].size.width;
     }
 

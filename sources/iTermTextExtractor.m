@@ -743,8 +743,11 @@ const NSInteger kLongMaximumWordLength = 100000;
         if (actionRequired) {
             // There is no match when using word selection and rangeForWordAt:maximumLength: can be slow.
             *range = VT100GridWindowedRangeMake(VT100GridCoordRangeMake(-1, -1, -1, -1), -1, -1);
-        } else {
+        } else if (location.y >= 0) {
             *range = [self rangeForWordAt:location maximumLength:kReasonableMaximumWordLength];
+        } else {
+            *range = VT100GridWindowedRangeMake(VT100GridCoordRangeMake(-1, -1, -1, -1),
+                                                _logicalWindow.location, _logicalWindow.length);
         }
         return nil;
     }
@@ -1265,16 +1268,12 @@ const NSInteger kLongMaximumWordLength = 100000;
                                   iTermImageInfo *imageInfo = GetImageInfo(theChar.code);
                                   NSImage *image = imageInfo.image.images.firstObject;
                                   if (image) {
-                                      if (IsElCapitanOrLater()) {
-                                          copiedImage = YES;
-                                          NSTextAttachment *textAttachment = [[[NSTextAttachment alloc] init] autorelease];
-                                          ITERM_IGNORE_PARTIAL_BEGIN
-                                          textAttachment.image = imageInfo.image.images.firstObject;
-                                          ITERM_IGNORE_PARTIAL_END
-                                          NSAttributedString *attributedStringWithAttachment = [NSAttributedString attributedStringWithAttachment:textAttachment];
-                                          [result appendAttributedString:attributedStringWithAttachment];
-                                          [coords addObject:[NSValue valueWithGridCoord:coord]];
-                                      }
+                                      copiedImage = YES;
+                                      NSTextAttachment *textAttachment = [[[NSTextAttachment alloc] init] autorelease];
+                                      textAttachment.image = imageInfo.image.images.firstObject;
+                                      NSAttributedString *attributedStringWithAttachment = [NSAttributedString attributedStringWithAttachment:textAttachment];
+                                      [result appendAttributedString:attributedStringWithAttachment];
+                                      [coords addObject:[NSValue valueWithGridCoord:coord]];
                                   }
                               }
                           } else if (theChar.code == TAB_FILLER && !theChar.complexChar) {

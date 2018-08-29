@@ -9,9 +9,12 @@
 #import "SessionTitleView.h"
 #import "iTermPreferences.h"
 #import "iTermStatusBarViewController.h"
+#import "NSAppearance+iTerm.h"
 #import "NSImage+iTerm.h"
 #import "NSStringITerm.h"
+#import "PSMMinimalTabStyle.h"
 #import "PSMTabBarControl.h"
+#import "PTYWindow.h"
 
 const double kBottomMargin = 0;
 static const CGFloat kButtonSize = 17;
@@ -38,6 +41,7 @@ static const CGFloat kButtonSize = 17;
 @synthesize title = title_;
 @synthesize delegate = delegate_;
 @synthesize dimmingAmount = dimmingAmount_;
+@synthesize statusBarViewController = _statusBarViewController;
 
 - (instancetype)initWithFrame:(NSRect)frame {
     self = [super initWithFrame:frame];
@@ -45,7 +49,7 @@ static const CGFloat kButtonSize = 17;
         const double kMargin = 5;
         double x = kMargin;
 
-        NSImage *closeImage = [NSImage imageNamed:@"closebutton"];
+        NSImage *closeImage = [NSImage it_imageNamed:@"closebutton" forClass:self.class];
         closeButton_ = [[NoFirstResponderButton alloc] initWithFrame:NSMakeRect(x,
                                                                                 (frame.size.height - kButtonSize) / 2,
                                                                                 kButtonSize,
@@ -65,7 +69,7 @@ static const CGFloat kButtonSize = 17;
         // some of it is clipped.
         menuButton_ = [[NSButton alloc] initWithFrame:NSMakeRect(0, 0, 14, 14)];
         menuButton_.bordered = NO;
-        menuButton_.image = [NSImage imageNamed:@"Hamburger"];
+        menuButton_.image = [NSImage it_imageNamed:@"Hamburger" forClass:self.class];
         menuButton_.imagePosition = NSImageOnly;
         menuButton_.target = self;
         menuButton_.action = @selector(openMenu:);
@@ -148,113 +152,14 @@ static const CGFloat kButtonSize = 17;
     [delegate_ close];
 }
 
-+ (NSColor *)colorByDimmingColor:(NSColor *)origColor byDimmingAmount:(double)dimmingAmount {
-    NSColor *color = [origColor colorUsingColorSpaceName:NSCalibratedRGBColorSpace];
-    double r = [color redComponent];
-    double g = [color greenComponent];
-    double b = [color blueComponent];
-    double alpha = 1 - dimmingAmount;
-
-    // Biases the input color by 1-alpha toward gray of (basis, basis, basis).
-    double basis = 0.15;
-
-    r = alpha * r + (1 - alpha) * basis;
-    g = alpha * g + (1 - alpha) * basis;
-    b = alpha * b + (1 - alpha) * basis;
-
-    return [NSColor colorWithCalibratedRed:r green:g blue:b alpha:1];
-}
-
-- (NSColor *)dimmedBackgroundColor {
-    iTermPreferencesTabStyle preferredStyle = [iTermPreferences intForKey:kPreferenceKeyTabStyle];
-    CGFloat whiteLevel = 0;
-    switch (preferredStyle) {
-        case TAB_STYLE_LIGHT:
-            if (![delegate_ sessionTitleViewIsFirstResponder]) {
-                // Not selected
-                whiteLevel = 0.58;
-            } else {
-                // selected
-                whiteLevel = 0.70;
-            }
-            break;
-        case TAB_STYLE_LIGHT_HIGH_CONTRAST:
-            if (![delegate_ sessionTitleViewIsFirstResponder]) {
-                // Not selected
-                whiteLevel = 0.68;
-            } else {
-                // selected
-                whiteLevel = 0.80;
-            }
-            break;
-        case TAB_STYLE_DARK:
-            if (![delegate_ sessionTitleViewIsFirstResponder]) {
-                // Not selected
-                whiteLevel = 0.18;
-            } else {
-                // selected
-                whiteLevel = 0.27;
-            }
-            break;
-        case TAB_STYLE_DARK_HIGH_CONTRAST:
-            if (![delegate_ sessionTitleViewIsFirstResponder]) {
-                // Not selected
-                whiteLevel = 0.08;
-            } else {
-                // selected
-                whiteLevel = 0.17;
-            }
-            break;
-    }
-
-    return [NSColor colorWithCalibratedWhite:whiteLevel alpha:1];
-}
-
 - (void)drawRect:(NSRect)dirtyRect {
-    NSColor *tabColor = delegate_.tabColor;
-    if (tabColor) {
-        CGFloat hue = tabColor.hueComponent;
-        CGFloat saturation = tabColor.saturationComponent;
-        CGFloat brightness = tabColor.brightnessComponent;
-        iTermPreferencesTabStyle preferredStyle = [iTermPreferences intForKey:kPreferenceKeyTabStyle];
-        switch (preferredStyle) {
-            case TAB_STYLE_LIGHT:
-                tabColor = [NSColor colorWithCalibratedHue:hue
-                                                saturation:saturation * .5
-                                                brightness:MAX(0.7, brightness)
-                                                     alpha:1];
-                break;
-            case TAB_STYLE_LIGHT_HIGH_CONTRAST:
-                tabColor = [NSColor colorWithCalibratedHue:hue
-                                                saturation:saturation * .25
-                                                brightness:MAX(0.85, brightness)
-                                                     alpha:1];
-                break;
-            case TAB_STYLE_DARK:
-                tabColor = [NSColor colorWithCalibratedHue:hue
-                                                saturation:saturation * .75
-                                                brightness:MIN(0.3, brightness)
-                                                     alpha:1];
-                break;
-            case TAB_STYLE_DARK_HIGH_CONTRAST:
-                tabColor = [NSColor colorWithCalibratedHue:hue
-                                                saturation:saturation * .95
-                                                brightness:MIN(0.15, brightness)
-                                                     alpha:1];
-                break;
-        }
-        if ([delegate_ sessionTitleViewIsFirstResponder]) {
-            [tabColor set];
-        } else {
-            [[SessionTitleView colorByDimmingColor:tabColor byDimmingAmount:0.3] set];
-        }
-    } else {
-        [[self dimmedBackgroundColor] set];
-    }
+    [[self.delegate sessionTitleViewBackgroundColor] set];
     NSRectFill(dirtyRect);
 
-    [[NSColor blackColor] set];
-    NSRectFill(NSMakeRect(dirtyRect.origin.x, 0, dirtyRect.size.width, 1));
+    if (!self.window.ptyWindow.it_terminalWindowUseMinimalStyle) {
+        [[NSColor blackColor] set];
+        NSRectFill(NSMakeRect(dirtyRect.origin.x, 0, dirtyRect.size.width, 1));
+    }
 
     [super drawRect:dirtyRect];
 }
@@ -302,12 +207,27 @@ static const CGFloat kButtonSize = 17;
 {
     dimmingAmount_ = value;
     [self updateTextColor];
+    [_statusBarViewController.view setNeedsDisplay:YES];
+}
+
+- (void)viewDidChangeEffectiveAppearance {
+    [super viewDidChangeEffectiveAppearance];
+    [self updateTextColor];
 }
 
 - (void)updateTextColor {
     CGFloat whiteLevel = 0;
     iTermPreferencesTabStyle preferredStyle = [iTermPreferences intForKey:kPreferenceKeyTabStyle];
-    switch (preferredStyle) {
+    if (self.window.ptyWindow.it_terminalWindowUseMinimalStyle) {
+        label_.textColor = self.window.ptyWindow.it_terminalWindowDecorationTextColor;
+        [self setNeedsDisplay:YES];
+        return;
+    }
+    switch ([self.effectiveAppearance it_tabStyle:preferredStyle]) {
+        case TAB_STYLE_AUTOMATIC:
+        case TAB_STYLE_MINIMAL:
+            assert(NO);
+            
         case TAB_STYLE_LIGHT:
             if (dimmingAmount_ > 0) {
                 // Not selected

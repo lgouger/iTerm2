@@ -386,6 +386,14 @@ static void SetCSITypeAndDefaultParameters(CSIParam *param, VT100Token *result) 
             result->type = VT100_WAIT;
             break;
 
+        case PACKED_CSI_COMMAND(0, '#', '|'):  // XTREPORTSGR
+            result->type = VT100CSI_XTREPORTSGR;
+            iTermParserSetCSIParameterIfDefault(param, 0, 1);
+            iTermParserSetCSIParameterIfDefault(param, 1, 1);
+            iTermParserSetCSIParameterIfDefault(param, 2, 1);
+            iTermParserSetCSIParameterIfDefault(param, 3, 1);
+            break;
+
         case 'D':       // Cursor Backward
             result->type = VT100CSI_CUB;
             iTermParserSetCSIParameterIfDefault(param, 0, 1);
@@ -425,6 +433,11 @@ static void SetCSITypeAndDefaultParameters(CSIParam *param, VT100Token *result) 
             result->type = VT100CSI_CUP;
             iTermParserSetCSIParameterIfDefault(param, 0, 1);
             iTermParserSetCSIParameterIfDefault(param, 1, 1);
+            break;
+
+        case 'I':
+            result->type = VT100CSI_CHT;
+            iTermParserSetCSIParameterIfDefault(param, 0, 1);
             break;
 
         case 'c':

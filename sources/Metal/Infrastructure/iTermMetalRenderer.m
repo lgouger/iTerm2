@@ -30,26 +30,20 @@ const NSInteger iTermMetalDriverMaximumNumberOfFramesInFlight = 3;
 }
 
 #if ENABLE_TRANSPARENT_METAL_WINDOWS
+
 + (instancetype)backgroundColorCompositing {
-    // What I want:
-    // If bg's alpha is 0, destination shows through exactly, alpha and all
-    // If bg's alpha is 1, obscure destination's RGB but preserve its alpha
-    // Destination alpha is always preserved.
-    // RGB are mixed per bg's alpha. bg=source
-    //
-    // RGB=S*Sa+D*(1-Sa)
-    //   A=Da
     iTermMetalBlending *blending = [[iTermMetalBlending alloc] init];
     blending.rgbBlendOperation = MTLBlendOperationAdd;
     blending.sourceRGBBlendFactor = MTLBlendFactorSourceAlpha;
     blending.destinationRGBBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
     
-    blending.alphaBlendOperation = MTLBlendOperationAdd;
-    blending.sourceAlphaBlendFactor = MTLBlendFactorZero;
-    blending.destinationAlphaBlendFactor = MTLBlendFactorOne;
+    blending.alphaBlendOperation = MTLBlendOperationMax;
+    blending.sourceAlphaBlendFactor = MTLBlendFactorSourceAlpha;
+    blending.destinationAlphaBlendFactor = MTLBlendFactorDestinationAlpha;
     
     return blending;
 }
+
 #endif
 
 - (instancetype)init {
@@ -398,7 +392,6 @@ const NSInteger iTermMetalDriverMaximumNumberOfFramesInFlight = 3;
     if (!image) {
         return nil;
     }
-
     NSRect imageRect = NSMakeRect(0, 0, image.size.width, image.size.height);
     CGImageRef imageRef = [image CGImageForProposedRect:&imageRect context:NULL hints:nil];
 
@@ -452,7 +445,9 @@ const NSInteger iTermMetalDriverMaximumNumberOfFramesInFlight = 3;
                       forTexture:texture];
 
     free(rawData);
-
+    if (texture) {
+        [context didAddTextureOfSize:texture.width * texture.height];
+    }
     return texture;
 }
 

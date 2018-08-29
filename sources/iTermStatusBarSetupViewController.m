@@ -11,6 +11,7 @@
 #import "iTermStatusBarComponent.h"
 #import "iTermStatusBarCPUUtilizationComponent.h"
 #import "iTermStatusBarClockComponent.h"
+#import "iTermStatusBarComposerComponent.h"
 #import "iTermStatusBarFixedSpacerComponent.h"
 #import "iTermStatusBarFunctionCallComponent.h"
 #import "iTermStatusBarGitComponent.h"
@@ -46,7 +47,7 @@ NS_ASSUME_NONNULL_BEGIN
 }
 
 - (nullable instancetype)initWithLayoutDictionary:(NSDictionary *)layoutDictionary {
-    self = [super initWithNibName:@"iTermStatusBarSetupViewController" bundle:nil];
+    self = [super initWithNibName:@"iTermStatusBarSetupViewController" bundle:[NSBundle bundleForClass:self.class]];
     if (self) {
         _initialLayout = [layoutDictionary copy];
     }
@@ -62,20 +63,27 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (void)awakeFromNib {
     NSArray<Class> *classes = @[
-                                 [iTermStatusBarSwiftyStringComponent class],
-                                 [iTermStatusBarFunctionCallComponent class],
-                                 [iTermStatusBarFixedSpacerComponent class],
-                                 [iTermStatusBarSpringComponent class],
-                                 [iTermStatusBarClockComponent class],
-                                 [iTermStatusBarGitComponent class],
-                                 [iTermStatusBarHostnameComponent class],
+                                 [iTermStatusBarCPUUtilizationComponent class],
                                  [iTermStatusBarMemoryUtilizationComponent class],
                                  [iTermStatusBarNetworkUtilizationComponent class],
+
+                                 [iTermStatusBarClockComponent class],
+
+                                 [iTermStatusBarGitComponent class],
+                                 [iTermStatusBarHostnameComponent class],
                                  [iTermStatusBarUsernameComponent class],
-                                 [iTermStatusBarWorkingDirectoryComponent class],
-                                 [iTermStatusBarSearchFieldComponent class],
                                  [iTermStatusBarJobComponent class],
-                                 [iTermStatusBarCPUUtilizationComponent class] ];
+                                 [iTermStatusBarWorkingDirectoryComponent class],
+
+                                 [iTermStatusBarSearchFieldComponent class],
+                                 [iTermStatusBarComposerComponent class],
+
+                                 [iTermStatusBarFixedSpacerComponent class],
+                                 [iTermStatusBarSpringComponent class],
+
+                                 [iTermStatusBarSwiftyStringComponent class],
+                                 [iTermStatusBarFunctionCallComponent class],
+                                 ];
     _elements = [classes mapWithBlock:^id(Class theClass) {
         iTermStatusBarBuiltInComponentFactory *factory =
             [[iTermStatusBarBuiltInComponentFactory alloc] initWithClass:theClass];
@@ -161,7 +169,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (NSSize)collectionView:(NSCollectionView *)collectionView
                   layout:(NSCollectionViewLayout*)collectionViewLayout
   sizeForItemAtIndexPath:(NSIndexPath *)indexPath {
-    iTermStatusBarSetupCollectionViewItem *item = [[iTermStatusBarSetupCollectionViewItem alloc] initWithNibName:@"iTermStatusBarSetupCollectionViewItem" bundle:nil];
+    iTermStatusBarSetupCollectionViewItem *item = [[iTermStatusBarSetupCollectionViewItem alloc] initWithNibName:@"iTermStatusBarSetupCollectionViewItem" bundle:[NSBundle bundleForClass:self.class]];
     [item view];
     [self initializeItem:item atIndexPath:indexPath];
     [item sizeToFit];

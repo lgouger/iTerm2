@@ -22,6 +22,7 @@ static NSString *const iTermStatusBarTextComponentTextColorKey = @"text: text co
 @implementation iTermStatusBarTextComponent {
     NSTextField *_textField;
     NSTextField *_measuringField;
+    NSString *_longestStringValue;
 }
 
 - (NSArray<iTermStatusBarComponentKnob *> *)statusBarComponentKnobs {
@@ -59,7 +60,7 @@ static NSString *const iTermStatusBarTextComponentTextColorKey = @"text: text co
 
 - (NSColor *)textColor {
     NSDictionary *knobValues = self.configuration[iTermStatusBarComponentConfigurationKeyKnobValues];
-    return [knobValues[iTermStatusBarTextComponentTextColorKey] colorValue];
+    return [knobValues[iTermStatusBarTextComponentTextColorKey] colorValue] ?: [self.delegate statusBarComponentDefaultTextColor];
 }
 
 - (NSColor *)backgroundColor {
@@ -88,6 +89,8 @@ static NSString *const iTermStatusBarTextComponentTextColorKey = @"text: text co
 }
 
 - (BOOL)setValueInField:(NSTextField *)textField compressed:(BOOL)compressed {
+    textField.textColor = self.textColor;
+
     NSString *proposed;
     if (compressed) {
         proposed = [self stringValueForCurrentWidth];
@@ -100,10 +103,14 @@ static NSString *const iTermStatusBarTextComponentTextColorKey = @"text: text co
     }
 
     textField.stringValue = proposed ?: @"";
-    textField.textColor = self.textColor;
 
     [textField sizeToFit];
     return YES;
+}
+
+- (void)setDelegate:(id<iTermStatusBarComponentDelegate>)delegate {
+    [super setDelegate:delegate];
+    _textField.textColor = self.textColor;
 }
 
 - (NSTextField *)textField {
@@ -115,10 +122,13 @@ static NSString *const iTermStatusBarTextComponentTextColorKey = @"text: text co
 }
 
 - (void)updateTextFieldIfNeeded {
-    if (![self setValueInField:_textField compressed:YES]) {
-        return;
+    [self setValueInField:_textField compressed:YES];
+
+    NSString *longest = self.longestStringValue ?: @"";
+    if (![longest isEqual:_longestStringValue]) {
+        _longestStringValue = longest;
+        [self.delegate statusBarComponentPreferredSizeDidChange:self];
     }
-    [self.delegate statusBarComponentPreferredSizeDidChange:self];
 }
 
 - (nullable NSString *)stringValueForCurrentWidth {

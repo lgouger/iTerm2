@@ -9,6 +9,7 @@
 #import "iTermSystemVersion.h"
 #import "iTermToolWrapper.h"
 #import "iTermToolbeltSplitView.h"
+#import "NSAppearance+iTerm.h"
 #import "NSArray+iTerm.h"
 #import "ToolCapturedOutputView.h"
 #import "ToolCommandHistoryView.h"
@@ -251,7 +252,11 @@ static NSString *const kDynamicToolURL = @"URL";
 
 - (void)drawRect:(NSRect)dirtyRect {
     NSColor *color = [NSColor colorWithCalibratedWhite:237.0/255.0 alpha:1];
-    switch ([iTermPreferences intForKey:kPreferenceKeyTabStyle]) {
+    switch ([self.effectiveAppearance it_tabStyle:[iTermPreferences intForKey:kPreferenceKeyTabStyle]]) {
+        case TAB_STYLE_AUTOMATIC:
+        case TAB_STYLE_MINIMAL:
+            assert(NO);
+            
         case TAB_STYLE_LIGHT:
         case TAB_STYLE_LIGHT_HIGH_CONTRAST:
             break;

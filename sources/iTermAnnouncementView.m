@@ -10,6 +10,7 @@
 #import "DebugLogging.h"
 #import "NSMutableAttributedString+iTerm.h"
 #import "NSStringITerm.h"
+#import "NSImage+iTerm.h"
 
 static const CGFloat kMargin = 8;
 NSString *const iTermWindowAppearanceDidChange = @"iTermWindowAppearanceDidChange";
@@ -81,6 +82,10 @@ NSString *const iTermWindowAppearanceDidChange = @"iTermWindowAppearanceDidChang
 - (instancetype)initWithFrame:(NSRect)frameRect {
     self = [super initWithFrame:frameRect];
     if (self) {
+        if (@available(macOS 10.14, *)) {
+            // This forces the button text to be dark. This view is always light regardless of theme.
+            self.appearance = [NSAppearance appearanceNamed:NSAppearanceNameVibrantLight];
+        }
         frameRect.size.height -= 10;
         frameRect.origin.y = 10;
         frameRect.origin.x = 0;
@@ -88,7 +93,7 @@ NSString *const iTermWindowAppearanceDidChange = @"iTermWindowAppearanceDidChang
         _internalView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
         [self addSubview:_internalView];
 
-        NSImage *closeImage = [NSImage imageNamed:@"closebutton"];
+        NSImage *closeImage = [NSImage it_imageNamed:@"closebutton" forClass:self.class];
         NSSize closeSize = closeImage.size;
         _buttonWidth = ceil(closeSize.width + kMargin);
         NSButton *closeButton = [[[NSButton alloc] initWithFrame:NSMakeRect(frameRect.size.width - _buttonWidth,
@@ -212,6 +217,9 @@ NSString *const iTermWindowAppearanceDidChange = @"iTermWindowAppearanceDidChang
 }
 
 - (void)updateAppearance {
+    if (@available(macOS 10.14, *)) {
+        return;
+    }
     if ([self.window.appearance.name isEqual:NSAppearanceNameVibrantDark]) {
         for (NSButton *button in _actionButtons) {
             button.appearance = [NSAppearance appearanceNamed:NSAppearanceNameVibrantLight];
@@ -232,7 +240,7 @@ NSString *const iTermWindowAppearanceDidChange = @"iTermWindowAppearanceDidChang
             iconString = @"⚠";  // Warning sign
             break;
         case kiTermAnnouncementViewStyleQuestion:
-            return [NSImage imageNamed:@"QuestionMarkSign"];
+            return [NSImage it_imageNamed:@"QuestionMarkSign" forClass:self.class];
     }
 
     NSFont *emojiFont = [NSFont fontWithName:@"Apple Color Emoji" size:18];

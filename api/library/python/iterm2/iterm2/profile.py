@@ -1,6 +1,13 @@
 """Provides classes for representing, querying, and modifying iTerm2 profiles."""
+import enum
 import iterm2.rpc
 import json
+
+class BackgroundImageMode(enum.Enum):
+    STRETCH = 0
+    TILE = 1
+    ASPECT_FILL = 2
+    ASPECT_FIT = 3
 
 class BadGUIDException(Exception):
     """Raised when a profile does not have a GUID or the GUID is unknown."""
@@ -340,11 +347,11 @@ class LocalWriteOnlyProfile:
         :param value: A float between 0 and 30"""
         return self._simple_set("Blur Radius", value)
 
-    def set_background_image_is_tiled(self, value):
-        """Sets whether the background image is tiled (true) or stretched (false)
+    def set_background_image_mode(self, value):
+        """Sets how the background image is drawn.
 
-        :param value: A bool"""
-        return self._simple_set("Background Image Is Tiled", value)
+        :param value: A `BackgroundImageMode`"""
+        return self._simple_set("Background Image Mode", value)
 
     def set_blend(self, value):
         """Sets how much the default background color gets blended with the background image.
@@ -1071,11 +1078,11 @@ class WriteOnlyProfile:
         :param value: A float between 0 and 30"""
         return await self._async_simple_set("Blur Radius", value)
 
-    async def async_set_background_image_is_tiled(self, value):
-        """Sets whether the background image is tiled (true) or stretched (false)
+    async def async_set_background_image_mode(self, value):
+        """Sets how the background iamge is draw.
 
-        :param value: A bool"""
-        return await self._async_simple_set("Background Image Is Tiled", value)
+        :param value: A `BackgroundImageMode`"""
+        return await self._async_simple_set("Background Image Mode", value)
 
     async def async_set_blend(self, value):
         """Sets how much the default background color gets blended with the background image.
@@ -1490,6 +1497,22 @@ class Profile(WriteOnlyProfile):
     USE_CUSTOM_COMMAND_ENABLED = "Yes"
     USE_CUSTOM_COMMAND_DISABLED = "No"
 
+    @staticmethod
+    async def async_get(connection, guids=None):
+        """Fetches all profiles with the specified GUIDs.
+
+        :param guids: The profiles to get, or if `None` then all will be returned.
+
+        :returns: A list of :class:`Profile` objects.
+        """
+        response = await iterm2.rpc.async_list_profiles(connection, guids, None)
+        profiles = []
+        for responseProfile in response.list_profiles_response.profiles:
+            profile = Profile(None, connection, responseProfile.properties)
+            profiles.append(profile)
+        return profiles
+
+
     def __init__(self, session_id, connection, profile_property_list):
         props = {}
         for prop in profile_property_list:
@@ -1885,11 +1908,11 @@ class Profile(WriteOnlyProfile):
         return self._simple_get("Blur Radius")
 
     @property
-    def background_image_is_tiled(self):
-        """Returns whether the background image is tiled (true) or stretched (false)
+    def background_image_mode(self):
+        """Returns how the background image is drawn
 
-        :returns: A bool"""
-        return self._simple_get("Background Image Is Tiled")
+        :returns: A `BackgroundImageMode`"""
+        return BackgroundImageMode(self._simple_get("Background Image Mode"))
 
     @property
     def blend(self):
@@ -2474,6 +2497,22 @@ class Color:
 
 class PartialProfile(Profile):
     """Represents a profile that has only a subset of fields available for reading."""
+
+    @staticmethod
+    async def async_get(connection, guids=None, properties=["Guid", "Name"]):
+        """Fetches a list of profiles.
+
+        :param properties: Lists the properties to fetch. Pass None for all.
+        :param guids: Lists GUIDs to list. Pass None for all profiles.
+
+        :returns: A list of :class:`PartialProfile` objects with only the specified properties set.
+        """
+        response = await iterm2.rpc.async_list_profiles(connection, guids, properties)
+        profiles = []
+        for responseProfile in response.list_profiles_response.profiles:
+            profile = iterm2.profile.PartialProfile(None, connection, responseProfile.properties)
+            profiles.append(profile)
+        return profiles
 
     def __init__(self, session_id, connection, profile_property_list):
         """Initializes a PartialProfile from a profile_property_list protobuf."""

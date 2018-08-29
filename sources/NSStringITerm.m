@@ -26,6 +26,7 @@
  */
 
 #import "DebugLogging.h"
+#import "iTermAdvancedSettingsModel.h"
 #import "iTermSwiftyStringParser.h"
 #import "iTermTuple.h"
 #import "iTermVariables.h"
@@ -68,6 +69,10 @@
 }
 
 + (NSString *)stringWithLongCharacter:(UTF32Char)longCharacter {
+    if (longCharacter <= 0xffff) {
+        unichar c = longCharacter;
+        return [self stringWithCharacters:&c length:1];
+    }
     UniChar c[2];
     CFStringGetSurrogatePairForLongCharacter(longCharacter, c);
     return [[[NSString alloc] initWithCharacters:c length:2] autorelease];
@@ -702,7 +707,6 @@ int decode_utf8_char(const unsigned char *datap,
                 // Handle URLs like *(http://example.com)
                 NSInteger lengthBefore = trimmedURLString.length;
                 trimmedURLString = [trimmedURLString stringByRemovingEnclosingPunctuationMarks];
-
                 if (trimmedURLString.length == lengthBefore) {
                     // Handle URLs like *http://example.com
                     trimmedURLString = [trimmedURLString substringFromIndex:1];
@@ -717,7 +721,6 @@ int decode_utf8_char(const unsigned char *datap,
     if (![trimmedURLString length]) {
         return NSMakeRange(NSNotFound, 0);
     }
-
 
     // Remove trailing punctuation.
     trimmedURLString = [trimmedURLString stringByRemovingTerminatingPunctuation];
@@ -745,21 +748,15 @@ int decode_utf8_char(const unsigned char *datap,
 }
 
 - (NSString *)stringByRemovingTerminatingPunctuation {
-    NSString *s = self;
-    NSArray *punctuationMarks = @[ @"!", @"?", @".", @",", @";", @":", @"...", @"…" ];
-    BOOL found;
-    do {
-        found = NO;
-        for (NSString *punctuationString in punctuationMarks) {
-            if ([s hasSuffix:punctuationString]) {
-                s = [s substringToIndex:s.length - 1];
-                found = YES;
-            }
-        }
-    } while (found);
-
-    return s;
+    NSCharacterSet *punctuationCharacterSet = [NSCharacterSet characterSetWithCharactersInString:[iTermAdvancedSettingsModel trailingPunctuationMarks]];
+    NSRange range = [self rangeOfCharacterFromSet:punctuationCharacterSet options:(NSBackwardsSearch | NSAnchoredSearch)];
+    if (range.length > 0 && range.location != NSNotFound) {
+        return [self substringToIndex:range.location];
+    } else {
+        return self;
+    }
 }
+
 
 - (NSString *)stringByEscapingForURL {
     static NSMutableCharacterSet *allowedCharacters;
@@ -1938,6 +1935,7 @@ static TECObjectRef CreateTECConverterForUTF8Variants(TextEncodingVariant varian
 
 - (NSString *)jsonEncodedString {
     NSMutableString *s = [NSMutableString stringWithString:self];
+    [s replaceOccurrencesOfString:@"\\" withString:@"\\\\" options:NSCaseInsensitiveSearch range:NSMakeRange(0, [s length])];
     [s replaceOccurrencesOfString:@"\"" withString:@"\\\"" options:NSCaseInsensitiveSearch range:NSMakeRange(0, [s length])];
     [s replaceOccurrencesOfString:@"/" withString:@"\\/" options:NSCaseInsensitiveSearch range:NSMakeRange(0, [s length])];
     [s replaceOccurrencesOfString:@"\n" withString:@"\\n" options:NSCaseInsensitiveSearch range:NSMakeRange(0, [s length])];

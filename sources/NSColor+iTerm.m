@@ -10,6 +10,7 @@
 
 #import "DebugLogging.h"
 #import "iTermPreferences.h"
+#import "NSAppearance+iTerm.h"
 
 // Constants for converting RGB to luma.
 static const double kRedComponentBrightness = 0.30;
@@ -319,9 +320,10 @@ CGFloat PerceivedBrightness(CGFloat r, CGFloat g, CGFloat b) {
     return [NSColor colorWithSRGBRed:red/255.0 green:green/255.0 blue:blue/255.0 alpha:1];
 }
 
-+ (NSColor *)it_searchFieldBackgroundColor:(BOOL)selected {
++ (NSColor *)it_searchFieldBackgroundColor:(BOOL)selected
+                                appearance:(NSAppearance *)appearance {
     iTermPreferencesTabStyle preferredStyle = [iTermPreferences intForKey:kPreferenceKeyTabStyle];
-    switch (preferredStyle) {
+    switch ([appearance it_tabStyle:preferredStyle]) {
         case TAB_STYLE_LIGHT:
             return [NSColor colorWithCalibratedHue:0
                                         saturation:0
@@ -342,7 +344,28 @@ CGFloat PerceivedBrightness(CGFloat r, CGFloat g, CGFloat b) {
                                         saturation:0
                                         brightness:0.25
                                              alpha:1];
+        case TAB_STYLE_MINIMAL:
+        case TAB_STYLE_AUTOMATIC:
+            assert(NO);
     }
 }
+
+- (NSColor *)it_colorByDimmingByAmount:(double)dimmingAmount {
+    NSColor *color = [self colorUsingColorSpace:[NSColorSpace sRGBColorSpace]];
+    double r = [color redComponent];
+    double g = [color greenComponent];
+    double b = [color blueComponent];
+    double alpha = 1 - dimmingAmount;
+    
+    // Biases the input color by 1-alpha toward gray of (basis, basis, basis).
+    double basis = 0.15;
+    
+    r = alpha * r + (1 - alpha) * basis;
+    g = alpha * g + (1 - alpha) * basis;
+    b = alpha * b + (1 - alpha) * basis;
+    
+    return [NSColor colorWithSRGBRed:r green:g blue:b alpha:1];
+}
+
 
 @end

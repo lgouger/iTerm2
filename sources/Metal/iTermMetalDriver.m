@@ -77,6 +77,7 @@ typedef struct {
     int rows;
     int columns;
     CGFloat scale;
+    CGSize glyphSize;
 } iTermMetalDriverMainThreadState;
 
 @interface iTermMetalDriver()
@@ -107,6 +108,7 @@ typedef struct {
     iTermCursorRenderer *_frameCursorRenderer;
     iTermCopyModeCursorRenderer *_copyModeCursorRenderer;
     iTermCopyBackgroundRenderer *_copyBackgroundRenderer;
+    iTermCursorRenderer *_keyCursorRenderer;
     iTermImageRenderer *_imageRenderer;
 #if ENABLE_USE_TEMPORARY_TEXTURE
     iTermCopyToDrawableRenderer *_copyToDrawableRenderer NS_DEPRECATED_MAC(10_12, 10_14);
@@ -120,7 +122,7 @@ typedef struct {
 
     // The command Queue from which we'll obtain command buffers
     id<MTLCommandQueue> _commandQueue;
-    iTermMetalDriverMainThreadState __mainThreadState;
+    iTermMetalDriverMainThreadState _mainThreadState;
 
 #if ENABLE_PRIVATE_QUEUE
     dispatch_queue_t _queue;
@@ -139,8 +141,10 @@ typedef struct {
     NSTimeInterval _lastFrameStartTime;
     iTermHistogram *_startToStartHistogram;
     iTermHistogram *_inFlightHistogram;
+    MovingAverage *_currentDrawableTime;
+    NSInteger _maxFramesInFlight;
 
-    // For client-driven calls through drawSynchronouslyInView/drawAsynchronouslyInView, this will
+    // For client-driven calls through drawAsynchronouslyInView, this will
     // be nonnil and holds the state needed by those calls. Will bet set to nil if the frame will
     // be drawn by reallyDrawInMTKView:.
     iTermMetalDriverAsyncContext *_context;
@@ -175,6 +179,7 @@ typedef struct {
         _blockCursorRenderer = [iTermCursorRenderer newBlockCursorRendererWithDevice:device];
         _frameCursorRenderer = [iTermCursorRenderer newFrameCursorRendererWithDevice:device];
         _copyModeCursorRenderer = [iTermCursorRenderer newCopyModeCursorRendererWithDevice:device];
+        _keyCursorRenderer = [iTermCursorRenderer newKeyCursorRendererWithDevice:device];
         _copyBackgroundRenderer = [[iTermCopyBackgroundRenderer alloc] initWithDevice:device];
 #if ENABLE_USE_TEMPORARY_TEXTURE
         if (@available(macOS 10.14, *)) {} else {
@@ -190,12 +195,17 @@ typedef struct {
         _queue = dispatch_queue_create("com.iterm2.metalDriver", NULL);
 #endif
         _currentFrames = [NSMutableArray array];
+        _currentDrawableTime = [[MovingAverage alloc] init];
+        _currentDrawableTime.alpha = 0.75;
+
         _fpsMovingAverage = [[MovingAverage alloc] init];
         _fpsMovingAverage.alpha = 0.75;
         iTermMetalFrameDataStatsBundleInitialize(_stats);
         _statHistograms = [[NSArray sequenceWithRange:NSMakeRange(0, iTermMetalFrameDataStatCount)] mapWithBlock:^id(NSNumber *anObject) {
             return [[iTermHistogram alloc] init];
         }];
+
+        _maxFramesInFlight = iTermMetalDriverMaximumNumberOfFramesInFlight;
 
         [[NSNotificationCenter defaultCenter] addObserver:self
                                                  selector:@selector(applicationDidBecomeActive:)
@@ -212,7 +222,7 @@ typedef struct {
 
 - (iTermMetalDriverMainThreadState *)mainThreadState {
     assert([NSThread isMainThread]);
-    return &__mainThreadState;
+    return &_mainThreadState;
 }
 
 - (void)applicationDidBecomeActive:(NSNotification *)notification {
@@ -236,12 +246,16 @@ typedef struct {
 
 - (void)setCellSize:(CGSize)cellSize
 cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
+          glyphSize:(CGSize)glyphSize
            gridSize:(VT100GridSize)gridSize
               scale:(CGFloat)scale {
     scale = MAX(1, scale);
     cellSize.width *= scale;
     cellSize.height *= scale;
 
+    glyphSize.width *= scale;
+    glyphSize.height *= scale;
+    
     cellSizeWithoutSpacing.width *= scale;
     cellSizeWithoutSpacing.height *= scale;
 
@@ -254,6 +268,7 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
     self.mainThreadState->rows = MAX(1, gridSize.height);
     self.mainThreadState->columns = MAX(1, gridSize.width);
     self.mainThreadState->scale = scale;
+    self.mainThreadState->glyphSize = glyphSize;
 }
 
 #pragma mark - MTKViewDelegate
@@ -294,7 +309,34 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
 }
 
 - (int)maximumNumberOfFramesInFlight {
-    return iTermMetalDriverMaximumNumberOfFramesInFlight;
+    if (![iTermAdvancedSettingsModel throttleMetalConcurrentFrames]) {
+        return iTermMetalDriverMaximumNumberOfFramesInFlight;
+    }
+
+    const CGFloat slowEnoughToDowngradeThreshold = 0.002;
+    const CGFloat fastEnoughToUpgradeTreshold = 0.0005;
+    if (_currentDrawableTime.numberOfMeasurements > 5 &&
+        _maxFramesInFlight > 1 &&
+        _currentDrawableTime.value > slowEnoughToDowngradeThreshold) {
+        DLog(@"Moving average of currentDrawable latency of %0.2fms with %@ measurements with mff of %@ is too high. Decrease mff to %@",
+             _currentDrawableTime.value * 1000,
+             @(_currentDrawableTime.numberOfMeasurements),
+             @(_maxFramesInFlight),
+             @(_maxFramesInFlight - 1));
+        _maxFramesInFlight -= 1;
+        [_currentDrawableTime reset];
+    } else if (_currentDrawableTime.numberOfMeasurements > 10 &&
+               _maxFramesInFlight < iTermMetalDriverMaximumNumberOfFramesInFlight &&
+               _currentDrawableTime.value < fastEnoughToUpgradeTreshold) {
+        DLog(@"Moving average of currentDrawable latency of %0.2fms with %@ measurements with mff of %@ is low. Increase mff to %@",
+              _currentDrawableTime.value * 1000,
+              @(_currentDrawableTime.numberOfMeasurements),
+              @(_maxFramesInFlight),
+              @(_maxFramesInFlight + 1));
+        _maxFramesInFlight += 1;
+        [_currentDrawableTime reset];
+    }
+    return _maxFramesInFlight;
 }
 
 - (iTermMetalDriverAsyncContext *)newContextForDrawInView:(MTKView *)view count:(int)count {
@@ -306,22 +348,6 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
     [view draw];
 
     return context;
-}
-
-- (BOOL)drawSynchronouslyInView:(MTKView *)view {
-    if (!view || !view.delegate) {
-        return NO;
-    }
-    static _Atomic int count;
-    int thisCount = -atomic_fetch_add_explicit(&count, 1, memory_order_relaxed);
-
-    DLog(@"Start synchronous draw of %d", thisCount);
-    iTermMetalDriverAsyncContext *context = [self newContextForDrawInView:view count:-thisCount];
-    self.waitingOnSynchronousDraw = YES;
-    dispatch_group_wait(context.group, DISPATCH_TIME_FOREVER);
-    self.waitingOnSynchronousDraw = NO;
-    DLog(@"Synchronous draw completed of %d.", thisCount);
-    return !context.aborted;
 }
 
 - (void)drawAsynchronouslyInView:(MTKView *)view completion:(void (^)(BOOL))completion {
@@ -457,7 +483,8 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
         };
         frameData.cellSize = rescale(frameData.perFrameState.cellSize);
         frameData.cellSizeWithoutSpacing = rescale(frameData.perFrameState.cellSizeWithoutSpacing);
-
+        frameData.glyphSize = self.mainThreadState->glyphSize;
+        
         frameData.scale = self.mainThreadState->scale;
         frameData.hasBackgroundImage = frameData.perFrameState.hasBackgroundImage;
     }];
@@ -722,6 +749,7 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
             frameData.destinationDrawable = view.currentDrawable;
             frameData.destinationTexture = frameData.renderPassDescriptor.colorAttachments[0].texture;
         }];
+
     } else {
 #if ENABLE_DEFER_CURRENT_DRAWABLE
         const BOOL synchronousDraw = (_context.group != nil);
@@ -731,10 +759,15 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
         frameData.deferCurrentDrawable = NO;
 #endif
         if (!frameData.deferCurrentDrawable) {
-            [frameData measureTimeForStat:iTermMetalFrameDataStatMtGetCurrentDrawable ofBlock:^{
+            NSTimeInterval duration = [frameData measureTimeForStat:iTermMetalFrameDataStatMtGetCurrentDrawable ofBlock:^{
                 frameData.destinationDrawable = view.currentDrawable;
                 frameData.destinationTexture = [self destinationTextureForFrameData:frameData];
             }];
+            [_currentDrawableTime addValue:duration];
+            if (frameData.destinationDrawable == nil) {
+                DLog(@"YIKES! Failed to get a drawable. %@/%@", self, frameData);
+                return;
+            }
         }
 
         [frameData measureTimeForStat:iTermMetalFrameDataStatMtGetRenderPassDescriptor ofBlock:^{
@@ -744,12 +777,16 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
                 frameData.renderPassDescriptor = view.currentRenderPassDescriptor;
             }
         }];
+        if (frameData.renderPassDescriptor == nil) {
+            DLog(@"YIKES! Failed to get an RPD. %@/%@", self, frameData);
+            return;
+        }
     }
 }
 
 - (void)enequeueDrawCallsForFrameData:(iTermMetalFrameData *)frameData
                         commandBuffer:(id<MTLCommandBuffer>)commandBuffer {
-    DLog(@"  enequeueDrawCallsForFrameData");
+    DLog(@"  enequeueDrawCallsForFrameData %@", frameData);
 
     NSString *firstLabel;
     if (frameData.intermediateRenderPassDescriptor) {
@@ -813,9 +850,11 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
     }
     __weak __typeof(self) weakSelf = self;
     CGSize cellSize = frameData.cellSize;
+    CGSize glyphSize = frameData.glyphSize;
     CGFloat scale = frameData.scale;
     __weak iTermMetalFrameData *weakFrameData = frameData;
     [_textRenderer setASCIICellSize:cellSize
+                          glyphSize:glyphSize
                  creationIdentifier:[frameData.perFrameState metalASCIICreationIdentifier]
                            creation:^NSDictionary<NSNumber *, iTermCharacterBitmap *> * _Nonnull(char c, iTermASCIITextureAttributes attributes) {
                                __typeof(self) strongSelf = weakSelf;
@@ -832,7 +871,7 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
                                    };
                                    BOOL emoji = NO;
                                    return [strongFrameData.perFrameState metalImagesForGlyphKey:&glyphKey
-                                                                                           size:cellSize
+                                                                                           size:glyphSize
                                                                                           scale:scale
                                                                                           emoji:&emoji];
                                } else {
@@ -966,6 +1005,10 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
         iTermCopyModeCursorRendererTransientState *tState = [frameData transientStateForRenderer:_copyModeCursorRenderer];
         tState.selecting = cursorInfo.copyModeCursorSelecting;
         tState.coord = cursorInfo.copyModeCursorCoord;
+    }
+    if (cursorInfo.cursorVisible && cursorInfo.password) {
+        iTermCursorRendererTransientState *tState = [frameData transientStateForRenderer:_keyCursorRenderer];
+        tState.coord = cursorInfo.coord;
     } else if (cursorInfo.cursorVisible) {
         switch (cursorInfo.type) {
             case CURSOR_UNDERLINE: {
@@ -1040,7 +1083,7 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
     textState.nonAsciiUnderlineDescriptor = nonAsciiUnderlineDescriptor;
     textState.defaultBackgroundColor = frameData.perFrameState.defaultBackgroundColor;
 
-    CGSize cellSize = textState.cellConfiguration.cellSize;
+    CGSize glyphSize = textState.cellConfiguration.glyphSize;
     iTermBackgroundColorRendererTransientState *backgroundState = [frameData transientStateForRenderer:_backgroundColorRenderer];
 
     iTermMetalIMEInfo *imeInfo = frameData.perFrameState.imeInfo;
@@ -1090,7 +1133,7 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
                                 context:textState.poolContext
                                creation:^NSDictionary<NSNumber *, iTermCharacterBitmap *> * _Nonnull(int x, BOOL *emoji) {
                                    return [frameData.perFrameState metalImagesForGlyphKey:&glyphKeys[x]
-                                                                                     size:cellSize
+                                                                                     size:glyphSize
                                                                                     scale:scale
                                                                                     emoji:emoji];
                                }];
@@ -1397,7 +1440,7 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
 - (void)drawCursorBeforeTextWithFrameData:(iTermMetalFrameData *)frameData {
     iTermMetalCursorInfo *cursorInfo = [frameData.perFrameState metalDriverCursorInfo];
 
-    if (!cursorInfo.copyMode && cursorInfo.cursorVisible) {
+    if (!cursorInfo.copyMode && !cursorInfo.password && cursorInfo.cursorVisible) {
         switch (cursorInfo.type) {
             case CURSOR_UNDERLINE:
                 if (frameData.intermediateRenderPassDescriptor) {
@@ -1433,31 +1476,38 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
         [self drawCellRenderer:_copyModeCursorRenderer
                      frameData:frameData
                           stat:iTermMetalFrameDataStatPqEnqueueDrawCursor];
-    } else if (cursorInfo.cursorVisible) {
-        switch (cursorInfo.type) {
-            case CURSOR_UNDERLINE:
-                if (!frameData.intermediateRenderPassDescriptor) {
-                    [self drawCellRenderer:_underlineCursorRenderer
-                                 frameData:frameData
-                                      stat:iTermMetalFrameDataStatPqEnqueueDrawCursor];
-                }
-                break;
-            case CURSOR_BOX:
-                if (cursorInfo.frameOnly) {
-                    [self drawCellRenderer:_frameCursorRenderer
-                                 frameData:frameData
-                                      stat:iTermMetalFrameDataStatPqEnqueueDrawCursor];
-                }
-                break;
-            case CURSOR_VERTICAL:
-                if (!frameData.intermediateRenderPassDescriptor) {
-                    [self drawCellRenderer:_barCursorRenderer
-                                 frameData:frameData
-                                      stat:iTermMetalFrameDataStatPqEnqueueDrawCursor];
-                }
-                break;
-            case CURSOR_DEFAULT:
-                break;
+    }
+    if (cursorInfo.cursorVisible) {
+        if (cursorInfo.password) {
+            [self drawCellRenderer:_keyCursorRenderer
+                         frameData:frameData
+                              stat:iTermMetalFrameDataStatPqEnqueueDrawCursor];
+        } else {
+            switch (cursorInfo.type) {
+                case CURSOR_UNDERLINE:
+                    if (!frameData.intermediateRenderPassDescriptor) {
+                        [self drawCellRenderer:_underlineCursorRenderer
+                                     frameData:frameData
+                                          stat:iTermMetalFrameDataStatPqEnqueueDrawCursor];
+                    }
+                    break;
+                case CURSOR_BOX:
+                    if (cursorInfo.frameOnly) {
+                        [self drawCellRenderer:_frameCursorRenderer
+                                     frameData:frameData
+                                          stat:iTermMetalFrameDataStatPqEnqueueDrawCursor];
+                    }
+                    break;
+                case CURSOR_VERTICAL:
+                    if (!frameData.intermediateRenderPassDescriptor) {
+                        [self drawCellRenderer:_barCursorRenderer
+                                     frameData:frameData
+                                          stat:iTermMetalFrameDataStatPqEnqueueDrawCursor];
+                    }
+                    break;
+                case CURSOR_DEFAULT:
+                    break;
+            }
         }
     }
     if (frameData.perFrameState.imeInfo) {
@@ -1696,7 +1746,7 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
 #pragma mark - Drawing Helpers
 
 - (void)complete:(iTermMetalFrameData *)frameData {
-    DLog(@"  Completed");
+    DLog(@"  in complete: for %@", frameData);
 
     if (!_textRenderer.rendererDisabled) {
         // Unlock indices and free up the stage texture.
@@ -1742,6 +1792,7 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
               _blockCursorRenderer,
               _frameCursorRenderer,
               _copyModeCursorRenderer,
+              _keyCursorRenderer,
               _timestampsRenderer ];
 }
 

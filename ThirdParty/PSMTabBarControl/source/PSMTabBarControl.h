@@ -15,8 +15,6 @@ extern NSString *const kPSMTabModifierKey;  // Key for user info dict in modifie
 extern NSString *const PSMTabDragDidEndNotification;
 extern NSString *const PSMTabDragDidBeginNotification;
 
-extern const CGFloat kPSMTabBarControlHeight;
-
 // internal cell border
 extern const CGFloat kSPMTabBarCellInternalXMargin;
 
@@ -40,6 +38,12 @@ extern const NSInteger kPSMStartResizeAnimation;
 @class PSMTabBarCell;
 @class PSMTabBarControl;
 @protocol PSMTabStyle;
+
+typedef NSString *PSMTabBarControlOptionKey NS_EXTENSIBLE_STRING_ENUM;
+extern PSMTabBarControlOptionKey PSMTabBarControlOptionColoredSelectedTabOutlineStrength;  // NSNumber in 0-3
+extern PSMTabBarControlOptionKey PSMTabBarControlOptionMinimalStyleBackgroundColorDifference;  // Number in 0-1
+extern PSMTabBarControlOptionKey PSMTabBarControlOptionColoredMinimalOutlineStrength;  // Number in 0-1
+extern PSMTabBarControlOptionKey PSMTabBarControlOptionColoredUnselectedTabTextProminence;  // NSNumber in 0-0.5
 
 // Tab views controlled by the tab bar may expect this protocol to be conformed to by their delegate.
 @protocol PSMTabViewDelegate<NSTabViewDelegate>
@@ -120,6 +124,7 @@ extern const NSInteger kPSMStartResizeAnimation;
 - (void)fillPath:(NSBezierPath*)path;
 - (void)tabView:(NSTabView *)tabView closeTab:(id)identifier;
 - (NSTabViewItem *)tabView:(NSTabView *)tabView unknownObjectWasDropped:(id <NSDraggingInfo>)sender;
+- (id)tabView:(PSMTabBarControl *)tabView valueOfOption:(PSMTabBarControlOptionKey)option;
 
 @end
 
@@ -206,6 +211,7 @@ enum {
 
 // Internal inset. Ensures nothing but background is drawn in this are.
 @property(nonatomic, assign) NSEdgeInsets insets;
+@property(nonatomic) CGFloat height;
 
 - (void)setTabColor:(NSColor *)aColor forTabViewItem:(NSTabViewItem *) tabViewItem;
 - (NSColor*)tabColorForTabViewItem:(NSTabViewItem*)tabViewItem;

@@ -15,6 +15,9 @@
 #import "iTermWarning.h"
 #import "PasteboardHistory.h"
 #import "WindowArrangements.h"
+#import "NSImage+iTerm.h"
+
+static const NSInteger iTermMaximumTmuxDashboardLimit = 1000;
 
 @interface iTermCustomFolderTextFieldCell : NSTextFieldCell
 @end
@@ -113,6 +116,8 @@ enum {
 
     // Hide the tmux client session
     IBOutlet NSButton *_autoHideTmuxClientSession;
+    
+    IBOutlet NSStepper *_tmuxDashboardLimitStepper;
 }
 
 - (instancetype)initWithNibName:(NSString *)nibNameOrNil bundle:(NSBundle *)nibBundleOrNil {
@@ -363,8 +368,11 @@ enum {
     info = [self defineControl:_tmuxDashboardLimit
                            key:kPreferenceKeyTmuxDashboardLimit
                           type:kPreferenceInfoTypeIntegerTextField];
-    info.range = NSMakeRange(0, 1000);
-
+    info.range = NSMakeRange(0, iTermMaximumTmuxDashboardLimit);
+    _tmuxDashboardLimitStepper.integerValue = _tmuxDashboardLimit.integerValue;
+    info.observer = ^{
+        [weakSelf didObserverTmuxDashboardLimitChange];
+    };
     [self defineControl:_autoHideTmuxClientSession
                     key:kPreferenceKeyAutoHideTmuxClientSession
                    type:kPreferenceInfoTypeCheckbox];
@@ -378,7 +386,17 @@ enum {
     }
 }
 
+- (void)didObserverTmuxDashboardLimitChange {
+    _tmuxDashboardLimitStepper.integerValue = _tmuxDashboardLimit.integerValue;
+}
+
 #pragma mark - Actions
+
+- (IBAction)tmuxDashboardLimitStepperDidChange:(id)sender {
+    NSInteger newValue = MAX(MIN(iTermMaximumTmuxDashboardLimit, _tmuxDashboardLimitStepper.integerValue), 0);
+    [self setInteger:newValue forKey:kPreferenceKeyTmuxDashboardLimit];
+    _tmuxDashboardLimit.integerValue = newValue;
+}
 
 - (IBAction)browseCustomFolder:(id)sender {
     [self choosePrefsCustomFolder];
@@ -420,7 +438,7 @@ enum {
     }
 
     BOOL remoteLocationIsValid = [[iTermRemotePreferences sharedInstance] remoteLocationIsValid];
-    _prefsDirWarning.image = remoteLocationIsValid ? [NSImage imageNamed:@"CheckMark"] : [NSImage imageNamed:@"WarningSign"];
+    _prefsDirWarning.image = remoteLocationIsValid ? [NSImage it_imageNamed:@"CheckMark" forClass:self.class] : [NSImage it_imageNamed:@"WarningSign" forClass:self.class];
     BOOL isValidFile = (shouldLoadRemotePrefs &&
                         remoteLocationIsValid &&
                         ![[iTermRemotePreferences sharedInstance] remoteLocationIsURL]);

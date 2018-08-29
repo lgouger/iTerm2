@@ -341,7 +341,7 @@ static const int kMaxScreenRows = 4096;
     [self saveCursor];  // reset saved text attributes
     [delegate_ terminalMouseModeDidChangeTo:_mouseMode];
     [delegate_ terminalSetUseColumnScrollRegion:NO];
-    _reportFocus = NO;
+    self.reportFocus = NO;
 
     self.strictAnsiMode = NO;
     self.allowColumnMode = NO;
@@ -1007,6 +1007,19 @@ static const int kMaxScreenRows = 4096;
     [delegate_ terminalSendReport:[self.output reportChecksum:checksum withIdentifier:identifier]];
 }
 
+- (void)sendSGRReportWithRectangle:(VT100GridRect)rect {
+    if (![delegate_ terminalShouldSendReport]) {
+        return;
+    }
+    if (![self rectangleIsValid:rect]) {
+        [delegate_ terminalSendReport:[self.output reportSGRCodes:@[]]];
+        return;
+    }
+    // TODO: Respect origin mode
+    NSArray<NSString *> *codes = [delegate_ terminalSGRCodesInRectangle:rect];
+    [delegate_ terminalSendReport:[self.output reportSGRCodes:codes]];
+}
+
 - (NSString *)decodedBase64PasteCommand:(NSString *)commandString {
     //
     // - write access
@@ -1106,6 +1119,11 @@ static const int kMaxScreenRows = 4096;
     savedCursor->origin = self.originMode;
     savedCursor->wraparound = self.wraparoundMode;
     savedCursor->unicodeVersion = [delegate_ terminalUnicodeVersion];
+}
+
+- (void)setReportFocus:(BOOL)reportFocus {
+    [self.delegate terminalReportFocusWillChangeTo:reportFocus];
+    _reportFocus = reportFocus;
 }
 
 - (void)resetSavedCursorPositions {
@@ -1377,6 +1395,11 @@ static const int kMaxScreenRows = 4096;
         case VT100CSI_CUP:
             [delegate_ terminalMoveCursorToX:token.csi->p[1] y:token.csi->p[0]];
             break;
+        case VT100CSI_CHT:
+            for (int i = 0; i < token.csi->p[0]; i++) {
+                [delegate_ terminalAppendTabAtCursor:!_softAlternateScreenMode];
+            }
+            break;
         case VT100CSI_CUU:
             [delegate_ terminalCursorUp:token.csi->p[0] > 0 ? token.csi->p[0] : 1
                        andToStartOfLine:NO];
@@ -1543,6 +1566,19 @@ static const int kMaxScreenRows = 4096;
             }
             break;
         }
+        case VT100CSI_XTREPORTSGR: {
+            if ([delegate_ terminalIsTrusted]) {
+                VT100GridRect defaultRectangle = VT100GridRectMake(0,
+                                                                   0,
+                                                                   [delegate_ terminalWidth],
+                                                                   [delegate_ terminalHeight]);
+                [self sendSGRReportWithRectangle:[self rectangleInToken:token
+                                                        startingAtIndex:0
+                                                       defaultRectangle:defaultRectangle]];
+            }
+            break;
+        }
+
         case VT100CSI_DECSTR:
             [self softReset];
             break;

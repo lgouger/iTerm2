@@ -117,6 +117,7 @@ NS_CLASS_AVAILABLE(10_11, NA)
 @property (atomic) vector_uint2 viewportSize;
 @property (atomic) VT100GridSize gridSize;
 @property (atomic) CGSize cellSize;
+@property (atomic) CGSize glyphSize;
 @property (atomic) CGSize cellSizeWithoutSpacing;
 @property (atomic) CGFloat scale;
 @property (atomic) BOOL hasBackgroundImage;
@@ -158,7 +159,7 @@ NS_CLASS_AVAILABLE(10_11, NA)
          fullSizeTexturePool:(iTermTexturePool *)fullSizeTexturePool NS_DESIGNATED_INITIALIZER;
 - (instancetype)init NS_UNAVAILABLE;
 
-- (void)measureTimeForStat:(iTermMetalFrameDataStat)stat ofBlock:(void (^)(void))block;
+- (NSTimeInterval)measureTimeForStat:(iTermMetalFrameDataStat)stat ofBlock:(void (^)(void))block;
 #if ENABLE_PRIVATE_QUEUE
 - (void)dispatchToPrivateQueue:(dispatch_queue_t)queue forPreparation:(void (^)(void))block;
 #endif

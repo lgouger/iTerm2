@@ -9,8 +9,7 @@
 #import <Cocoa/Cocoa.h>
 #import "SolidColorView.h"
 
-extern const CGFloat kHorizontalTabBarHeight;
-
+@class iTermRootTerminalView;
 @class iTermTabBarControlView;
 @protocol iTermTabBarControlViewDelegate;
 @class iTermToolbeltView;
@@ -29,9 +28,13 @@ extern const CGFloat kHorizontalTabBarHeight;
 - (BOOL)tabBarAlwaysVisible;
 - (NSEdgeInsets)tabBarInsets;
 - (BOOL)exitingLionFullscreen;
+- (BOOL)enteringLionFullscreen;
 - (BOOL)divisionViewShouldBeVisible;
 - (NSWindow *)window;
 - (BOOL)enableStoplightHotbox;
+- (void)rootTerminalViewDidChangeEffectiveAppearance;
+- (CGFloat)rootTerminalViewHeightOfTabBar:(iTermRootTerminalView *)sender;
+- (CGFloat)rootTerminalViewStoplightButtonsOffset:(iTermRootTerminalView *)sender;
 @end
 
 @interface iTermRootTerminalView : SolidColorView
@@ -100,5 +103,7 @@ extern const CGFloat kHorizontalTabBarHeight;
 - (BOOL)tabBarShouldBeVisibleWithAdditionalTabs:(int)numberOfAdditionalTabs;
 
 - (void)willShowTabBar;
+
+- (void)didChangeCompactness;
 
 @end

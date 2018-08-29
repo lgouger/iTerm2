@@ -981,7 +981,7 @@ static iTermController *gSharedInstance;
     PseudoTerminal *term =
         [[[PseudoTerminal alloc] initWithSmartLayout:YES
                                           windowType:windowType
-                                     savedWindowType:WINDOW_TYPE_NORMAL
+                                     savedWindowType:windowType
                                               screen:[iTermProfilePreferences intForKey:KEY_SCREEN inProfile:profile]
                                     hotkeyWindowType:iTermHotkeyWindowTypeNone] autorelease];
     if ([iTermProfilePreferences boolForKey:KEY_HIDE_AFTER_OPENING inProfile:profile]) {
@@ -1204,7 +1204,7 @@ static iTermController *gSharedInstance;
             DLog(@"Create a new window controller");
             term = [[[PseudoTerminal alloc] initWithSmartLayout:YES
                                                      windowType:windowType
-                                                savedWindowType:WINDOW_TYPE_NORMAL
+                                                savedWindowType:windowType
                                                          screen:[aDict objectForKey:KEY_SCREEN] ? [[aDict objectForKey:KEY_SCREEN] intValue] : -1
                                                hotkeyWindowType:hotkeyWindowType] autorelease];
         }

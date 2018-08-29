@@ -429,6 +429,7 @@ static NSColor *ColorForVector(vector_float4 v) {
     _cursorVisible = drawingHelper.cursorVisible;
     const int offset = _visibleRange.start.y - _numberOfScrollbackLines;
     _cursorInfo = [[iTermMetalCursorInfo alloc] init];
+    _cursorInfo.password = drawingHelper.passwordInput;
     _cursorInfo.copyMode = drawingHelper.copyMode;
     _cursorInfo.copyModeCursorCoord = VT100GridCoordMake(drawingHelper.copyModeCursorCoord.x,
                                                          drawingHelper.copyModeCursorCoord.y - _visibleRange.start.y);
@@ -1314,6 +1315,13 @@ ambiguousIsDoubleWidth:(BOOL)ambiguousIsDoubleWidth
     NSFont *font = fontInfo.font;
     assert(font);
 
+    int radius = iTermTextureMapMaxCharacterParts / 2;
+    if (@available(macOS 10.14, *)) {
+        if (isAscii) {
+            // These are always guaranteed to fit in a single part.
+            radius = 0;
+        }
+    }
     iTermCharacterSource *characterSource =
         [[iTermCharacterSource alloc] initWithCharacter:CharToStr(glyphKey->code, glyphKey->isComplex)
                                                    font:font
@@ -1323,7 +1331,8 @@ ambiguousIsDoubleWidth:(BOOL)ambiguousIsDoubleWidth
                                          useThinStrokes:glyphKey->thinStrokes
                                                fakeBold:fakeBold
                                              fakeItalic:fakeItalic
-                                            antialiased:isAscii ? _asciiAntialias : _nonasciiAntialias];
+                                            antialiased:isAscii ? _asciiAntialias : _nonasciiAntialias
+                                                 radius:radius];
     if (characterSource == nil) {
         return nil;
     }
@@ -1480,8 +1489,15 @@ ambiguousIsDoubleWidth:(BOOL)ambiguousIsDoubleWidth
 - (iTermCharacterBitmap *)bitmapForBoxDrawingCode:(unichar)code
                                              size:(CGSize)size
                                             scale:(CGFloat)scale {
-    NSColor *backgroundColor = [NSColor whiteColor];
-    NSColor *foregroundColor = [NSColor blackColor];
+    NSColor *backgroundColor;
+    NSColor *foregroundColor;
+    if (@available(macOS 10.14, *)) {
+        backgroundColor = [NSColor clearColor];
+        foregroundColor = [NSColor whiteColor];
+    } else {
+        backgroundColor = [NSColor whiteColor];
+        foregroundColor = [NSColor blackColor];
+    }
     NSMutableData *data = [NSImage argbDataForImageOfSize:size drawBlock:^(CGContextRef context) {
         NSAffineTransform *transform = [NSAffineTransform transform];
         [transform concat];

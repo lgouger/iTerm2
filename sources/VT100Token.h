@@ -1,5 +1,4 @@
 #import <Foundation/Foundation.h>
-#import "iTermObjectPool.h"
 #import "iTermParser.h"
 #import "ScreenChar.h"
 
@@ -54,6 +53,7 @@ typedef enum {
     VT100CSI_CUD,                   // Cursor Down
     VT100CSI_CUF,                   // Cursor Forward
     VT100CSI_CUP,                   // Cursor Position
+    VT100CSI_CHT,                   // Cursor Forward Tabulation Ps tab stops
     VT100CSI_CUU,                   // Cursor Up
     VT100CSI_CNL,                   // Cursor Next Line
     VT100CSI_CPL,                   // Cursor Preceding Line
@@ -93,6 +93,7 @@ typedef enum {
     VT100CSI_DECDSR,                // Device Status Report (DEC specific)
     VT100CSI_SET_MODIFIERS,         // CSI > Ps; Pm m (Whether to set modifiers for different kinds of key presses; no official name)
     VT100CSI_RESET_MODIFIERS,       // CSI > Ps n (Set all modifiers values to -1, disabled)
+    VT100CSI_XTREPORTSGR,           // Report SGR
     VT100CSI_DECSLRM,               // Set left-right margin
     VT100CSI_DECRQCRA,              // Request Checksum of Rectangular Area
     VT100CSI_REP,                   // Repeat
@@ -207,7 +208,7 @@ typedef struct {
     ScreenChars *screenChars;
 } AsciiData;
 
-@interface VT100Token : iTermPooledObject {
+@interface VT100Token : NSObject {
 @public
     VT100TerminalTokenType type;
 
@@ -240,7 +241,6 @@ typedef struct {
 // For ascii strings (type==VT100_ASCIISTRING).
 @property(nonatomic, readonly) AsciiData *asciiData;
 
-// Warning: autoreleased VT100Token doesn't behave normally. Use -recycleObject.
 + (instancetype)token;
 + (instancetype)tokenForControlCharacter:(unsigned char)controlCharacter;
 

@@ -10,12 +10,24 @@
 #import "PSMTabStyle.h"
 #import "PSMTabBarControl.h"
 
+@interface NSColor (HSP)
+@property (nonatomic, readonly) CGFloat it_hspBrightness;
+@end
+
 @interface PSMYosemiteTabStyle : NSObject<NSCoding, PSMTabStyle>
 
 @property(nonatomic, readonly) NSColor *tabBarColor;
+@property(nonatomic, readonly) PSMTabBarOrientation orientation;
 
 #pragma mark - For subclasses
 
 - (NSColor *)topLineColorSelected:(BOOL)selected;
+- (BOOL)anyTabHasColor;
+- (CGFloat)tabColorBrightness:(PSMTabBarCell *)cell;
+
+- (NSColor *)effectiveBackgroundColorForTabWithTabColor:(NSColor *)tabColor
+                                               selected:(BOOL)selected
+                                        highlightAmount:(CGFloat)highlightAmount
+                                                 window:(NSWindow *)window;
 
 @end

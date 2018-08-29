@@ -1,5 +1,3 @@
-// This view contains a session's scrollview.
-
 #import "SessionView.h"
 #import "DebugLogging.h"
 #import "FutureMethods.h"
@@ -7,19 +5,24 @@
 #import "iTermAnnouncementViewController.h"
 #import "iTermDropDownFindViewController.h"
 #import "iTermFindDriver.h"
+#import "iTermGenericStatusBarContainer.h"
 #import "iTermMetalClipView.h"
 #import "iTermMetalDeviceProvider.h"
 #import "iTermPreferences.h"
 #import "iTermStatusBarSearchFieldComponent.h"
 #import "iTermStatusBarViewController.h"
+#import "NSAppearance+iTerm.h"
+#import "NSColor+iTerm.h"
 #import "NSView+iTerm.h"
 #import "MovePaneController.h"
 #import "NSResponder+iTerm.h"
+#import "PSMMinimalTabStyle.h"
 #import "PSMTabDragAssistant.h"
 #import "PTYScrollView.h"
 #import "PTYSession.h"
 #import "PTYTab.h"
 #import "PTYTextView.h"
+#import "PTYWindow.h"
 #import "SessionTitleView.h"
 #import "SplitSelectionView.h"
 
@@ -61,10 +64,10 @@ static NSDate* lastResizeDate_;
 
 @end
 
-
 @interface SessionView () <
     iTermAnnouncementDelegate,
     iTermFindDriverDelegate,
+    iTermGenericStatusBarContainer,
     NSDraggingSource,
     PTYScrollerDelegate>
 @property(nonatomic, strong) PTYScrollView *scrollview;
@@ -86,6 +89,7 @@ static NSDate* lastResizeDate_;
     SplitSelectionView *_splitSelectionView;
 
     BOOL _showTitle;
+    BOOL _showBottomStatusBar;
     SessionTitleView *_title;
 
     NSView *_hoverURLView;
@@ -102,6 +106,7 @@ static NSDate* lastResizeDate_;
     iTermFindDriver *_dropDownFindDriver;
     iTermFindDriver *_permanentStatusBarFindDriver;
     iTermFindDriver *_temporaryStatusBarFindDriver;
+    iTermGenericStatusBarContainer *_genericStatusBarContainer;
 }
 
 + (double)titleHeight {
@@ -183,7 +188,7 @@ static NSDate* lastResizeDate_;
 
 - (iTermDropDownFindViewController *)newDropDownFindView {
     iTermDropDownFindViewController *dropDownViewController =
-        [[iTermDropDownFindViewController alloc] initWithNibName:@"FindView" bundle:nil];
+        [[iTermDropDownFindViewController alloc] initWithNibName:@"FindView" bundle:[NSBundle bundleForClass:self.class]];
     [[dropDownViewController view] setHidden:YES];
     [super addSubview:dropDownViewController.view];
     NSRect aRect = [self frame];
@@ -228,7 +233,7 @@ static NSDate* lastResizeDate_;
         case iTermSessionViewFindDriverPermanentStatusBar:
             return NO;
         case iTermSessionViewFindDriverTemporaryStatusBar:
-            return _title.statusBarViewController.temporaryLeftComponent == nil;
+            return self.delegate.sessionViewStatusBarViewController.temporaryLeftComponent == nil;
     }
     assert(false);
     return YES;
@@ -247,10 +252,22 @@ static NSDate* lastResizeDate_;
     return nil;
 }
 
+- (NSSize)internalDecorationSize {
+    NSSize size = NSZeroSize;
+    if (_showTitle) {
+        size.height += _title.frame.size.height;
+    }
+    if (_showBottomStatusBar) {
+        size.height += iTermStatusBarHeight;
+    }
+    return size;
+}
+
 - (void)showFindUI {
+    iTermStatusBarViewController *statusBarViewController = self.delegate.sessionViewStatusBarViewController;
     if (self.findViewIsHidden) {
-        if (_title.statusBarViewController) {
-            if (!_title.statusBarViewController.temporaryLeftComponent) {
+        if (statusBarViewController) {
+            if (!statusBarViewController.temporaryLeftComponent) {
                 _findDriver = iTermSessionViewFindDriverTemporaryStatusBar;
                 NSDictionary *knobs = @{ iTermStatusBarPriorityKey: @(INFINITY),
                                          iTermStatusBarSearchComponentIsTemporaryKey: @YES };
@@ -260,7 +277,7 @@ static NSDate* lastResizeDate_;
                 _temporaryStatusBarFindDriver = [[iTermFindDriver alloc] initWithViewController:component.statusBarComponentSearchViewController];
                 _temporaryStatusBarFindDriver.delegate = _dropDownFindDriver.delegate;
                 component.statusBarComponentSearchViewController.driver = _temporaryStatusBarFindDriver;
-                _title.statusBarViewController.temporaryLeftComponent = component;
+                statusBarViewController.temporaryLeftComponent = component;
             }
         } else {
             _findDriver = iTermSessionViewFindDriverDropDown;
@@ -271,7 +288,7 @@ static NSDate* lastResizeDate_;
 }
 
 - (void)findViewDidHide {
-    _title.statusBarViewController.temporaryLeftComponent = nil;
+    self.delegate.sessionViewStatusBarViewController.temporaryLeftComponent = nil;
 }
 
 - (BOOL)useMetal {
@@ -303,38 +320,40 @@ static NSDate* lastResizeDate_;
 }
 
 - (id<MTLDevice>)metalDevice {
+    static id<MTLDevice> chosenDevice;
     static BOOL preferIntegrated;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         preferIntegrated = [iTermPreferences boolForKey:kPreferenceKeyPreferIntegratedGPU];
-    });
-    if (preferIntegrated) {
-        NSArray<id<MTLDevice>> *devices = MTLCopyAllDevices();
+        if (preferIntegrated) {
+            NSArray<id<MTLDevice>> *devices = MTLCopyAllDevices();
 
-        id<MTLDevice> gpu = nil;
+            id<MTLDevice> gpu = nil;
 
-        for (id<MTLDevice> device in devices) {
-            if (device.isLowPower) {
-                gpu = device;
-                break;
+            for (id<MTLDevice> device in devices) {
+                if (device.isLowPower) {
+                    gpu = device;
+                    break;
+                }
             }
-        }
 
-        if (!gpu) {
-            gpu = MTLCreateSystemDefaultDevice();
+            if (!gpu) {
+                gpu = MTLCreateSystemDefaultDevice();
+            }
+            // I'm intentionally leaking devices and gpu because I'm seeing crazy crashes where
+            // metal occasionally thinks something is over-released. There's no reason to do that
+            // dangerous dance here.
+            chosenDevice = gpu;
+        } else {
+            static id<MTLDevice> device;
+            static dispatch_once_t once;
+            dispatch_once(&once, ^{
+                device = MTLCreateSystemDefaultDevice();
+            });
+            chosenDevice = device;
         }
-        // I'm intentionally leaking devices and gpu because I'm seeing crazy crashes where
-        // metal occasionally thinks something is over-released. There's no reason to do that
-        // dangerous dance here.
-        return gpu;
-    } else {
-        static id<MTLDevice> device;
-        static dispatch_once_t once;
-        dispatch_once(&once, ^{
-            device = MTLCreateSystemDefaultDevice();
-        });
-        return device;
-    }
+    });
+    return chosenDevice;
 }
 
 - (void)installMetalViewWithDataSource:(id<iTermMetalDriverDataSource>)dataSource NS_AVAILABLE_MAC(10_11) {
@@ -345,16 +364,16 @@ static NSDate* lastResizeDate_;
     _metalView = [[MTKView alloc] initWithFrame:_scrollview.contentView.frame
                                          device:[self metalDevice]];
 #if ENABLE_TRANSPARENT_METAL_WINDOWS
-    _metalView.layer.opaque = NO;
+    if (@available(macOS 10.14, *)) {
+        _metalView.layer.opaque = NO;
+    } else {
+        _metalView.layer.opaque = YES;
+    }
 #else
     _metalView.layer.opaque = YES;
 #endif
     _metalView.colorspace = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
     
-    // There was a spike in crashes on 5/1. I'm removing this temporarily to see if it was the cause.
-#if ENABLE_LOW_POWER_GPU_DETECTION
-                                         device:[[iTermMetalDeviceProvider sharedInstance] preferredDevice]];
-#endif
     // Tell the clip view about it so it can ask the metalview to draw itself on scroll.
     _metalClipView.metalView = _metalView;
 
@@ -373,10 +392,6 @@ static NSDate* lastResizeDate_;
     _driver.dataSource = dataSource;
     [_driver mtkView:_metalView drawableSizeWillChange:_metalView.drawableSize];
     _metalView.delegate = _driver;
-}
-
-- (BOOL)drawFrameSynchronously {
-    return [_driver drawSynchronouslyInView:_metalView];
 }
 
 - (void)removeMetalView NS_AVAILABLE_MAC(10_11) {
@@ -402,6 +417,8 @@ static NSDate* lastResizeDate_;
     if (@available(macOS 10.11, *)) {
         if (needsDisplay) {
             [_metalView setNeedsDisplay:YES];
+            [_title setNeedsDisplay:YES];
+            [_genericStatusBarContainer setNeedsDisplay:YES];
         }
     }
 }
@@ -446,22 +463,31 @@ static NSDate* lastResizeDate_;
             [self updateScrollViewFrame];
             [self updateFindViewFrame];
         }
+        if (self.showBottomStatusBar) {
+            [self updateBottomStatusBarFrame];
+        }
     } else {
         // Don't resize anything but do keep it all top-aligned.
         if (self.showTitle) {
             NSRect aRect = [self frame];
             CGFloat maxY = aRect.size.height;
-            if (_showTitle) {
-                maxY -= _title.frame.size.height;
-                [_title setFrame:NSMakeRect(0,
-                                            maxY,
-                                            _title.frame.size.width,
-                                            _title.frame.size.height)];
-            }
+
+            maxY -= _title.frame.size.height;
+            [_title setFrame:NSMakeRect(0,
+                                        maxY,
+                                        _title.frame.size.width,
+                                        _title.frame.size.height)];
+
             NSRect frame = _scrollview.frame;
             maxY -= frame.size.height;
             frame.origin.y = maxY;
             _scrollview.frame = frame;
+        }
+        if (_showBottomStatusBar) {
+            _genericStatusBarContainer.frame = NSMakeRect(0,
+                                                          0,
+                                                          self.frame.size.width,
+                                                          _genericStatusBarContainer.frame.size.height);
         }
     }
 
@@ -478,6 +504,7 @@ static NSDate* lastResizeDate_;
         frame.origin = NSMakePoint(horizontalPadding, verticalPadding);
         _hoverURLTextField.frame = frame;
     }
+    [self updateAnnouncementFrame];
 
     if (_useMetal) {
         [self updateMetalViewFrame];
@@ -492,7 +519,11 @@ static NSDate* lastResizeDate_;
 
 - (void)reallyUpdateMetalViewFrame {
     [_delegate sessionViewHideMetalViewUntilNextFrame];
-    _metalView.frame = [self frameByInsettingForMetal:_scrollview.contentView.frame];
+    NSRect frame = _scrollview.contentView.frame;
+    if (self.showBottomStatusBar) {
+        frame.origin.y += iTermStatusBarHeight;
+    }
+    _metalView.frame = [self frameByInsettingForMetal:frame];
     [_driver mtkView:_metalView drawableSizeWillChange:_metalView.drawableSize];
 }
 
@@ -727,6 +758,114 @@ static NSDate* lastResizeDate_;
                              blendDefaultBackground:YES];
 }
 
+- (NSColor *)backgroundColorForDecorativeSubviews {
+    iTermPreferencesTabStyle preferredStyle = [iTermPreferences intForKey:kPreferenceKeyTabStyle];
+    NSColor *tabColor = self.tabColor;
+    if (tabColor) {
+        CGFloat hue = tabColor.hueComponent;
+        CGFloat saturation = tabColor.saturationComponent;
+        CGFloat brightness = tabColor.brightnessComponent;
+        if (self.window.ptyWindow.it_terminalWindowUseMinimalStyle) {
+            tabColor = [_delegate sessionViewBackgroundColor];
+        } else {
+            switch ([self.effectiveAppearance it_tabStyle:preferredStyle]) {
+                case TAB_STYLE_AUTOMATIC:
+                case TAB_STYLE_MINIMAL:
+                    assert(NO);
+                case TAB_STYLE_LIGHT:
+                    tabColor = [NSColor colorWithCalibratedHue:hue
+                                                    saturation:saturation * .5
+                                                    brightness:MAX(0.7, brightness)
+                                                         alpha:1];
+                    break;
+                case TAB_STYLE_LIGHT_HIGH_CONTRAST:
+                    tabColor = [NSColor colorWithCalibratedHue:hue
+                                                    saturation:saturation * .25
+                                                    brightness:MAX(0.85, brightness)
+                                                         alpha:1];
+                    break;
+                case TAB_STYLE_DARK:
+                    tabColor = [NSColor colorWithCalibratedHue:hue
+                                                    saturation:saturation * .75
+                                                    brightness:MIN(0.3, brightness)
+                                                         alpha:1];
+                    break;
+                case TAB_STYLE_DARK_HIGH_CONTRAST:
+                    tabColor = [NSColor colorWithCalibratedHue:hue
+                                                    saturation:saturation * .95
+                                                    brightness:MIN(0.15, brightness)
+                                                         alpha:1];
+                    break;
+            }
+        }
+        if ([_delegate sessionViewTerminalIsFirstResponder]) {
+            return tabColor;
+        } else {
+            return [tabColor it_colorByDimmingByAmount:0.3];
+        }
+    } else {
+        return [self dimmedBackgroundColorWithAppearance:self.effectiveAppearance];
+    }
+}
+
+- (NSColor *)dimmedBackgroundColorWithAppearance:(NSAppearance *)appearance {
+    const BOOL inactive = ![_delegate sessionViewTerminalIsFirstResponder];
+    iTermPreferencesTabStyle preferredStyle = [iTermPreferences intForKey:kPreferenceKeyTabStyle];
+    if (self.window.ptyWindow.it_terminalWindowUseMinimalStyle) {
+        NSColor *color = [_delegate sessionViewBackgroundColor];
+        if (inactive) {
+            return [color colorDimmedBy:[self adjustedDimmingAmount]
+                       towardsGrayLevel:0.5];
+        } else {
+            return color;
+        }
+    }
+    CGFloat whiteLevel = 0;
+    switch ([appearance it_tabStyle:preferredStyle]) {
+        case TAB_STYLE_AUTOMATIC:
+        case TAB_STYLE_MINIMAL:
+            assert(NO);
+        case TAB_STYLE_LIGHT:
+            if (inactive) {
+                // Not selected
+                whiteLevel = 0.58;
+            } else {
+                // selected
+                whiteLevel = 0.70;
+            }
+            break;
+        case TAB_STYLE_LIGHT_HIGH_CONTRAST:
+            if (inactive) {
+                // Not selected
+                whiteLevel = 0.68;
+            } else {
+                // selected
+                whiteLevel = 0.80;
+            }
+            break;
+        case TAB_STYLE_DARK:
+            if (inactive) {
+                // Not selected
+                whiteLevel = 0.18;
+            } else {
+                // selected
+                whiteLevel = 0.27;
+            }
+            break;
+        case TAB_STYLE_DARK_HIGH_CONTRAST:
+            if (inactive) {
+                // Not selected
+                whiteLevel = 0.08;
+            } else {
+                // selected
+                whiteLevel = 0.17;
+            }
+            break;
+    }
+    
+    return [NSColor colorWithCalibratedWhite:whiteLevel alpha:1];
+}
+
 - (void)drawRect:(NSRect)dirtyRect {
     // Fill in background color in the area around a scrollview if it's smaller
     // than the session view.
@@ -736,6 +875,14 @@ static NSDate* lastResizeDate_;
         [self drawAroundFrame:_metalView.frame dirtyRect:dirtyRect];
     } else {
         [self drawAroundFrame:self.scrollview.frame dirtyRect:dirtyRect];
+    }
+    if (@available(macOS 10.14, *)) {
+        return;
+    }
+    // 10.13 path: work around issue 6974
+    if (_useMetal && _scrollview.isLegacyScroller && [_scrollview.effectiveAppearance.name isEqualToString:NSAppearanceNameVibrantDark]) {
+        [[NSColor colorWithWhite:20.0 / 255.0 alpha:1] set];
+        NSRectFill(NSMakeRect(self.frame.size.width - 15, 0, self.frame.size.height, self.frame.size.height));
     }
 }
 
@@ -768,11 +915,19 @@ static NSDate* lastResizeDate_;
 }
 
 - (NSRect)contentRect {
+    CGFloat topInset = 0;
+    CGFloat bottomInset = 0;
+    
+    NSRect frame = self.frame;
     if (_showTitle) {
-        return NSMakeRect(0, 0, self.frame.size.width, self.frame.size.height - kTitleHeight);
-    } else {
-        return self.frame;
+        topInset = kTitleHeight;
     }
+    if (_showBottomStatusBar) {
+        bottomInset = iTermStatusBarHeight;
+    }
+    frame.origin.y += bottomInset;
+    frame.size.height -= (topInset + bottomInset);
+    return frame;
 }
 
 - (void)createSplitSelectionView {
@@ -929,13 +1084,71 @@ static NSDate* lastResizeDate_;
     [self setTitle:[_delegate sessionViewTitle]];
     [self updateScrollViewFrame];
     [self invalidateStatusBar];
+    [self updateAnnouncementFrame];
+    return YES;
+}
+
+- (BOOL)showBottomStatusBar {
+    return _showBottomStatusBar;
+}
+
+- (BOOL)setShowBottomStatusBar:(BOOL)value adjustScrollView:(BOOL)adjustScrollView {
+    if (value == _showBottomStatusBar) {
+        return NO;
+    }
+    _showBottomStatusBar = value;
+    
+    PTYScrollView *scrollView = [self scrollview];
+    NSRect frame = [scrollView frame];
+    if (_showBottomStatusBar) {
+        iTermStatusBarViewController *statusBar = self.delegate.sessionViewStatusBarViewController;
+        _title.statusBarViewController = nil;
+        frame.size.height -= iTermStatusBarHeight;
+        _genericStatusBarContainer = [[iTermGenericStatusBarContainer alloc] initWithFrame:NSMakeRect(0,
+                                                                                                      0,
+                                                                                                      self.frame.size.width,
+                                                                                                      iTermStatusBarHeight)];
+        _genericStatusBarContainer.statusBarViewController = statusBar;
+        _genericStatusBarContainer.delegate = self;
+        [self invalidateStatusBar];
+        if (adjustScrollView) {
+            [_genericStatusBarContainer setAutoresizingMask:NSViewWidthSizable | NSViewMaxYMargin];
+        }
+        [self addSubviewBelowFindView:_genericStatusBarContainer];
+    } else {
+        [_genericStatusBarContainer removeFromSuperview];
+        _genericStatusBarContainer = nil;
+        frame.size.height += iTermStatusBarHeight;
+    }
+    if (adjustScrollView) {
+        [scrollView setFrame:frame];
+    } else {
+        [self updateBottomStatusBarFrame];
+    }
+    [self updateScrollViewFrame];
+    [self invalidateStatusBar];
     return YES;
 }
 
 - (void)invalidateStatusBar {
     iTermStatusBarViewController *newVC = [self.delegate sessionViewStatusBarViewController];
-    if (newVC != _title.statusBarViewController) {
-        _title.statusBarViewController = newVC;
+    BOOL statusBarChanged = NO;
+    switch ((iTermStatusBarPosition)[iTermPreferences unsignedIntegerForKey:kPreferenceKeyStatusBarPosition]) {
+        case iTermStatusBarPositionTop:
+            if (newVC != _title.statusBarViewController) {
+                statusBarChanged = YES;
+                _title.statusBarViewController = newVC;
+            }
+            break;
+            
+        case iTermStatusBarPositionBottom:
+            if (newVC != _genericStatusBarContainer.statusBarViewController) {
+                statusBarChanged = YES;
+                _genericStatusBarContainer.statusBarViewController = newVC;
+            }
+            break;
+    }
+    if (statusBarChanged) {
         if (newVC.searchViewController) {
             _findDriver = iTermSessionViewFindDriverPermanentStatusBar;
             _permanentStatusBarFindDriver = [[iTermFindDriver alloc] initWithViewController:newVC.searchViewController];
@@ -974,6 +1187,9 @@ static NSDate* lastResizeDate_;
     if (_showTitle) {
         size.height += kTitleHeight;
     }
+    if (_showBottomStatusBar) {
+        size.height += iTermStatusBarHeight;
+    }
     DLog(@"Smallest such frame is %@", NSStringFromSize(size));
     return size;
 }
@@ -985,7 +1201,10 @@ static NSDate* lastResizeDate_;
         size.height -= kTitleHeight;
         DLog(@"maximumPossibleScrollViewContentSize: sub title height. size=%@", [NSValue valueWithSize:size]);
     }
-
+    if (_showBottomStatusBar) {
+        size.height -= iTermStatusBarHeight;
+        DLog(@"maximumPossibleScrollViewContentSize: sub bottom status bar height. size=%@", NSStringFromSize(size));
+    }
     Class verticalScrollerClass = [[[self scrollview] verticalScroller] class];
     if (![[self scrollview] hasVerticalScroller]) {
         verticalScrollerClass = nil;
@@ -1015,6 +1234,20 @@ static NSDate* lastResizeDate_;
     [self updateFindViewFrame];
 }
 
+- (void)updateBottomStatusBarFrame {
+    NSRect aRect = [self frame];
+    if (_showBottomStatusBar) {
+        _genericStatusBarContainer.frame = NSMakeRect(0,
+                                               0,
+                                               aRect.size.width,
+                                               iTermStatusBarHeight);
+        
+        [_genericStatusBarContainer.statusBarViewController.view setNeedsLayout:YES];
+    }
+    [self updateScrollViewFrame];
+    [self updateFindViewFrame];
+}
+
 - (void)updateFindViewFrame {
     NSRect aRect = self.frame;
     NSView *findView = _dropDownFindViewController.view;
@@ -1024,10 +1257,14 @@ static NSDate* lastResizeDate_;
 
 - (void)updateScrollViewFrame {
     CGFloat titleHeight = _showTitle ? _title.frame.size.height : 0;
+    CGFloat bottomStatusBarHeight = _showBottomStatusBar ? iTermStatusBarHeight : 0;
     NSSize proposedSize = NSMakeSize(self.frame.size.width,
-                                     self.frame.size.height - titleHeight);
+                                     self.frame.size.height - titleHeight - bottomStatusBarHeight);
     NSSize size = [_delegate sessionViewScrollViewWillResize:proposedSize];
-    NSRect rect = NSMakeRect(0, proposedSize.height - size.height, size.width, size.height);
+    NSRect rect = NSMakeRect(0,
+                             bottomStatusBarHeight + proposedSize.height - size.height,
+                             size.width,
+                             size.height);
     [self scrollview].frame = rect;
 
     rect.origin = NSZeroPoint;
@@ -1053,10 +1290,6 @@ static NSDate* lastResizeDate_;
 
 #pragma mark SessionTitleViewDelegate
 
-- (BOOL)sessionTitleViewIsFirstResponder {
-    return [_delegate sessionViewTerminalIsFirstResponder];
-}
-
 - (NSColor *)tabColor {
     return [_delegate sessionViewTabColor];
 }
@@ -1081,6 +1314,10 @@ static NSDate* lastResizeDate_;
     [_delegate sessionViewBecomeFirstResponder];
 }
 
+- (NSColor *)sessionTitleViewBackgroundColor {
+    return [self backgroundColorForDecorativeSubviews];
+}
+
 - (void)addAnnouncement:(iTermAnnouncementViewController *)announcement {
     [_announcements addObject:announcement];
     announcement.delegate = self;
@@ -1101,6 +1338,9 @@ static NSDate* lastResizeDate_;
     // Fix the origin
     rect = _currentAnnouncement.view.frame;
     rect.origin.y = self.frame.size.height - _currentAnnouncement.view.frame.size.height;
+    if (_showTitle) {
+        rect.origin.y -= kTitleHeight;
+    }
     _currentAnnouncement.view.frame = rect;
 }
 
@@ -1222,7 +1462,7 @@ static NSDate* lastResizeDate_;
 
 - (void)findViewControllerClearSearch {
     [self.delegate findViewControllerClearSearch];
-    _title.statusBarViewController.temporaryLeftComponent = nil;
+    self.delegate.sessionViewStatusBarViewController.temporaryLeftComponent = nil;
 }
 
 - (void)findString:(NSString *)aString
@@ -1237,6 +1477,12 @@ static NSDate* lastResizeDate_;
 
 - (void)findViewControllerVisibilityDidChange:(id<iTermFindViewController>)sender {
     [self.delegate findViewControllerVisibilityDidChange:sender];
+}
+
+#pragma mark - iTermGenericStatusBarContainer
+
+- (NSColor *)genericStatusBarContainerBackgroundColor {
+    return [self backgroundColorForDecorativeSubviews];
 }
 
 @end

@@ -234,5 +234,11 @@
 + (NSString *)pathToTelnet;
 + (BOOL)sshURLsSupportPath;
 + (double)underlineCursorHeight;
++ (double)coloredSelectedTabOutlineStrength;
++ (double)minimalTabStyleBackgroundColorDifference;
++ (double)minimalTabStyleOutlineStrength;
++ (double)coloredUnselectedTabTextProminence;
++ (BOOL)throttleMetalConcurrentFrames;
++ (NSString *)trailingPunctuationMarks;
 
 @end

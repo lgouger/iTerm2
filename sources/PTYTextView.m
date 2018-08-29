@@ -758,6 +758,15 @@ static const int kDragThreshold = 3;
     [self setNeedsDisplay:YES];
 }
 
+- (BOOL)showTimestamps {
+    return _drawingHelper.showTimestamps;
+}
+
+- (void)setShowTimestamps:(BOOL)value {
+    _drawingHelper.showTimestamps = value;
+    [self setNeedsDisplay:YES];
+}
+
 - (NSRect)scrollViewContentSize {
     NSRect r = NSMakeRect(0, 0, 0, 0);
     r.size = [[self enclosingScrollView] contentSize];
@@ -1203,7 +1212,7 @@ static const int kDragThreshold = 3;
             [subview setNeedsDisplay:YES];
         }
 
-        if (_drawingHelper.blinkingFound) {
+        if (_drawingHelper.blinkingFound && _blinkAllowed) {
             // The user might have used the scroll wheel to cause blinking text to become
             // visible. Make sure the timer is running if anything onscreen is
             // blinking.
@@ -1782,7 +1791,7 @@ static const int kDragThreshold = 3;
         } else {
             action = [self urlActionForClickAtX:x
                                               y:y
-                         respectingHardNewlines:![iTermAdvancedSettingsModel ignoreHardNewlinesInURLs]];
+                         respectingHardNewlines:![self ignoreHardNewlinesInURLs]];
             if (action) {
                 if ([iTermAdvancedSettingsModel enableUnderlineSemanticHistoryOnCmdHover]) {
                     _drawingHelper.underlinedRange = VT100GridAbsWindowedRangeFromRelative(action.range, [_dataSource totalScrollbackOverflow]);
@@ -2564,14 +2573,14 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
             case kURLActionOpenExistingFile: {
                 NSString *extendedPrefix = [extractor wrappedStringAt:coord
                                                               forward:NO
-                                                  respectHardNewlines:![iTermAdvancedSettingsModel ignoreHardNewlinesInURLs]
+                                                  respectHardNewlines:![self ignoreHardNewlinesInURLs]
                                                              maxChars:[iTermAdvancedSettingsModel maxSemanticHistoryPrefixOrSuffix]
                                                     continuationChars:nil
                                                   convertNullsToSpace:YES
                                                                coords:nil];
                 NSString *extendedSuffix = [extractor wrappedStringAt:coord
                                                               forward:YES
-                                                  respectHardNewlines:![iTermAdvancedSettingsModel ignoreHardNewlinesInURLs]
+                                                  respectHardNewlines:![self ignoreHardNewlinesInURLs]
                                                              maxChars:[iTermAdvancedSettingsModel maxSemanticHistoryPrefixOrSuffix]
                                                     continuationChars:nil
                                                   convertNullsToSpace:YES
@@ -2767,6 +2776,9 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
 }
 
 - (void)showDefinitionForWordAt:(NSPoint)clickPoint {
+    if (clickPoint.y < 0) {
+        return;
+    }
     iTermTextExtractor *extractor = [iTermTextExtractor textExtractorWithDataSource:_dataSource];
     VT100GridWindowedRange range =
         [extractor rangeForWordAt:VT100GridCoordMake(clickPoint.x, clickPoint.y)
@@ -5117,7 +5129,7 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
     if ([content isKindOfClass:[NSAttributedString class]]) {
         attributedString = content;
         accessory = [[[iTermPrintAccessoryViewController alloc] initWithNibName:@"iTermPrintAccessoryViewController"
-                                                                         bundle:nil] autorelease];
+                                                                         bundle:[NSBundle bundleForClass:self.class]] autorelease];
         accessory.userDidChangeSetting = ^() {
             NSAttributedString *theAttributedString = nil;
             if (accessory.blackAndWhite) {
@@ -6199,7 +6211,14 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
     // that it doesn't work well. Hard EOLs mid-url are very common. Let's try always ignoring them.
     return [self urlActionForClickAtX:x
                                     y:y
-               respectingHardNewlines:![iTermAdvancedSettingsModel ignoreHardNewlinesInURLs]];
+               respectingHardNewlines:![self ignoreHardNewlinesInURLs]];
+}
+
+- (BOOL)ignoreHardNewlinesInURLs {
+    if ([iTermAdvancedSettingsModel ignoreHardNewlinesInURLs]) {
+        return YES;
+    }
+    return [self.delegate textViewInInteractiveApplication];
 }
 
 - (NSDragOperation)dragOperationForSender:(id<NSDraggingInfo>)sender {

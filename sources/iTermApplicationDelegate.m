@@ -48,6 +48,7 @@
 #import "iTermIntegerNumberFormatter.h"
 #import "iTermLaunchServices.h"
 #import "iTermLSOF.h"
+#import "iTermMenuBarObserver.h"
 #import "iTermMigrationHelper.h"
 #import "iTermModifierRemapper.h"
 #import "iTermPreferences.h"
@@ -62,6 +63,7 @@
 #import "iTermPromptOnCloseReason.h"
 #import "iTermProfilePreferences.h"
 #import "iTermProfilesWindowController.h"
+#import "iTermRecordingCodec.h"
 #import "iTermScriptConsole.h"
 #import "iTermScriptFunctionCall.h"
 #import "iTermServiceProvider.h"
@@ -81,6 +83,7 @@
 #import "NSApplication+iTerm.h"
 #import "NSArray+iTerm.h"
 #import "NSBundle+iTerm.h"
+#import "NSData+GZIP.h"
 #import "NSFileManager+iTerm.h"
 #import "NSObject+iTerm.h"
 #import "NSStringITerm.h"
@@ -563,6 +566,10 @@ static BOOL hasBecomeActive = NO;
         }
         return YES;
     }
+    if ([filename.pathExtension isEqualToString:@"itr"]) {
+        [iTermRecordingCodec loadRecording:[NSURL fileURLWithPath:filename]];
+        return YES;
+    }
     NSLog(@"Quiet launch");
     quiet_ = YES;
     if ([filename isEqualToString:[[NSFileManager defaultManager] versionNumberFilename]]) {
@@ -588,6 +595,16 @@ static BOOL hasBecomeActive = NO;
                 } else {
                     initialText = [NSString stringWithFormat:@"%@; exit", filename];
                 }
+
+                const iTermWarningSelection selection =
+                    [iTermWarning showWarningWithTitle:[NSString stringWithFormat:@"OK to run “%@”?", filename]
+                                               actions:@[ @"OK", @"Cancel" ]
+                                            identifier:@"NoSyncConfirmRunOpenFile"
+                                           silenceable:kiTermWarningTypePermanentlySilenceable];
+                if (selection != kiTermWarningSelection0) {
+                    return YES;
+                }
+
                 bookmark[KEY_INITIAL_TEXT] = initialText;
             }
         }
@@ -601,7 +618,7 @@ static BOOL hasBecomeActive = NO;
             [[iTermHotKeyController sharedInstance] showWindowForProfileHotKey:profileHotkey url:nil];
         }
     }
-    return (YES);
+    return YES;
 }
 
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)app
@@ -987,6 +1004,7 @@ static BOOL hasBecomeActive = NO;
 }
 
 - (void)applicationWillFinishLaunching:(NSNotification *)aNotification {
+    [iTermMenuBarObserver sharedInstance];
     // Cleanly crash on uncaught exceptions, such as during actions.
     [[NSUserDefaults standardUserDefaults] registerDefaults:@{ @"NSApplicationCrashOnExceptions": @YES }];
 
@@ -2089,8 +2107,12 @@ static BOOL hasBecomeActive = NO;
 }
 
 - (IBAction)openSourceLicenses:(id)sender {
-    NSURL *url = [[NSBundle mainBundle] URLForResource:@"Licenses" withExtension:@"txt"];
+    NSURL *url = [[NSBundle bundleForClass:self.class] URLForResource:@"Licenses" withExtension:@"txt"];
     [[NSWorkspace sharedWorkspace] openURL:url];
+}
+
+- (IBAction)loadRecording:(id)sender {
+    [iTermRecordingCodec loadRecording];
 }
 
 #pragma mark - Private

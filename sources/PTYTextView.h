@@ -200,6 +200,7 @@ typedef NS_ENUM(NSInteger, PTYTextViewSelectionExtensionUnit) {
 - (iTermBackgroundImageMode)backgroundImageMode;
 - (BOOL)textViewShouldDrawRect;
 - (void)textViewDidHighightMark;
+- (BOOL)textViewInInteractiveApplication;
 
 @end
 
@@ -330,6 +331,10 @@ typedef NS_ENUM(NSInteger, PTYTextViewSelectionExtensionUnit) {
 // Used by tests to modify drawing helper. Called within -drawRect:.
 typedef void (^PTYTextViewDrawingHookBlock)(iTermTextDrawingHelper *);
 @property(nonatomic, copy) PTYTextViewDrawingHookBlock drawingHook;
+
+@property(nonatomic, assign) BOOL showTimestamps;
+
+@property(nonatomic, readonly) BOOL anyAnnotationsAreVisible;
 
 // For tests.
 @property(nonatomic, readonly) NSRect cursorFrame;
@@ -588,6 +593,9 @@ typedef void (^PTYTextViewDrawingHookBlock)(iTermTextDrawingHelper *);
 - (void)resetMouseLocationToRefuseFirstResponderAt;
 
 - (void)setTransparencyAffectsOnlyDefaultBackgroundColor:(BOOL)value;
+
+- (IBAction)selectCurrentCommand:(id)sender;
+- (IBAction)selectOutputOfLastCommand:(id)sender;
 
 - (void)showFireworks;
 

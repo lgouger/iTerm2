@@ -14,14 +14,28 @@
 #define kPSMMetalObjectCounterRadius 7.0
 #define kPSMMetalCounterMinWidth 20
 
-@interface NSColor (HSP)
-@property (nonatomic, readonly) CGFloat it_hspBrightness;
+@interface NSColor (PSMYosemiteTabStyle)
+
+- (NSColor *)it_srgbForColorInWindow:(NSWindow *)window;
+
 @end
 
-@implementation NSColor (HSP)
+@implementation NSColor (PSMYosemiteTabStyle)
 
 // http://www.nbdtech.com/Blog/archive/2008/04/27/Calculating-the-Perceived-Brightness-of-a-Color.aspx
 // http://alienryderflex.com/hsp.html
+- (NSColor *)it_srgbForColorInWindow:(NSWindow *)window {
+    if ([self isEqual:window.backgroundColor]) {
+        if ([window.effectiveAppearance.name isEqualToString:NSAppearanceNameVibrantDark]) {
+            return [NSColor colorWithSRGBRed:0.25 green:0.25 blue:0.25 alpha:1];
+        } else {
+            return [NSColor colorWithSRGBRed:0.75 green:0.75 blue:0.75 alpha:1];
+        }
+    } else {
+        return [self colorUsingColorSpace:[NSColorSpace sRGBColorSpace]];
+    }
+}
+
 - (CGFloat)it_hspBrightness {
     NSColor *safeColor = [self colorUsingColorSpace:[NSColorSpace sRGBColorSpace]];
     const CGFloat r = safeColor.redComponent;
@@ -108,8 +122,6 @@
     NSImage *_addTabButtonRolloverImage;
 
     NSDictionary *_objectCountStringAttributes;
-
-    PSMTabBarOrientation _orientation;
 }
 
 @synthesize tabBar = _tabBar;
@@ -124,9 +136,9 @@
 - (id)init {
     if ((self = [super init]))  {
         // Load close buttons 
-        _closeButton = [[NSImage imageNamed:@"TabClose_Front"] retain];
-        _closeButtonDown = [[NSImage imageNamed:@"TabClose_Front_Pressed"] retain];
-        _closeButtonOver = [[NSImage imageNamed:@"TabClose_Front_Rollover"] retain];
+        _closeButton = [[[NSBundle bundleForClass:self.class] imageForResource:@"TabClose_Front"] retain];
+        _closeButtonDown = [[[NSBundle bundleForClass:self.class] imageForResource:@"TabClose_Front_Pressed"] retain];
+        _closeButtonOver = [[[NSBundle bundleForClass:self.class] imageForResource:@"TabClose_Front_Rollover"] retain];
 
         // Load "new tab" buttons
         _addTabButtonImage = [[NSImage alloc] initByReferencingFile:[[PSMTabBarControl bundle] pathForImageResource:@"TabNewMetal"]];
@@ -234,7 +246,7 @@
     NSRect result;
     result.size = NSMakeSize(kPSMTabBarIconWidth, kPSMTabBarIconWidth);
     result.origin.x = minX - kPSMTabBarCellIconPadding - kPSMTabBarIconWidth;
-    result.origin.y = cellFrame.origin.y + floor((cellFrame.size.height - result.size.height) / 2.0);
+    result.origin.y = cellFrame.origin.y + floor((cellFrame.size.height - result.size.height) / 2.0) - 1;
 
     return result;
 }
@@ -384,15 +396,18 @@
                 // dark tab
                 textColor = [NSColor whiteColor];
             }
-        } else
+        } else {
             // Non-selected cell when any cell has a tab color
+            CGFloat prominence = [[_tabBar.delegate tabView:_tabBar valueOfOption:PSMTabBarControlOptionColoredUnselectedTabTextProminence] doubleValue];
+            CGFloat delta = prominence ?: 0.1;
             if (cellBrightness > 0.5) {
                 // Light tab
-                return [NSColor colorWithWhite:0.4 alpha:1];
+                return [NSColor colorWithWhite:0.5 - delta alpha:1];
             } else {
                 // Dark tab
-                return [NSColor colorWithWhite:0.6 alpha:1];
+                return [NSColor colorWithWhite:0.5 + delta alpha:1];
             }
+        }
     } else {
         // No cell has a tab color
         if (selected) {
@@ -440,7 +455,7 @@
     }
 }
 
-- (NSColor *)verticalLineColor {
+- (NSColor *)verticalLineColorSelected:(BOOL)selected {
     if (_tabBar.window.isKeyWindow && [NSApp isActive]) {
         return [NSColor colorWithSRGBRed:160/255.0 green:160/255.0 blue:160/255.0 alpha:1];
     } else {
@@ -479,11 +494,13 @@
 }
 
 - (void)drawHorizontalLineInFrame:(NSRect)rect y:(CGFloat)y {
-    NSRectFill(NSMakeRect(NSMinX(rect), y, rect.size.width + 1, 1));
+    NSRect modifiedRect = NSMakeRect(NSMinX(rect), y, rect.size.width + 1, 1);
+    NSRectFillUsingOperation(modifiedRect, NSCompositingOperationSourceOver);
 }
 
 - (void)drawVerticalLineInFrame:(NSRect)rect x:(CGFloat)x {
-    NSRectFill(NSMakeRect(x, NSMinY(rect) + 1, 1, rect.size.height - 2));
+    NSRect modifiedRect = NSMakeRect(x, NSMinY(rect) + 1, 1, rect.size.height - 2);
+    NSRectFillUsingOperation(modifiedRect, NSCompositingOperationSourceOver);
 }
 
 - (NSColor *)cellBackgroundColorForTabColor:(NSColor *)tabColor
@@ -514,10 +531,11 @@
 
 - (NSColor *)effectiveBackgroundColorForTabWithTabColor:(NSColor *)tabColor
                                                selected:(BOOL)selected
-                                        highlightAmount:(CGFloat)highlightAmount {
-    NSColor *base = [[self backgroundColorSelected:selected highlightAmount:highlightAmount] colorUsingColorSpace:[NSColorSpace sRGBColorSpace]];
+                                        highlightAmount:(CGFloat)highlightAmount
+                                                 window:(NSWindow *)window {
+    NSColor *base = [[self backgroundColorSelected:selected highlightAmount:highlightAmount] it_srgbForColorInWindow:window];
     if (tabColor) {
-        NSColor *overcoat = [[self cellBackgroundColorForTabColor:tabColor selected:selected] colorUsingColorSpace:[NSColorSpace sRGBColorSpace]];
+        NSColor *overcoat = [[self cellBackgroundColorForTabColor:tabColor selected:selected] it_srgbForColorInWindow:window];
         const CGFloat a = overcoat.alphaComponent;
         const CGFloat q = 1-a;
         CGFloat r = q * base.redComponent + a * overcoat.redComponent;
@@ -530,32 +548,41 @@
     }
 }
 
-- (void)drawCellBackgroundAndFrameHorizontallyOriented:(BOOL)horizontal
-                                                inRect:(NSRect)cellFrame
-                                              selected:(BOOL)selected
-                                          withTabColor:(NSColor *)tabColor
-                                                isLast:(BOOL)isLast
-                                       highlightAmount:(CGFloat)highlightAmount {
+- (void)drawCellBackgroundSelected:(BOOL)selected
+                            inRect:(NSRect)cellFrame
+                      withTabColor:(NSColor *)tabColor
+                   highlightAmount:(CGFloat)highlightAmount {
     [[self backgroundColorSelected:selected highlightAmount:highlightAmount] set];
     NSRectFill(cellFrame);
-
     if (tabColor) {
         NSColor *color = [self cellBackgroundColorForTabColor:tabColor selected:selected];
         // Alpha the inactive tab's colors a bit to make it clear which tab is active.
         [color set];
         NSRectFillUsingOperation(cellFrame, NSCompositingOperationSourceOver);
     }
+}
+
+- (void)drawCellBackgroundAndFrameHorizontallyOriented:(BOOL)horizontal
+                                                inRect:(NSRect)cellFrame
+                                              selected:(BOOL)selected
+                                          withTabColor:(NSColor *)tabColor
+                                                isLast:(BOOL)isLast
+                                       highlightAmount:(CGFloat)highlightAmount {
+    [self drawCellBackgroundSelected:selected
+                              inRect:cellFrame
+                        withTabColor:tabColor
+                     highlightAmount:highlightAmount];
 
     if (horizontal) {
         BOOL isLeftmostTab = NSMinX(cellFrame) == 0;
         if (!isLeftmostTab) {
             // Left line
-            [[self verticalLineColor] set];
+            [[self verticalLineColorSelected:selected] set];
             [self drawVerticalLineInFrame:cellFrame x:NSMinX(cellFrame)];
         }
         // Right line
         CGFloat adjustment = 0;
-        [[self verticalLineColor] set];
+        [[self verticalLineColorSelected:selected] set];
         [self drawVerticalLineInFrame:cellFrame x:NSMaxX(cellFrame) + adjustment];
 
         // Top line
@@ -574,7 +601,7 @@
 
     } else {
         // Bottom line
-        [[self verticalLineColor] set];
+        [[self verticalLineColorSelected:selected] set];
         cellFrame.origin.x += 1;
         cellFrame.size.width -= 3;
         [self drawHorizontalLineInFrame:cellFrame y:NSMaxY(cellFrame) - 1];
@@ -610,7 +637,8 @@
 - (CGFloat)tabColorBrightness:(PSMTabBarCell *)cell {
     return [[self effectiveBackgroundColorForTabWithTabColor:cell.tabColor
                                                     selected:(cell.state == NSOnState)
-                                             highlightAmount:0] it_hspBrightness];
+                                             highlightAmount:0
+                                                      window:cell.controlView.window] it_hspBrightness];
 }
 
 - (BOOL)anyTabHasColor {
@@ -619,7 +647,8 @@
     }] != NSNotFound;
 }
 
-- (void)drawPostHocDecorationsOnSelectedCell:(PSMTabBarCell *)cell {
+- (void)drawPostHocDecorationsOnSelectedCell:(PSMTabBarCell *)cell
+                               tabBarControl:(PSMTabBarControl *)bar {
     if (self.anyTabHasColor) {
         const CGFloat brightness = [self tabColorBrightness:cell];
         NSRect rect = NSInsetRect(cell.frame, -0.5, 0.5);
@@ -627,7 +656,9 @@
 
         NSColor *outerColor;
         NSColor *innerColor;
-        const CGFloat alpha = [_tabBar.window isKeyWindow] ? 0.5 : 0.3;
+        NSNumber *strengthNumber = [bar.delegate tabView:bar valueOfOption:PSMTabBarControlOptionColoredSelectedTabOutlineStrength] ?: @0.5;
+        CGFloat strength = strengthNumber.doubleValue;
+        const CGFloat alpha = MIN(MAX(strength, 0), 1) * ([_tabBar.window isKeyWindow] ? 1 : 0.6);
         if (brightness > 0.5) {
             outerColor = [NSColor colorWithWhite:1 alpha:alpha];
             innerColor = [NSColor colorWithWhite:0 alpha:alpha];
@@ -637,14 +668,16 @@
         }
 
         [outerColor set];
+        const CGFloat width = MIN(MAX(strength, 1), 3);
+        rect = NSInsetRect(rect, width - 1, width - 1);
         path = [NSBezierPath bezierPathWithRect:rect];
-        [path setLineWidth:1];
+        [path setLineWidth:width];
         [path stroke];
 
         [innerColor set];
-        rect = NSInsetRect(rect, 1, 1);
+        rect = NSInsetRect(rect, width, width);
         path = [NSBezierPath bezierPathWithRect:rect];
-        [path setLineWidth:1];
+        [path setLineWidth:width];
         [path stroke];
     }
 }
@@ -899,7 +932,7 @@
     }
     for (PSMTabBarCell *cell in [bar cells]) {
         if (![cell isInOverflowMenu] && NSIntersectsRect([cell frame], rect) && cell.state == NSOnState) {
-            [cell drawPostHocDecorationsOnSelectedCell];
+            [cell drawPostHocDecorationsOnSelectedCell:cell tabBarControl:bar];
         }
     }
 }

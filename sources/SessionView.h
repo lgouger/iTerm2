@@ -88,6 +88,7 @@
 
 // Is this session's text view the first responder?
 - (BOOL)sessionViewTerminalIsFirstResponder;
+- (NSColor *)sessionViewBackgroundColor;
 
 // Gives the tab color for this session.
 - (NSColor *)sessionViewTabColor;
@@ -155,6 +156,7 @@
 @property(nonatomic, readonly) BOOL findViewIsHidden;
 @property(nonatomic, readonly) BOOL findViewHasKeyboardFocus;
 @property(nonatomic, readonly) iTermFindDriver *findDriver;
+@property(nonatomic, readonly) NSSize internalDecorationSize;
 
 - (void)showFindUI;
 - (void)findViewDidHide;
@@ -174,6 +176,10 @@
 - (void)setSplitSelectionMode:(SplitSelectionMode)mode move:(BOOL)move session:(id)session;
 - (BOOL)setShowTitle:(BOOL)value adjustScrollView:(BOOL)adjustScrollView;
 - (BOOL)showTitle;
+
+- (BOOL)setShowBottomStatusBar:(BOOL)value adjustScrollView:(BOOL)adjustScrollView;
+- (BOOL)showBottomStatusBar;
+
 - (void)setTitle:(NSString *)title;
 // For tmux sessions, autoresizing is turned off so the title must be moved
 // manually. This repositions the title view and the find view.
@@ -204,7 +210,6 @@
 
 - (void)setHoverURL:(NSString *)url;
 - (BOOL)hasHoverURL;
-- (BOOL)drawFrameSynchronously;
 - (void)reallyUpdateMetalViewFrame;
 - (void)invalidateStatusBar;
 

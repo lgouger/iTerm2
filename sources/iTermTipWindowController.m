@@ -15,6 +15,7 @@
 #import "iTermTipCardViewController.h"
 #import "iTermFlippedView.h"
 #import "NSView+iTerm.h"
+#import "NSImage+iTerm.h"
 #import "SolidColorView.h"
 
 #import <QuartzCore/QuartzCore.h>
@@ -93,11 +94,18 @@ static const CGFloat kWindowWidth = 400;
     [super dealloc];
 }
 
+- (void)awakeFromNib {
+    if (@available(macOS 10.14, *)) {
+        self.window.backgroundColor = [NSColor clearColor];
+    }
+    [super awakeFromNib];
+}
+
 // Expanded means the "more options" is open.
 - (void)loadCardExpanded:(BOOL)expanded {
     iTermTipCardViewController *card =
         [[[iTermTipCardViewController alloc] initWithNibName:@"iTermTipCardViewController"
-                                                      bundle:nil] autorelease];
+                                                      bundle:[NSBundle bundleForClass:self.class]] autorelease];
     self.cardViewController = card;
     [card view];
     card.titleString = self.tip.title;
@@ -112,14 +120,14 @@ static const CGFloat kWindowWidth = 400;
 - (void)addButtonsToCard:(iTermTipCardViewController *)card expanded:(BOOL)expanded {
     if (_tip.url) {
         [card addActionWithTitle:kLearnMoreTitle
-                            icon:[NSImage imageNamed:@"Navigate"]
+                            icon:[NSImage it_imageNamed:@"Navigate" forClass:self.class]
                            block:^(id sendingCard) {
                                [self openURL];
                            }];
     }
     [card addActionWithTitle:kDismissTipTitle
                     shortcut:@"⎋"
-                        icon:[NSImage imageNamed:@"Dismiss"]
+                        icon:[NSImage it_imageNamed:@"Dismiss" forClass:self.class]
                        block:^(id sendingCard) {
                            [self dismiss];
                        }];
@@ -127,7 +135,7 @@ static const CGFloat kWindowWidth = 400;
     NSString *toggleTitle = expanded ? kFewerOptionsTitle : kMoreOptionsTitle;
     iTermTipCardActionButton *button =
         [card addActionWithTitle:toggleTitle
-                            icon:[NSImage imageNamed:@"ChevronDown"]
+                            icon:[NSImage it_imageNamed:@"ChevronDown" forClass:self.class]
                            block:^(id sendingCard) {
                                [self toggleOptionsInCard:sendingCard];
                            }];
@@ -135,7 +143,7 @@ static const CGFloat kWindowWidth = 400;
 
     button =
         [card addActionWithTitle:kShowThisLaterTitle
-                            icon:[NSImage imageNamed:@"Later"]
+                            icon:[NSImage it_imageNamed:@"Later" forClass:self.class]
                            block:^(id sendingCard) {
                                [self showThisLater];
                            }];
@@ -173,7 +181,7 @@ static const CGFloat kWindowWidth = 400;
     }
     button =
         [card addActionWithTitle:frequencyTitle
-                            icon:[NSImage imageNamed:@"TipCalendar"]
+                            icon:[NSImage it_imageNamed:@"TipCalendar" forClass:self.class]
                            block:^(id sendingCard) {
                                [_delegate toggleTipFrequency];
                                iTermTipCardActionButton *theButton = [card actionWithTitle:kShowTipsWeeklyTitle];
@@ -196,7 +204,7 @@ static const CGFloat kWindowWidth = 400;
     }
     button =
         [card addActionWithTitle:enableOrDisableTitle
-                            icon:[NSImage imageNamed:@"DisableTips"]
+                            icon:[NSImage it_imageNamed:@"DisableTips" forClass:self.class]
                            block:^(id sendingCard) {
                                if (![_delegate tipWindowTipsAreDisabled]) {
                                    [self disableTips];
@@ -213,7 +221,7 @@ static const CGFloat kWindowWidth = 400;
     if ([_delegate tipWindowTipAfterTipWithIdentifier:self.tip.identifier]) {
         button =
             [card addActionWithTitle:kShowNextTipTitle
-                                icon:[NSImage imageNamed:@"NextTip"]
+                                icon:[NSImage it_imageNamed:@"NextTip" forClass:self.class]
                                block:^(id sendingCard) {
                                    [self showNextTip];
                                }];
@@ -224,7 +232,7 @@ static const CGFloat kWindowWidth = 400;
     if ([_delegate tipWindowTipBeforeTipWithIdentifier:self.tip.identifier]) {
         button =
             [card addActionWithTitle:kShowPreviousTipTitle
-                                icon:[NSImage imageNamed:@"NextTip"]
+                                icon:[NSImage it_imageNamed:@"NextTip" forClass:self.class]
                                block:^(id sendingCard) {
                                    [self showPreviousTip];
                                }];
