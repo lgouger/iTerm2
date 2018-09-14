@@ -25,12 +25,14 @@
 #import "iTermDisclosableView.h"
 #import "iTermEchoProbe.h"
 #import "iTermFindDriver.h"
+#import "iTermGraphicSource.h"
 #import "iTermNotificationController.h"
 #import "iTermHistogram.h"
 #import "iTermHotKeyController.h"
 #import "iTermInitialDirectory.h"
 #import "iTermKeyBindingMgr.h"
 #import "iTermKeyLabels.h"
+#import "iTermLocalHostNameGuesser.h"
 #import "iTermMetaFrustrationDetector.h"
 #import "iTermMetalGlue.h"
 #import "iTermMetalDriver.h"
@@ -65,6 +67,7 @@
 #import "iTermUpdateCadenceController.h"
 #import "iTermVariables.h"
 #import "iTermWarning.h"
+#import "iTermWorkingDirectoryPoller.h"
 #import "MovePaneController.h"
 #import "MovingAverage.h"
 #import "NSArray+iTerm.h"
@@ -255,7 +258,8 @@ static NSString *const iTermSessionTitleSession = @"session";
     iTermSessionViewDelegate,
     iTermStatusBarViewControllerDelegate,
     iTermUpdateCadenceControllerDelegate,
-    iTermVariablesDelegate>
+    iTermVariablesDelegate,
+    iTermWorkingDirectoryPollerDelegate>
 @property(nonatomic, retain) Interval *currentMarkOrNotePosition;
 @property(nonatomic, retain) TerminalFile *download;
 @property(nonatomic, retain) TerminalFileUpload *upload;
@@ -489,6 +493,9 @@ static NSString *const iTermSessionTitleSession = @"session";
     iTermMetaFrustrationDetector *_metaFrustrationDetector;
 
     iTermTmuxStatusBarMonitor *_tmuxStatusBarMonitor;
+    iTermWorkingDirectoryPoller *_pwdPoller;
+    
+    iTermGraphicSource *_graphicSource;
 }
 
 + (NSMapTable<NSString *, PTYSession *> *)sessionMap {
@@ -671,6 +678,9 @@ static NSString *const iTermSessionTitleSession = @"session";
         _echoProbe.delegate = self;
         _metaFrustrationDetector = [[iTermMetaFrustrationDetector alloc] init];
         _metaFrustrationDetector.delegate = self;
+        _pwdPoller = [[iTermWorkingDirectoryPoller alloc] init];
+        _pwdPoller.delegate = self;
+        _graphicSource = [[iTermGraphicSource alloc] init];
 
         [[NSNotificationCenter defaultCenter] addObserver:self
                                                  selector:@selector(coprocessChanged)
@@ -828,7 +838,9 @@ ITERM_WEAKLY_REFERENCEABLE
     [_lastRemoteHost release];
     [_textview release];  // I'm not sure it's ever nonnil here
     [_currentMarkOrNotePosition release];
-
+    [_pwdPoller release];
+    [_graphicSource release];
+    
     [super dealloc];
 }
 
@@ -956,6 +968,25 @@ ITERM_WEAKLY_REFERENCEABLE
         [result appendString:@"🖥"];
     }
     return result;
+}
+
+- (void)didFinishInitialization:(BOOL)ok {
+    [_pwdPoller poll];
+    if ([self.variablesScope valueForVariableName:iTermVariableKeySessionUsername] == nil) {
+        [self.variablesScope setValue:NSUserName() forVariableNamed:iTermVariableKeySessionUsername];
+    }
+    if ([self.variablesScope valueForVariableName:iTermVariableKeySessionHostname] == nil) {
+        __weak __typeof(self) weakSelf = self;
+        [[iTermLocalHostNameGuesser sharedInstance] callBlockWhenReady:^(NSString * _Nonnull name) {
+            [weakSelf didGuessLocalHostName:name];
+        }];
+    }
+}
+
+- (void)didGuessLocalHostName:(NSString *)name {
+    if ([self.variablesScope valueForVariableName:iTermVariableKeySessionHostname] == nil) {
+        [self.variablesScope setValue:name forVariableNamed:iTermVariableKeySessionHostname];
+    }
 }
 
 - (void)setGuid:(NSString *)guid {
@@ -1307,7 +1338,9 @@ ITERM_WEAKLY_REFERENCEABLE
     }
     if (missingProfile) {
         iTermAnnouncementViewController *announcement = [aSession announcementForMissingProfileInArrangement:arrangement];
-        [aSession queueAnnouncement:announcement identifier:@"ThisProfileNoLongerExists"];
+        if (announcement) {
+            [aSession queueAnnouncement:announcement identifier:@"ThisProfileNoLongerExists"];
+        }
     }
 
     NSString *path = [aSession.screen workingDirectoryOnLine:aSession.screen.numberOfScrollbackLines + aSession.screen.cursorY - 1];
@@ -1448,7 +1481,8 @@ ITERM_WEAKLY_REFERENCEABLE
     NSDictionary *contents = arrangement[SESSION_ARRANGEMENT_CONTENTS];
     BOOL restoreContents = !tmuxPaneNumber && contents && [iTermAdvancedSettingsModel restoreWindowContents];
     BOOL attachedToServer = NO;
-    void (^runCommandBlock)(void (^)(BOOL)) = ^(void (^completion)(BOOL)) { completion(YES); };
+    typedef void (^iTermBooleanCompletionBlock)(BOOL ok);
+    void (^runCommandBlock)(iTermBooleanCompletionBlock) = ^(void (^completion)(BOOL)) { completion(YES); };
 
     if (!tmuxPaneNumber) {
         DLog(@"No tmux pane ID during session restoration");
@@ -1543,7 +1577,7 @@ ITERM_WEAKLY_REFERENCEABLE
                 isUTF8Arg = @(aSession.isUTF8);
                 substitutionsArg = aSession.substitutions;
             }
-            runCommandBlock = ^(void (^completion)(BOOL)) {
+            runCommandBlock = ^(iTermBooleanCompletionBlock completion) {
                 iTermSessionFactory *factory = [[[iTermSessionFactory alloc] init] autorelease];
                 [factory attachOrLaunchCommandInSession:aSession
                                               canPrompt:NO
@@ -1589,6 +1623,7 @@ ITERM_WEAKLY_REFERENCEABLE
                                            tmuxDCSIdentifier:tmuxDCSIdentifier
                                               tmuxPaneNumber:tmuxPaneNumber
                                               missingProfile:missingProfile];
+        [aSession didFinishInitialization:YES];
     };
     runCommandBlock(finish);
 
@@ -1666,6 +1701,7 @@ ITERM_WEAKLY_REFERENCEABLE
     _terminal.delegate = _screen;
     [_shell setDelegate:self];
     [self.variablesScope setValue:_shell.tty forVariableNamed:iTermVariableKeySessionTTY];
+    [self.variablesScope setValue:@(_terminal.mouseMode) forVariableNamed:iTermVariableKeySessionMouseReportingMode];
 
     // initialize the screen
     // TODO: Shouldn't this take the scrollbar into account?
@@ -1966,12 +2002,17 @@ ITERM_WEAKLY_REFERENCEABLE
             env[@"LANG"] = lang;
         } else if ([self shouldSetCtype]){
             DLog(@"should set ctype...");
-            // Try just the encoding by itself, which might work.
-            NSString *encName = [self encodingName];
-            DLog(@"See if encoding %@ is supported...", encName);
-            if (encName && [self _localeIsSupported:encName]) {
-                DLog(@"Set LC_CTYPE=%@", encName);
-                env[@"LC_CTYPE"] = encName;
+            NSString *fallback = [iTermAdvancedSettingsModel fallbackLCCType];
+            if (fallback.length) {
+                env[@"LC_CTYPE"] = fallback;
+            } else {
+                // Try just the encoding by itself, which might work.
+                NSString *encName = [self encodingName];
+                DLog(@"See if encoding %@ is supported...", encName);
+                if (encName && [self _localeIsSupported:encName]) {
+                    DLog(@"Set LC_CTYPE=%@", encName);
+                    env[@"LC_CTYPE"] = encName;
+                }
             }
         }
     }
@@ -2116,7 +2157,8 @@ ITERM_WEAKLY_REFERENCEABLE
         [iTermWarning showWarningWithTitle:theTitle
                                    actions:@[ @"OK" ]
                                 identifier:theKey
-                               silenceable:kiTermWarningTypePermanentlySilenceable];
+                               silenceable:kiTermWarningTypePermanentlySilenceable
+                                    window:self.view.window];
     }
 }
 
@@ -2913,13 +2955,12 @@ ITERM_WEAKLY_REFERENCEABLE
         return;
     }
     [_shell killServerIfRunning];
-    if ([self shouldPostGrowlNotification] &&
+    if ([self shouldPostUserNotification] &&
         [iTermProfilePreferences boolForKey:KEY_SEND_SESSION_ENDED_ALERT inProfile:self.profile]) {
         [[iTermNotificationController sharedInstance] notify:@"Session Ended"
                                              withDescription:[NSString stringWithFormat:@"Session \"%@\" in tab #%d just terminated.",
                                                               [self name],
-                                                              [_delegate tabNumber]]
-                                             andNotification:@"Broken Pipes"];
+                                                              [_delegate tabNumber]]];
     }
 
     _exited = YES;
@@ -3309,8 +3350,8 @@ ITERM_WEAKLY_REFERENCEABLE
     return [_shell hasCoprocess];
 }
 
-- (BOOL)shouldPostGrowlNotification {
-    if (!_screen.postGrowlNotifications) {
+- (BOOL)shouldPostUserNotification {
+    if (!_screen.postUserNotifications) {
         return NO;
     }
     if (![_delegate sessionBelongsToVisibleTab]) {
@@ -3388,16 +3429,15 @@ ITERM_WEAKLY_REFERENCEABLE
         [_delegate setBell:flag];
         if (_bell) {
             if ([_textview keyIsARepeat] == NO &&
-                [self shouldPostGrowlNotification] &&
+                [self shouldPostUserNotification] &&
                 [iTermProfilePreferences boolForKey:KEY_SEND_BELL_ALERT inProfile:self.profile]) {
                 [[iTermNotificationController sharedInstance] notify:@"Bell"
-                                                     withDescription:[NSString stringWithFormat:@"Session %@ #%d just rang a bell!",
-                                                                      [self name],
-                                                                      [_delegate tabNumber]]
-                                                     andNotification:@"Bells"
-                                                         windowIndex:[self screenWindowIndex]
-                                                            tabIndex:[self screenTabIndex]
-                                                           viewIndex:[self screenViewIndex]];
+                                                 withDescription:[NSString stringWithFormat:@"Session %@ #%d just rang a bell!",
+                                                                  [self name],
+                                                                  [_delegate tabNumber]]
+                                                     windowIndex:[self screenWindowIndex]
+                                                        tabIndex:[self screenTabIndex]
+                                                       viewIndex:[self screenViewIndex]];
             }
         }
     }
@@ -3678,7 +3718,7 @@ ITERM_WEAKLY_REFERENCEABLE
     [_screen setAudibleBell:![iTermProfilePreferences boolForKey:KEY_SILENCE_BELL inProfile:aDict]];
     [_screen setShowBellIndicator:[iTermProfilePreferences boolForKey:KEY_VISUAL_BELL inProfile:aDict]];
     [_screen setFlashBell:[iTermProfilePreferences boolForKey:KEY_FLASHING_BELL inProfile:aDict]];
-    [_screen setPostGrowlNotifications:[iTermProfilePreferences boolForKey:KEY_BOOKMARK_GROWL_NOTIFICATIONS inProfile:aDict]];
+    [_screen setPostUserNotifications:[iTermProfilePreferences boolForKey:KEY_BOOKMARK_USER_NOTIFICATIONS inProfile:aDict]];
     [_textview setBlinkAllowed:[iTermProfilePreferences boolForKey:KEY_BLINK_ALLOWED inProfile:aDict]];
     [_screen setCursorBlinks:[iTermProfilePreferences boolForKey:KEY_BLINKING_CURSOR inProfile:aDict]];
     [_textview setBlinkingCursor:[iTermProfilePreferences boolForKey:KEY_BLINKING_CURSOR inProfile:aDict]];
@@ -3737,18 +3777,24 @@ ITERM_WEAKLY_REFERENCEABLE
         NSDictionary *existing = _statusBarViewController.layout.dictionaryValue;
         if (![NSObject object:existing isEqualToObject:layout]) {
             iTermStatusBarLayout *newLayout = [[[iTermStatusBarLayout alloc] initWithDictionary:layout] autorelease];
-            [_statusBarViewController release];
-            if (newLayout) {
-                _statusBarViewController =
+            if (![NSObject object:existing isEqualToObject:newLayout.dictionaryValue]) {
+                [_statusBarViewController release];
+                if (newLayout) {
+                    _statusBarViewController =
                     [[iTermStatusBarViewController alloc] initWithLayout:newLayout
                                                                    scope:self.variablesScope];
-                _statusBarViewController.delegate = self;
-            } else {
-                _statusBarViewController.delegate = nil;
-                _statusBarViewController = nil;
+                    _statusBarViewController.delegate = self;
+                } else {
+                    _statusBarViewController.delegate = nil;
+                    _statusBarViewController = nil;
+                }
+                [_view invalidateStatusBar];
             }
-            [_view invalidateStatusBar];
         }
+    } else {
+        [_statusBarViewController release];
+        _statusBarViewController = nil;
+        [_view invalidateStatusBar];
     }
     _tmuxStatusBarMonitor.active = [iTermProfilePreferences boolForKey:KEY_SHOW_STATUS_BAR inProfile:aDict];
     _screen.appendToScrollbackWithStatusBar = [iTermProfilePreferences boolForKey:KEY_SCROLLBACK_WITH_STATUS_BAR
@@ -3777,6 +3823,7 @@ ITERM_WEAKLY_REFERENCEABLE
         [self.tmuxController setTabColorString:tabColor ? [tabColor hexString] : iTermTmuxTabColorNone
                                  forWindowPane:self.tmuxPane];
     }
+    [self.delegate sessionDidChangeGraphic:self];
     [self.delegate sessionUpdateMetalAllowed];
     [self profileNameDidChangeTo:self.profile[KEY_NAME]];
     [_nameController setNeedsUpdate];
@@ -3843,6 +3890,26 @@ ITERM_WEAKLY_REFERENCEABLE
 
 - (NSString *)name {
     return [self.variablesScope valueForVariableName:iTermVariableKeySessionName] ?: [self.variablesScope valueForVariableName:iTermVariableKeySessionProfileName] ?: @"Untitled";
+}
+
+- (BOOL)shouldShowTabGraphic {
+    const iTermProfileIcon icon = [iTermProfilePreferences unsignedIntegerForKey:KEY_ICON inProfile:self.profile];
+    return icon != iTermProfileIconNone;
+}
+
+- (NSImage *)tabGraphic {
+    const iTermProfileIcon icon = [iTermProfilePreferences unsignedIntegerForKey:KEY_ICON inProfile:self.profile];
+    switch (icon) {
+        case iTermProfileIconNone:
+            return nil;
+            
+        case iTermProfileIconAutomatic:
+            [_graphicSource updateImageForProcessID:self.shell.pid enabled:[self shouldShowTabGraphic]];
+            return _graphicSource.image;
+    }
+
+    DLog(@"Unexpected icon setting %@", @(icon));
+    return nil;
 }
 
 - (NSString *)windowTitle {
@@ -5309,7 +5376,7 @@ ITERM_WEAKLY_REFERENCEABLE
                                                                                      scope:self.variablesScope];
                 _tmuxStatusBarMonitor.active = [iTermProfilePreferences boolForKey:KEY_SHOW_STATUS_BAR inProfile:self.profile];
                 if ([iTermStatusBarLayout shouldOverrideLayout:self.profile[KEY_STATUS_BAR_LAYOUT]]) {
-                    [self setSessionSpecificProfileValues:@{ KEY_STATUS_BAR_LAYOUT: [[iTermStatusBarLayout tmuxLayout] dictionaryValue] }];
+                    [self setSessionSpecificProfileValues:@{ KEY_STATUS_BAR_LAYOUT: [[iTermStatusBarLayout tmuxLayoutWithController:_tmuxController] dictionaryValue] }];
                 }
                 break;
         }
@@ -5594,8 +5661,10 @@ ITERM_WEAKLY_REFERENCEABLE
         // perhaps other edge cases I haven't found--it used to be done every time before the
         // _currentHost ivar existed).
         _currentHost = [[_screen remoteHostOnLine:[_screen numberOfLines]] retain];
-        [self.variablesScope setValue:_currentHost.hostname forVariableNamed:iTermVariableKeySessionHostname];
-        [self.variablesScope setValue:_currentHost.username forVariableNamed:iTermVariableKeySessionUsername];
+        if (_currentHost) {
+            [self.variablesScope setValue:_currentHost.hostname forVariableNamed:iTermVariableKeySessionHostname];
+            [self.variablesScope setValue:_currentHost.username forVariableNamed:iTermVariableKeySessionUsername];
+        }
     }
     return _currentHost;
 }
@@ -5944,6 +6013,7 @@ ITERM_WEAKLY_REFERENCEABLE
             }
         }
         _lastInput = [NSDate timeIntervalSinceReferenceDate];
+        [_pwdPoller userDidPressKey];
         if (_view.currentAnnouncement.dismissOnKeyDown) {
             [_view.currentAnnouncement dismiss];
             return NO;
@@ -5996,7 +6066,7 @@ ITERM_WEAKLY_REFERENCEABLE
     return self.variablesScope.functionCallSource;
 }
 
-+ (void)reportFunctionCallError:(NSError *)error forInvocation:(NSString *)invocation origin:(NSString *)origin {
++ (void)reportFunctionCallError:(NSError *)error forInvocation:(NSString *)invocation origin:(NSString *)origin window:(NSWindow *)window {
     NSString *message = [NSString stringWithFormat:@"Error running “%@”:\n%@",
                          invocation, error.localizedDescription];
     NSString *traceback = error.localizedFailureReason;
@@ -6013,7 +6083,8 @@ ITERM_WEAKLY_REFERENCEABLE
                              accessory:accessory
                             identifier:@"NoSyncFunctionCallError"
                            silenceable:kiTermWarningTypeTemporarilySilenceable
-                               heading:[NSString stringWithFormat:@"%@ Function Call Failed", origin]];
+                               heading:[NSString stringWithFormat:@"%@ Function Call Failed", origin]
+                                window:window];
 
 }
 
@@ -6033,7 +6104,8 @@ ITERM_WEAKLY_REFERENCEABLE
                                    if (error) {
                                        [PTYSession reportFunctionCallError:error
                                                              forInvocation:invocation
-                                                                    origin:origin];
+                                                                    origin:origin
+                                                                    window:self.view.window];
                                    }
                                }];
 }
@@ -6113,7 +6185,8 @@ ITERM_WEAKLY_REFERENCEABLE
                                            if (error) {
                                                [PTYSession reportFunctionCallError:error
                                                                      forInvocation:keyBindingText
-                                                                            origin:@"Key Binding"];
+                                                                            origin:@"Key Binding"
+                                                                            window:nil];
                                            }
                                        }];
             return YES;
@@ -7446,6 +7519,7 @@ ITERM_WEAKLY_REFERENCEABLE
 - (void)textViewBackgroundColorDidChange {
     [_delegate sessionBackgroundColorDidChange:self];
     [_delegate sessionUpdateMetalAllowed];
+    [_statusBarViewController updateColors];
     [self.view setNeedsDisplay:YES];
 }
 
@@ -7523,6 +7597,69 @@ ITERM_WEAKLY_REFERENCEABLE
 
 - (BOOL)textViewInInteractiveApplication {
     return _terminal.softAlternateScreenMode;
+}
+
+- (BOOL)textViewTerminalStateForMenuItem:(NSMenuItem *)menuItem {
+    switch (menuItem.tag) {
+        case 1:
+            return _screen.showingAlternateScreen;
+
+        case 2:
+            return _terminal.reportFocus;
+            break;
+
+        case 3:
+            return _terminal.mouseMode != MOUSE_REPORTING_NONE;
+
+        case 4:
+            return _terminal.bracketedPasteMode;
+
+        case 5:
+            return _terminal.cursorMode;
+
+        case 6:
+            return _terminal.keypadMode;
+    }
+
+    return NO;
+}
+
+- (void)textViewToggleTerminalStateForMenuItem:(NSMenuItem *)menuItem {
+    switch (menuItem.tag) {
+        case 1:
+            [_screen toggleAlternateScreen];
+            break;
+
+        case 2:
+            _terminal.reportFocus = !_terminal.reportFocus;
+            break;
+
+        case 3:
+            if (_terminal.mouseMode == MOUSE_REPORTING_NONE) {
+                _terminal.mouseMode = _terminal.previousMouseMode;
+            } else {
+                _terminal.mouseMode = MOUSE_REPORTING_NONE;
+            }
+            [_terminal.delegate terminalMouseModeDidChangeTo:_terminal.mouseMode];
+            break;
+
+        case 4:
+            _terminal.bracketedPasteMode = !_terminal.bracketedPasteMode;
+            break;
+
+        case 5:
+            _terminal.cursorMode = !_terminal.cursorMode;
+            break;
+
+        case 6:
+            [_terminal forceSetKeypadMode:!_terminal.keypadMode];
+            break;
+            
+    }
+}
+
+- (void)textViewResetTerminal {
+    [_terminal gentleReset];
 }
 
 - (void)bury {
@@ -8032,6 +8169,8 @@ ITERM_WEAKLY_REFERENCEABLE
 - (void)screenMouseModeDidChange {
     [_textview updateCursor:nil];
     [_textview updateTrackingAreas];
+    [self.variablesScope setValue:@(_terminal.mouseMode)
+                 forVariableNamed:iTermVariableKeySessionMouseReportingMode];
 }
 
 - (void)screenFlashImage:(NSString *)identifier {
@@ -8128,7 +8267,6 @@ ITERM_WEAKLY_REFERENCEABLE
                                                  withDescription:[NSString stringWithFormat:@"Session %@ #%d had a mark set.",
                                                                   [self name],
                                                                   [_delegate tabNumber]]
-                                                 andNotification:@"Mark Set"
                                                      windowIndex:[self screenWindowIndex]
                                                         tabIndex:[self screenTabIndex]
                                                        viewIndex:[self screenViewIndex]
@@ -9257,7 +9395,8 @@ ITERM_WEAKLY_REFERENCEABLE
             [iTermWarning showWarningWithTitle:@"It looks like you're not at a command prompt."
                                        actions:@[ @"Run Installer Anyway", @"Cancel" ]
                                     identifier:nil
-                                   silenceable:kiTermWarningTypePersistent];
+                                   silenceable:kiTermWarningTypePersistent
+                                        window:self.view.window];
         switch (selection) {
             case kiTermWarningSelection0:
                 [_textview installShellIntegration:nil];
@@ -9411,6 +9550,14 @@ ITERM_WEAKLY_REFERENCEABLE
 
 - (void)screenReportFocusWillChangeTo:(BOOL)reportFocus {
     [self dismissAnnouncementWithIdentifier:kTurnOffFocusReportingOnHostChangeAnnouncementIdentifier];
+}
+
+- (void)screenDidReceiveLineFeed {
+    [_pwdPoller didReceiveLineFeed];
+}
+
+- (void)screenSoftAlternateScreenModeDidChange {
+    [[iTermProcessCache sharedInstance] setNeedsUpdate:YES];
 }
 
 #pragma mark - Announcements
@@ -10123,6 +10270,7 @@ ITERM_WEAKLY_REFERENCEABLE
             subscriptions = _customEscapeSequenceNotifications;
             break;
 
+        case ITMNotificationType_NotifyOnVariableChange:  // Gets special handling before this method is called
         case ITMNotificationType_NotifyOnNewSession:
         case ITMNotificationType_NotifyOnTerminateSession:
         case ITMNotificationType_NotifyOnLayoutChange:
@@ -10210,7 +10358,6 @@ ITERM_WEAKLY_REFERENCEABLE
 - (void)sessionNameControllerPresentationNameDidChangeTo:(NSString *)presentationName {
     [_delegate nameOfSession:self didChangeTo:presentationName];
     [self.view setTitle:presentationName];
-    [self setBell:NO];
 
     // get the session submenu to be rebuilt
     if ([[iTermController sharedInstance] currentTerminal] == [_delegate parentWindow]) {
@@ -10244,10 +10391,26 @@ ITERM_WEAKLY_REFERENCEABLE
 #pragma mark - iTermVariablesDelegate
 
 - (void)variables:(iTermVariables *)variables didChangeValuesForNames:(NSSet<NSString *> *)changedNames group:(dispatch_group_t)group {
+    if ([changedNames containsObject:iTermVariableKeySessionJobPid]) {
+        [[iTermProcessCache sharedInstance] setNeedsUpdate:YES];
+        if ([_graphicSource updateImageForProcessID:self.shell.pid enabled:[self shouldShowTabGraphic]]) {
+            [self.delegate sessionDidChangeGraphic:self];
+        }
+    }
     [_nameController variablesDidChange:changedNames];
     [_badgeSwiftyString variablesDidChange:changedNames];
     [_textview setBadgeLabel:[self badgeLabel]];
     [_statusBarViewController variablesDidChange:changedNames];
+#warning TODO: Don't post notifications when the variable is not within my scope
+    for (NSString *name in changedNames) {
+        id userInfo = iTermVariableDidChangeNotificationUserInfo(ITMVariableScope_Session,
+                                                                 self.guid,
+                                                                 name,
+                                                                 [variables discouragedValueForVariableName:name]);
+        [[NSNotificationCenter defaultCenter] postNotificationName:iTermVariableDidChangeNotification
+                                                            object:nil
+                                                          userInfo:userInfo];
+    }
 }
 
 #pragma mark - iTermEchoProbeDelegate
@@ -10265,7 +10428,8 @@ ITERM_WEAKLY_REFERENCEABLE
                 @"like what you're typing is echoed to the screen."
                                           actions:@[ @"Cancel", @"Enter Password" ]
                                        identifier:nil
-                                      silenceable:kiTermWarningTypePersistent] == kiTermWarningSelection1);
+                                      silenceable:kiTermWarningTypePersistent
+                                           window:self.view.window] == kiTermWarningSelection1);
     if (ok) {
         [_echoProbe enterPassword];
     }
@@ -10303,7 +10467,7 @@ ITERM_WEAKLY_REFERENCEABLE
 
 #pragma mark - iTermStatusBarViewControllerDelegate
 
-- (NSColor *)statusBarDefaultTextColor {
+- (NSColor *)textColorForStatusBar {
     if (self.view.window.ptyWindow.it_terminalWindowUseMinimalStyle) {
         return self.view.window.ptyWindow.it_terminalWindowDecorationTextColor;
     } else if (@available(macOS 10.14, *)) {
@@ -10313,6 +10477,25 @@ ITERM_WEAKLY_REFERENCEABLE
     } else {
         return [NSColor blackColor];
     }
+}
+
+- (NSColor *)statusBarDefaultTextColor {
+    return [self textColorForStatusBar];
+}
+
+- (NSColor *)statusBarSeparatorColor {
+    if (self.view.window.ptyWindow.it_terminalWindowUseMinimalStyle) {
+        return nil;
+    }
+    return _statusBarViewController.layout.advancedConfiguration.separatorColor;
+}
+
+- (NSColor *)statusBarBackgroundColor {
+    return _statusBarViewController.layout.advancedConfiguration.backgroundColor;
+}
+
+- (void)updateStatusBarStyle {
+    [_statusBarViewController updateColors];
 }
 
 #pragma mark - iTermMetaFrustrationDetectorDelegate
@@ -10390,6 +10573,31 @@ ITERM_WEAKLY_REFERENCEABLE
                                                 }];
     static NSString *const identifier = @"OfferToChangeOptionKeyToSendESC";
     [self queueAnnouncement:announcement identifier:identifier];
+}
+
+#pragma mark - iTermWorkingDirectoryPollerDelegate
+
+- (BOOL)workingDirectoryPollerShouldPoll {
+    if (_shellIntegrationEverUsed) {
+        DLog(@"Should not poll for working directory: shell integration used");
+        return NO;
+    }
+    if (_terminal.softAlternateScreenMode) {
+        DLog(@"Should not poll for working directory: soft alternate screen mode");
+    }
+    DLog(@"Should poll for working directory.");
+    return YES;
+}
+
+- (pid_t)workingDirectoryPollerProcessID {
+    return _shell.pid;;
+}
+
+- (void)workingDirectoryPollerDidFindWorkingDirectory:(NSString *)pwd {
+    if (_shellIntegrationEverUsed) {
+        return;
+    }
+    [self.variablesScope setValue:pwd forVariableNamed:iTermVariableKeySessionPath];
 }
 
 @end

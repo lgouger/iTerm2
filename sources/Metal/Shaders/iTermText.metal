@@ -1,4 +1,5 @@
 #import "iTermTextShaderCommon.h"
+#import <metal_math>
 
 // Slow path: taken for all underlined code paths and all solid background code paths (because they aren't used
 // and I don't want to spend time testing dead code right now).
@@ -30,6 +31,7 @@ iTermTextVertexShader(uint vertexID [[ vertex_id ]],
     out.cellOffset = perInstanceUniforms[iid].offset.xy + offset[0];
     out.underlineStyle = perInstanceUniforms[iid].underlineStyle;
     out.underlineColor = static_cast<half4>(perInstanceUniforms[iid].underlineColor);
+    out.power = 3.0 - 2.0 * (0.3 * out.textColor.x + 0.59 * out.textColor.y + 0.11 * out.textColor.z);
 
     return out;
 }
@@ -103,6 +105,7 @@ iTermTextVertexShaderMonochrome(uint vertexID [[ vertex_id ]],
 
     out.textureCoordinate = vertexArray[vertexID].textureCoordinate + perInstanceUniforms[iid].textureOffset;
     out.textColor = static_cast<half4>(perInstanceUniforms[iid].textColor);
+    out.power = 3.0 - 2.0 * (0.3 * out.textColor.x + 0.59 * out.textColor.y + 0.11 * out.textColor.z);
 
     return out;
 }
@@ -226,7 +229,11 @@ iTermTextFragmentShaderMonochrome(iTermTextVertexFunctionOutputMonochrome in [[s
                                      min_filter::linear);
 
     half4 textureColor = texture.sample(textureSampler, in.textureCoordinate);
-    return textureColor * in.textColor;
+    // These values were arrived at experimentally.
+    // They're not a perfect match for how the system recolors glyphs but it's close.
+    half4 result = in.textColor;
+    result.w *= pow(textureColor.w, in.power);
+    return result;
 }
 
 // Return sample from texture plus underline
@@ -285,8 +292,11 @@ iTermTextFragmentShaderMonochromeUnderlined(iTermTextVertexFunctionOutput in [[s
                                                                  textureSampler,
                                                                  dimensions->scale);
 
+    half4 recoloredTextColor = static_cast<half4>(in.textColor);
+    recoloredTextColor.w *= pow(textureColor.w, in.power);
+
     // I could eke out a little speed by passing a half4 from the vector shader but this is so slow I'd rather not add the complexity.
-    return mix(textureColor * static_cast<half4>(in.textColor),
+    return mix(recoloredTextColor,
                in.underlineColor,
                underlineWeight);
 }

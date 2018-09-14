@@ -9,6 +9,7 @@
 #import "iTermMetalClipView.h"
 #import "iTermMetalDeviceProvider.h"
 #import "iTermPreferences.h"
+#import "iTermStatusBarLayout.h"
 #import "iTermStatusBarSearchFieldComponent.h"
 #import "iTermStatusBarViewController.h"
 #import "NSAppearance+iTerm.h"
@@ -1315,6 +1316,12 @@ static NSDate* lastResizeDate_;
 }
 
 - (NSColor *)sessionTitleViewBackgroundColor {
+    if (!_showBottomStatusBar && _title.statusBarViewController) {
+        NSColor *color = _title.statusBarViewController.layout.advancedConfiguration.backgroundColor;
+        if (color) {
+            return color;
+        }
+    }
     return [self backgroundColorForDecorativeSubviews];
 }
 
@@ -1374,6 +1381,7 @@ static NSDate* lastResizeDate_;
 
         NSRect initialRect = finalRect;
         initialRect.origin.y += finalRect.size.height;
+        _title.hidden = YES;
         _currentAnnouncement.view.frame = initialRect;
 
         [_currentAnnouncement.view.animator setFrame:finalRect];
@@ -1381,6 +1389,8 @@ static NSDate* lastResizeDate_;
         _currentAnnouncement.view.autoresizingMask = NSViewWidthSizable | NSViewMinYMargin;
         [_currentAnnouncement didBecomeVisible];
         [self addSubviewBelowFindView:_currentAnnouncement.view];
+    } else {
+        _title.hidden = NO;
     }
     [self.delegate sessionViewAnnouncementDidChange:self];
 }

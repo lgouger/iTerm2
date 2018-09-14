@@ -88,7 +88,7 @@ static const double kInterBellQuietPeriod = 0.1;
     BOOL audibleBell_;
     BOOL showBellIndicator_;
     BOOL flashBell_;
-    BOOL postGrowlNotifications_;
+    BOOL postUserNotifications_;
     BOOL cursorBlinks_;
     VT100Grid *primaryGrid_;
     VT100Grid *altGrid_;  // may be nil
@@ -180,7 +180,7 @@ static NSString *const kInilineFileInset = @"inset";  // NSValue of NSEdgeInsets
 @synthesize audibleBell = audibleBell_;
 @synthesize showBellIndicator = showBellIndicator_;
 @synthesize flashBell = flashBell_;
-@synthesize postGrowlNotifications = postGrowlNotifications_;
+@synthesize postUserNotifications = postUserNotifications_;
 @synthesize cursorBlinks = cursorBlinks_;
 @synthesize allowTitleReporting = allowTitleReporting_;
 @synthesize maxScrollbackLines = maxScrollbackLines_;
@@ -2528,6 +2528,7 @@ basedAtAbsoluteLineNumber:(long long)absoluteLineNumber
         [self linefeed];
     }
     [delegate_ screenTriggerableChangeDidOccur];
+    [delegate_ screenDidReceiveLineFeed];
 }
 
 - (void)terminalCursorLeft:(int)n
@@ -3119,8 +3120,8 @@ basedAtAbsoluteLineNumber:(long long)absoluteLineNumber
     }
 }
 
-- (BOOL)terminalPostGrowlNotification:(NSString *)message {
-    if (postGrowlNotifications_ && [delegate_ screenShouldPostTerminalGeneratedAlert]) {
+- (BOOL)terminalPostUserNotification:(NSString *)message {
+    if (postUserNotifications_ && [delegate_ screenShouldPostTerminalGeneratedAlert]) {
         [delegate_ screenIncrementBadge];
         NSString *description = [NSString stringWithFormat:@"Session %@ #%d: %@",
                                     [delegate_ screenName],
@@ -3129,7 +3130,6 @@ basedAtAbsoluteLineNumber:(long long)absoluteLineNumber
         BOOL sent = [[iTermNotificationController sharedInstance]
                                  notify:@"Alert"
                         withDescription:description
-                        andNotification:@"Customized Message"
                             windowIndex:[delegate_ screenWindowIndex]
                                tabIndex:[delegate_ screenTabIndex]
                               viewIndex:[delegate_ screenViewIndex]];
@@ -3254,6 +3254,14 @@ basedAtAbsoluteLineNumber:(long long)absoluteLineNumber
     [currentGrid_ markAllCharsDirty:YES];
     [delegate_ screenScheduleRedrawSoon];
     commandStartX_ = commandStartY_ = -1;
+}
+
+- (void)toggleAlternateScreen {
+    if (self.showingAlternateScreen) {
+        [self terminalShowPrimaryBuffer];
+    } else {
+        [self terminalShowAltBuffer];
+    }
 }
 
 - (BOOL)terminalIsShowingAltBuffer {
@@ -4383,6 +4391,10 @@ basedAtAbsoluteLineNumber:(long long)absoluteLineNumber
 
 - (void)terminalReportFocusWillChangeTo:(BOOL)reportFocus {
     [self.delegate screenReportFocusWillChangeTo:reportFocus];
+}
+
+- (void)terminalSoftAlternateScreenModeDidChange {
+    [self.delegate screenSoftAlternateScreenModeDidChange];
 }
 
 #pragma mark - Private

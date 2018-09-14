@@ -13,6 +13,7 @@
 #import "FutureMethods.h"
 #import "ITAddressBookMgr.h"
 #import "iTerm.h"
+#import "iTermAPIHelper.h"
 #import "iTermAboutWindow.h"
 #import "iTermAdvancedSettingsModel.h"
 #import "iTermAnnouncementView.h"
@@ -134,6 +135,7 @@ static NSString* TERMINAL_ARRANGEMENT_HIDE_AFTER_OPENING = @"Hide After Opening"
 static NSString* TERMINAL_ARRANGEMENT_DESIRED_COLUMNS = @"Desired Columns";
 static NSString* TERMINAL_ARRANGEMENT_DESIRED_ROWS = @"Desired Rows";
 static NSString* TERMINAL_ARRANGEMENT_IS_HOTKEY_WINDOW = @"Is Hotkey Window";
+static NSString* TERMINAL_ARRANGEMENT_INITIAL_PROFILE = @"Initial Profile";  // Optional
 
 static NSString* TERMINAL_GUID = @"TerminalGuid";
 static NSString* TERMINAL_ARRANGEMENT_HAS_TOOLBELT = @"Has Toolbelt";
@@ -439,6 +441,11 @@ static NSRect iTermRectCenteredVerticallyWithinRect(NSRect frameToCenter, NSRect
     }
 }
 
++ (Profile *)expurgatedInitialProfile:(Profile *)profile {
+    // We don't care about almost all the keys in the profile, so don't waste space and privacy storing them.
+    return [profile ?: @{} dictionaryKeepingOnlyKeys:@[ KEY_CUSTOM_WINDOW_TITLE, KEY_USE_CUSTOM_WINDOW_TITLE ]];
+}
+
 - (instancetype)initWithWindowNibName:(NSString *)windowNibName {
     self = [super initWithWindowNibName:windowNibName];
     if (self) {
@@ -450,19 +457,22 @@ static NSRect iTermRectCenteredVerticallyWithinRect(NSRect frameToCenter, NSRect
 - (instancetype)initWithSmartLayout:(BOOL)smartLayout
                          windowType:(iTermWindowType)windowType
                     savedWindowType:(iTermWindowType)savedWindowType
-                             screen:(int)screenNumber {
+                             screen:(int)screenNumber
+                            profile:(Profile *)profile {
     return [self initWithSmartLayout:smartLayout
                           windowType:windowType
                      savedWindowType:savedWindowType
                               screen:screenNumber
-                    hotkeyWindowType:iTermHotkeyWindowTypeNone];
+                    hotkeyWindowType:iTermHotkeyWindowTypeNone
+                             profile:profile];
 }
 
 - (instancetype)initWithSmartLayout:(BOOL)smartLayout
                          windowType:(iTermWindowType)windowType
                     savedWindowType:(iTermWindowType)savedWindowType
                              screen:(int)screenNumber
-                   hotkeyWindowType:(iTermHotkeyWindowType)hotkeyWindowType {
+                   hotkeyWindowType:(iTermHotkeyWindowType)hotkeyWindowType
+                            profile:(Profile *)profile {
     self = [self initWithWindowNibName:@"PseudoTerminal"];
     NSAssert(self, @"initWithWindowNibName returned nil");
     if (self) {
@@ -470,7 +480,8 @@ static NSRect iTermRectCenteredVerticallyWithinRect(NSRect frameToCenter, NSRect
                                        windowType:windowType
                                   savedWindowType:savedWindowType
                                            screen:screenNumber
-                                 hotkeyWindowType:hotkeyWindowType];
+                                 hotkeyWindowType:hotkeyWindowType
+                                          profile:profile];
     }
     return self;
 }
@@ -523,7 +534,8 @@ static NSRect iTermRectCenteredVerticallyWithinRect(NSRect frameToCenter, NSRect
                                  windowType:(iTermWindowType)windowType
                             savedWindowType:(iTermWindowType)savedWindowType
                                      screen:(int)screenNumber
-                           hotkeyWindowType:(iTermHotkeyWindowType)hotkeyWindowType {
+                           hotkeyWindowType:(iTermHotkeyWindowType)hotkeyWindowType
+                                    profile:(Profile *)profile {
     DLog(@"-[%p finishInitializationWithSmartLayout:%@ windowType:%d screen:%d hotkeyWindowType:%@ ",
          self,
          smartLayout ? @"YES" : @"NO",
@@ -769,6 +781,13 @@ static NSRect iTermRectCenteredVerticallyWithinRect(NSRect frameToCenter, NSRect
     }
     _shortcutAccessoryViewController.ordinal = number_ + 1;
 #endif
+
+    _initialProfile = [[PseudoTerminal expurgatedInitialProfile:profile] retain];
+    if ([iTermProfilePreferences boolForKey:KEY_USE_CUSTOM_WINDOW_TITLE inProfile:profile]) {
+        NSString *override = [iTermProfilePreferences stringForKey:KEY_CUSTOM_WINDOW_TITLE inProfile:profile];;
+        self.titleOverride = override.length ? override : @" ";
+    }
+
     [[NSNotificationCenter defaultCenter] postNotificationName:kTerminalWindowControllerWasCreatedNotification object:self];
     DLog(@"Done initializing PseudoTerminal %@", self);
 }
@@ -793,8 +812,10 @@ static NSRect iTermRectCenteredVerticallyWithinRect(NSRect frameToCenter, NSRect
         case iTermHotkeyWindowTypeFloatingPanel:
         case iTermHotkeyWindowTypeFloatingWindow:
             [[self window] setCollectionBehavior:[[self window] collectionBehavior] | NSWindowCollectionBehaviorFullScreenAuxiliary];
-            [[self window] setCollectionBehavior:[[self window] collectionBehavior] | NSWindowCollectionBehaviorIgnoresCycle];
-            [[self window] setCollectionBehavior:[[self window] collectionBehavior] & ~NSWindowCollectionBehaviorParticipatesInCycle];
+            if (![iTermAdvancedSettingsModel hotkeyWindowsExcludedFromCycling]) {
+                [[self window] setCollectionBehavior:[[self window] collectionBehavior] | NSWindowCollectionBehaviorIgnoresCycle];
+                [[self window] setCollectionBehavior:[[self window] collectionBehavior] & ~NSWindowCollectionBehaviorParticipatesInCycle];
+            }
             break;
     }
 }
@@ -871,6 +892,7 @@ ITERM_WEAKLY_REFERENCEABLE
     [_variables release];
     [_scope release];
     [_windowTitleOverrideSwiftyString release];
+    [_initialProfile release];
 
     [super dealloc];
 }
@@ -897,6 +919,22 @@ ITERM_WEAKLY_REFERENCEABLE
             (self.window.styleMask & NSWindowStyleMaskTitled) &&
             ![self anyFullScreen] &&
             ![self tabBarVisibleOnTop]);
+}
+
+- (BOOL)rootTerminalViewShouldDrawWindowTitleInPlaceOfTabBar {
+    if (self.anyFullScreen) {
+        return NO;
+    }
+    if (windowType_ != WINDOW_TYPE_COMPACT) {
+        return NO;
+    }
+    if (self.tabBarShouldBeVisible) {
+        return NO;
+    }
+    if ([iTermPreferences intForKey:kPreferenceKeyTabPosition] != PSMTab_TopTab) {
+        return NO;
+    }
+    return YES;
 }
 
 - (void)rootTerminalViewDidResizeContentArea {
@@ -1062,7 +1100,8 @@ ITERM_WEAKLY_REFERENCEABLE
     term = [[[PseudoTerminal alloc] initWithSmartLayout:NO
                                              windowType:newWindowType
                                         savedWindowType:savedWindowType
-                                                 screen:screen] autorelease];
+                                                 screen:screen
+                                                profile:self.initialProfile] autorelease];
     if (term == nil) {
         return nil;
     }
@@ -1421,7 +1460,8 @@ ITERM_WEAKLY_REFERENCEABLE
                                      accessory:nil
                                     identifier:@"ClosingTmuxTabKillsTmuxWindows"
                                    silenceable:kiTermWarningTypePermanentlySilenceable
-                                       heading:nil];
+                                       heading:nil
+                                        window:self.window];
         if (selection == kiTermWarningSelection1) {
             [[aTab tmuxController] killWindow:[aTab tmuxWindow]];
         } else if (selection == kiTermWarningSelection0) {
@@ -1669,6 +1709,7 @@ ITERM_WEAKLY_REFERENCEABLE
         warning.warningActions = @[ ok, cancel ];
         warning.identifier = @"NoSyncSuppressRestartSessionConfirmationAlert";
         warning.warningType = kiTermWarningTypePermanentlySilenceable;
+        warning.window = self.window;
         [warning runModal];
     }
 }
@@ -1747,6 +1788,8 @@ ITERM_WEAKLY_REFERENCEABLE
         title = @"";
     }
 
+    NSString *titleExWindowNumber = title;
+
     if ([iTermPreferences boolForKey:kPreferenceKeyShowWindowNumber]) {
         NSString *tmuxId = @"";
         if ([[self currentSession] isTmuxClient]) {
@@ -1765,42 +1808,51 @@ ITERM_WEAKLY_REFERENCEABLE
         }
 #endif
         title = [NSString stringWithFormat:@"%@%@%@", windowNumber, title, tmuxId];
+        titleExWindowNumber = [NSString stringWithFormat:@"%@%@", titleExWindowNumber, tmuxId];
+        [self.contentView windowNumberDidChangeTo:@(number_ + 1)];
+    } else {
+        [self.contentView windowNumberDidChangeTo:nil];
     }
     if ((self.numberOfTabs == 1) && (self.tabs.firstObject.state & kPTYTabBellState) && !self.tabBarShouldBeVisible) {
         title = [title stringByAppendingString:@" 🔔"];
+        titleExWindowNumber = [titleExWindowNumber stringByAppendingString:@" 🔔"];
     }
     if ((self.desiredTitle && [title isEqualToString:self.desiredTitle]) ||
         [title isEqualToString:self.window.title]) {
         return; // Title is already up to date
-    } else if (liveResize_) {
+    }
+
+    [self.contentView windowTitleDidChangeTo:titleExWindowNumber];
+
+    if (liveResize_) {
         // During a live resize this has to be done immediately because the runloop doesn't get
         // around to delayed performs until the live resize is done (bug 2812).
         self.window.title = title;
-    } else {
-        // In bug 2593, we see a crazy thing where setting the window title right
-        // after a window is created causes it to have the wrong background color.
-        // A delay of 0 doesn't fix it. I'm at wit's end here, so this will have to
-        // do until a better explanation comes along.
+        return;
+    }
+    // In bug 2593, we see a crazy thing where setting the window title right
+    // after a window is created causes it to have the wrong background color.
+    // A delay of 0 doesn't fix it. I'm at wit's end here, so this will have to
+    // do until a better explanation comes along.
 
-        // In bug 3957, we see that GNU screen is buggy and sends a crazy number of title changes.
-        // We want to coalesce them to avoid the title flickering like mad. Also, setting the title
-        // seems to be relatively slow, so we don't want to spend too much time doing that if the
-        // terminal goes nuts and sends lots of title-change sequences.
-        BOOL hadTimer = (self.desiredTitle != nil);
-        self.desiredTitle = title;
-        if (!hadTimer) {
-            if (!_windowWasJustCreated && ![self.ptyWindow titleChangedRecently]) {
-                // Unless the window was just created, set the title immediately. Issue 5876.
-                self.window.title = self.desiredTitle;
-            }
-            PseudoTerminal<iTermWeakReference> *weakSelf = self.weakSelf;
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(iTermWindowTitleChangeMinimumInterval * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                if (!(weakSelf.window.title == weakSelf.desiredTitle || [weakSelf.window.title isEqualToString:weakSelf.desiredTitle])) {
-                    weakSelf.window.title = weakSelf.desiredTitle;
-                }
-                weakSelf.desiredTitle = nil;
-            });
+    // In bug 3957, we see that GNU screen is buggy and sends a crazy number of title changes.
+    // We want to coalesce them to avoid the title flickering like mad. Also, setting the title
+    // seems to be relatively slow, so we don't want to spend too much time doing that if the
+    // terminal goes nuts and sends lots of title-change sequences.
+    BOOL hadTimer = (self.desiredTitle != nil);
+    self.desiredTitle = title;
+    if (!hadTimer) {
+        if (!_windowWasJustCreated && ![self.ptyWindow titleChangedRecently]) {
+            // Unless the window was just created, set the title immediately. Issue 5876.
+            self.window.title = self.desiredTitle;
         }
+        PseudoTerminal<iTermWeakReference> *weakSelf = self.weakSelf;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(iTermWindowTitleChangeMinimumInterval * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            if (!(weakSelf.window.title == weakSelf.desiredTitle || [weakSelf.window.title isEqualToString:weakSelf.desiredTitle])) {
+                weakSelf.window.title = weakSelf.desiredTitle;
+            }
+            weakSelf.desiredTitle = nil;
+        });
     }
 }
 
@@ -2163,7 +2215,8 @@ ITERM_WEAKLY_REFERENCEABLE
                                                  windowType:WINDOW_TYPE_TRADITIONAL_FULL_SCREEN
                                             savedWindowType:[arrangement[TERMINAL_ARRANGEMENT_SAVED_WINDOW_TYPE] intValue]
                                                      screen:screenIndex
-                                           hotkeyWindowType:hotkeyWindowType] autorelease];
+                                           hotkeyWindowType:hotkeyWindowType
+                                                    profile:arrangement[TERMINAL_ARRANGEMENT_INITIAL_PROFILE]] autorelease];
 
         NSRect rect;
         rect.origin.x = [[arrangement objectForKey:TERMINAL_ARRANGEMENT_OLD_X_ORIGIN] doubleValue];
@@ -2180,7 +2233,8 @@ ITERM_WEAKLY_REFERENCEABLE
                                                  windowType:WINDOW_TYPE_LION_FULL_SCREEN
                                             savedWindowType:[arrangement[TERMINAL_ARRANGEMENT_SAVED_WINDOW_TYPE] intValue]
                                                      screen:screenIndex
-                                           hotkeyWindowType:hotkeyWindowType] autorelease];
+                                           hotkeyWindowType:hotkeyWindowType
+                                                    profile:arrangement[TERMINAL_ARRANGEMENT_INITIAL_PROFILE]] autorelease];
         [term delayedEnterFullscreen];
     } else {
         // Support legacy edge-spanning flag by adjusting the
@@ -2208,7 +2262,8 @@ ITERM_WEAKLY_REFERENCEABLE
                                                  windowType:windowType
                                             savedWindowType:windowType
                                                      screen:screenIndex
-                                           hotkeyWindowType:hotkeyWindowType] autorelease];
+                                           hotkeyWindowType:hotkeyWindowType
+                                                    profile:arrangement[TERMINAL_ARRANGEMENT_INITIAL_PROFILE]] autorelease];
 
         NSRect rect;
         rect.origin.x = [[arrangement objectForKey:TERMINAL_ARRANGEMENT_X_ORIGIN] doubleValue];
@@ -2543,6 +2598,10 @@ ITERM_WEAKLY_REFERENCEABLE
     return [self arrangementWithTabs:tabs includingContents:includeContents];
 }
 
+- (Profile *)expurgatedInitialProfile {
+    return [PseudoTerminal expurgatedInitialProfile:_initialProfile];
+}
+
 - (NSDictionary *)arrangementWithTabs:(NSArray<PTYTab *> *)tabs
                              includingContents:(BOOL)includeContents {
     NSMutableDictionary* result = [NSMutableDictionary dictionaryWithCapacity:7];
@@ -2578,6 +2637,7 @@ ITERM_WEAKLY_REFERENCEABLE
 
     result[TERMINAL_ARRANGEMENT_WINDOW_TYPE] = @([self lionFullScreen] ? WINDOW_TYPE_LION_FULL_SCREEN : windowType_);
     result[TERMINAL_ARRANGEMENT_SAVED_WINDOW_TYPE] = @(savedWindowType_);
+    result[TERMINAL_ARRANGEMENT_INITIAL_PROFILE] = [self expurgatedInitialProfile];
     if (_hotkeyWindowType == iTermHotkeyWindowTypeNone) {
         result[TERMINAL_ARRANGEMENT_SCREEN_INDEX] = @([[NSScreen screens] indexOfObjectIdenticalTo:[[self window] screen]]);
     } else {
@@ -2697,7 +2757,8 @@ ITERM_WEAKLY_REFERENCEABLE
                 [iTermWarning showWarningWithTitle:title
                                            actions:@[ @"Hide", @"Detach tmux Session", @"Kill" ]
                                         identifier:@"ClosingTmuxWindowKillsTmuxWindows"
-                                       silenceable:kiTermWarningTypePermanentlySilenceable];
+                                       silenceable:kiTermWarningTypePermanentlySilenceable
+                                            window:self.window];
             // If there are tmux tabs, tell the tmux server to kill/hide the
             // window, but go ahead and close the window anyway because there
             // might be non-tmux tabs as well. This is a rare instance of
@@ -2892,7 +2953,7 @@ ITERM_WEAKLY_REFERENCEABLE
     [self notifyTmuxOfTabChange];
 
     [self updateUseMetalInAllTabs];
-    [_contentView updateDivisionView];
+    [_contentView updateDivisionViewAndWindowNumberLabel];
 }
 
 - (void)makeCurrentSessionFirstResponder
@@ -3227,7 +3288,17 @@ ITERM_WEAKLY_REFERENCEABLE
         return;
     }
 
-    if (![iTermApplication sharedApplication].it_characterPanelIsOpen) {
+    BOOL shouldAutoHideHotkeyWindow = YES;
+    if (self.ptyWindow.it_openingSheet) {
+        shouldAutoHideHotkeyWindow = NO;
+        DLog(@"windowDidResignKey not auto-hiding hotkey window because a sheet is being opened.");
+    }
+    if ([iTermApplication sharedApplication].it_characterPanelIsOpen) {
+        shouldAutoHideHotkeyWindow = NO;
+        DLog(@"windowDidResignKey not auto-hiding hotkey window because the character panel is open.");
+    }
+
+    if (shouldAutoHideHotkeyWindow) {
         NSArray<NSWindowController *> *siblings = [[iTermHotKeyController sharedInstance] siblingWindowControllersOf:self];
         NSWindowController *newKeyWindowController = [[NSApp keyWindow] windowController];
         if (![siblings containsObject:newKeyWindowController]) {
@@ -3267,7 +3338,7 @@ ITERM_WEAKLY_REFERENCEABLE
     }
 
     [self updateUseMetalInAllTabs];
-    [_contentView updateDivisionView];
+    [_contentView updateDivisionViewAndWindowNumberLabel];
 }
 
 - (void)windowDidBecomeMain:(NSNotification *)notification {
@@ -3337,8 +3408,19 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (BOOL)enableStoplightHotbox {
-    return (windowType_ == WINDOW_TYPE_COMPACT &&
-            [iTermPreferences intForKey:kPreferenceKeyTabPosition] == PSMTab_BottomTab);
+    if (windowType_ != WINDOW_TYPE_COMPACT) {
+        return NO;
+    }
+    switch ([iTermPreferences intForKey:kPreferenceKeyTabPosition]) {
+        case PSMTab_BottomTab:
+            return YES;
+        case PSMTab_TopTab:
+            return NO;
+        case PSMTab_LeftTab:
+            return !self.tabBarShouldBeVisible;
+    }
+
+    return NO;
 }
 
 - (NSEdgeInsets)tabBarInsets {
@@ -3347,7 +3429,11 @@ ITERM_WEAKLY_REFERENCEABLE
     }
     switch ([iTermPreferences intForKey:kPreferenceKeyTabPosition]) {
         case PSMTab_TopTab:
-            return NSEdgeInsetsMake(0, 69, 0, 0);
+            if ([self rootTerminalViewWindowNumberLabelShouldBeVisible]) {
+                return NSEdgeInsetsMake(0, 75 + iTermRootTerminalViewWindowNumberLabelMargin * 2 + iTermRootTerminalViewWindowNumberLabelWidth, 0, 0);
+            } else {
+                return NSEdgeInsetsMake(0, 75, 0, 0);
+            }
 
         case PSMTab_LeftTab:
             return NSEdgeInsetsMake(24, 0, 0, 0);
@@ -3360,10 +3446,7 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (BOOL)tabBarAlwaysVisible {
-    if (![iTermPreferences boolForKey:kPreferenceKeyHideTabBar]) {
-        return YES;
-    }
-    return windowType_ == WINDOW_TYPE_COMPACT;
+    return ![iTermPreferences boolForKey:kPreferenceKeyHideTabBar];
 }
 
 - (BOOL)anyFullScreen
@@ -3701,10 +3784,10 @@ ITERM_WEAKLY_REFERENCEABLE
     return [self traditionalFullScreenFrameForScreen:self.window.screen];
 }
 
-- (BOOL)fullScreenWindowFrameShouldBeShiftedDownBelowMenuBar {
+- (BOOL)fullScreenWindowFrameShouldBeShiftedDownBelowMenuBarOnScreen:(NSScreen *)screen {
     const BOOL wantToHideMenuBar = [iTermPreferences boolForKey:kPreferenceKeyHideMenuBarInFullscreen];
     const BOOL canHideMenuBar = ![iTermPreferences boolForKey:kPreferenceKeyUIElement];
-    const BOOL menuBarIsHidden = ![[iTermMenuBarObserver sharedInstance] menuBarVisible];
+    const BOOL menuBarIsHidden = ![[iTermMenuBarObserver sharedInstance] menuBarVisibleOnScreen:screen];
     const BOOL canOverlapMenuBar = [self.window isKindOfClass:[iTermPanel class]];
 
     DLog(@"Checking if the fullscreen window frame should be shifted down below the menu bar. "
@@ -3733,7 +3816,7 @@ ITERM_WEAKLY_REFERENCEABLE
     frameMinusMenuBar.size.height -= [[[NSApplication sharedApplication] mainMenu] menuBarHeight];
     BOOL menuBarIsVisible = NO;
 
-    if ([self fullScreenWindowFrameShouldBeShiftedDownBelowMenuBar]) {
+    if ([self fullScreenWindowFrameShouldBeShiftedDownBelowMenuBarOnScreen:screen]) {
         menuBarIsVisible = YES;
     }
     if (menuBarIsVisible) {
@@ -3960,6 +4043,7 @@ ITERM_WEAKLY_REFERENCEABLE
         }
     }
     _fullScreen = !_fullScreen;
+    [self didChangeAnyFullScreen];
     [_contentView.tabBarControl updateFlashing];
     togglingFullScreen_ = YES;
     _contentView.toolbeltWidth = savedToolbeltWidth;
@@ -4168,9 +4252,16 @@ ITERM_WEAKLY_REFERENCEABLE
     [self updateUseMetalInAllTabs];
 }
 
+- (void)didChangeAnyFullScreen {
+    for (PTYSession *session in self.allSessions) {
+        [session updateStatusBarStyle];
+    }
+}
+
 - (void)windowWillEnterFullScreen:(NSNotification *)notification {
     DLog(@"Window will enter lion fullscreen");
     togglingLionFullScreen_ = YES;
+    [self didChangeAnyFullScreen];
     [self updateUseMetalInAllTabs];
     [self repositionWidgets];
     [_contentView didChangeCompactness];
@@ -4184,6 +4275,7 @@ ITERM_WEAKLY_REFERENCEABLE
     togglingLionFullScreen_ = NO;
     _fullScreenRetryCount = 0;
     lionFullScreen_ = YES;
+    [self didChangeAnyFullScreen];
     [_contentView.tabBarControl setFlashing:YES];
     [_contentView updateToolbelt];
     // Set scrollbars appropriately
@@ -4245,7 +4337,8 @@ ITERM_WEAKLY_REFERENCEABLE
     exitingLionFullscreen_ = NO;
     zooming_ = NO;
     lionFullScreen_ = NO;
-    
+    [self didChangeAnyFullScreen];
+
     DLog(@"Window did exit fullscreen. Set window type to %d", savedWindowType_);
     self.windowType = savedWindowType_;
 
@@ -5434,7 +5527,10 @@ ITERM_WEAKLY_REFERENCEABLE
     }
 }
 
-- (NSColor *)accessoryTextColor {
+- (NSColor *)accessoryTextColorForMini:(BOOL)mini {
+    if (mini) {
+        return [self.currentSession textColorForStatusBar];
+    }
     if ([_contentView.tabBarControl isHidden] && ![self anyFullScreen]) {
         return [NSColor blackColor];
     } else {
@@ -6709,7 +6805,8 @@ ITERM_WEAKLY_REFERENCEABLE
         if ([iTermWarning showWarningWithTitle:@"Keyboard input will be sent to multiple sessions."
                                        actions:@[ @"OK", @"Cancel" ]
                                     identifier:@"NoSyncSuppressBroadcastInputWarning"
-                                   silenceable:kiTermWarningTypePermanentlySilenceable] == kiTermWarningSelection1) {
+                                   silenceable:kiTermWarningTypePermanentlySilenceable
+                                        window:self.window] == kiTermWarningSelection1) {
             return;
         }
     }
@@ -6919,6 +7016,7 @@ ITERM_WEAKLY_REFERENCEABLE
     }
 #else
     [self setWindowTitle];
+    [_contentView layoutSubviews];
 #endif
 }
 
@@ -6991,6 +7089,7 @@ ITERM_WEAKLY_REFERENCEABLE
 
             // In case dimming amount slider moved update the dimming amount.
             [[aSession view] updateDim];
+            [aSession updateStatusBarStyle];
         }
     }
 
@@ -7009,9 +7108,60 @@ ITERM_WEAKLY_REFERENCEABLE
             [self fitWindowToTabs];
         }
     }
-
     // If the theme changed from light to dark make sure split pane dividers redraw.
     [_contentView.tabView setNeedsDisplay:YES];
+}
+
+- (BOOL)rootTerminalViewWindowNumberLabelShouldBeVisible {
+    if ([iTermPreferences intForKey:kPreferenceKeyTabPosition] == PSMTab_LeftTab) {
+        return !self.anyFullScreen;
+    }
+    if ([iTermPreferences intForKey:kPreferenceKeyTabPosition] != PSMTab_TopTab) {
+        return NO;
+    }
+    if (![iTermPreferences boolForKey:kPreferenceKeyShowWindowNumber]) {
+        return NO;
+    }
+    if (windowType_ == WINDOW_TYPE_COMPACT) {
+        return YES;
+    }
+    if (self.anyFullScreen) {
+        return self.tabBarShouldBeVisible;
+    }
+
+    return NO;
+}
+
+- (NSColor *)rootTerminalViewTabBarBackgroundColor {
+    // This is only called if there is 1 tab and the tab bar is not shown and we're drawing
+    // the background of the fake title bar.
+    if (self.currentSession.tabColor) {
+        return self.currentSession.tabColor;
+    }
+    return [_contentView.tabBarControl.style backgroundColorSelected:NO highlightAmount:0];
+}
+
+- (NSColor *)rootTerminalViewTabBarTextColorForWindowNumber {
+    iTermPreferencesTabStyle preferredStyle = [iTermPreferences intForKey:kPreferenceKeyTabStyle];
+    if (preferredStyle != TAB_STYLE_MINIMAL && self.tabBarShouldBeVisible) {
+        // The window number will be displayed over the system titlebar color.
+        return [NSColor labelColor];
+    }
+    
+    if (self.currentSession.tabColor &&
+        [self.tabView indexOfTabViewItem:self.tabView.selectedTabViewItem] == 0) {
+        // The window number will be displayed over the tab color.
+        // Use text color of first tab when the first tab is selected.
+        return [_contentView.tabBarControl.style textColorForCell:_contentView.tabBarControl.cells.firstObject];
+    }
+    
+    // The window number will be displayed over the tabbar color.
+    return [_contentView.tabBarControl.style textColorDefaultSelected:self.window.isKeyWindow];
+}
+
+- (NSColor *)rootTerminalViewTabBarTextColorForTitle {
+    // This is only called for compact windows. Minimal is irrelevant.
+    return [_contentView.tabBarControl.style textColorForCell:_contentView.tabBarControl.cells.firstObject];
 }
 
 - (void)rootTerminalViewDidChangeEffectiveAppearance {
@@ -7241,6 +7391,8 @@ ITERM_WEAKLY_REFERENCEABLE
                 contentSize.width += [self tabviewWidth];
                 break;
         }
+    } else if ([self rootTerminalViewShouldDrawWindowTitleInPlaceOfTabBar]) {
+        contentSize.height += [self rootTerminalViewHeightOfTabBar:_contentView];
     }
 
     // Add 1px border
@@ -8056,6 +8208,7 @@ ITERM_WEAKLY_REFERENCEABLE
                 [[PreferencePanel sessionsInstance] underlyingBookmarkDidChange];
             }
         }
+        [session updateStatusBarStyle];
     }
     if (self.isHotKeyWindow) {
         iTermProfileHotKey *profileHotKey = [[iTermHotKeyController sharedInstance] profileHotKeyForWindowController:self];
@@ -8436,6 +8589,10 @@ ITERM_WEAKLY_REFERENCEABLE
     }
 }
 
+- (void)tabDidChangeGraphic:(PTYTab *)tab {
+    [_contentView.tabBarControl graphicDidChangeForTabWithIdentifier:tab];
+}
+
 - (void)tabDidChangeTmuxLayout:(PTYTab *)tab {
     [self setWindowTitle];
 }
@@ -8569,6 +8726,16 @@ ITERM_WEAKLY_REFERENCEABLE
 
 - (void)variables:(iTermVariables *)variables didChangeValuesForNames:(NSSet<NSString *> *)changedNames group:(dispatch_group_t)group {
     [self.windowTitleOverrideSwiftyString variablesDidChange:changedNames];
+#warning TODO: Don't post a notif if the variable isn't in my scope
+    for (NSString *name in changedNames) {
+        id userInfo = iTermVariableDidChangeNotificationUserInfo(ITMVariableScope_App,
+                                                                 self.terminalGuid,
+                                                                 name,
+                                                                 [variables discouragedValueForVariableName:name]);
+        [[NSNotificationCenter defaultCenter] postNotificationName:iTermVariableDidChangeNotification
+                                                            object:nil
+                                                          userInfo:userInfo];
+    }
 }
 
 #pragma mark - PSMMinimalTabStyleDelegate

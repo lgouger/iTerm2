@@ -209,6 +209,17 @@ static const NSEventModifierFlags iTermHotkeyModifierMask = (NSEventModifierFlag
     return temp;
 }
 
+- (NSDictionary *)dictionaryKeepingOnlyKeys:(NSArray *)keys {
+    NSMutableDictionary *dictionary = [NSMutableDictionary dictionary];
+    for (id key in keys) {
+        id object = self[key];
+        if (object) {
+            dictionary[key] = object;
+        }
+    }
+    return dictionary;
+}
+
 - (NSData *)propertyListData {
     NSString *filename = [[NSWorkspace sharedWorkspace] temporaryFileNameWithPrefix:@"DictionaryPropertyList" suffix:@"iTerm2"];
     [self writeToFile:filename atomically:NO];
@@ -319,6 +330,18 @@ static const NSEventModifierFlags iTermHotkeyModifierMask = (NSEventModifierFlag
     return error == nil;
 }
 
+- (NSDictionary *)it_attributesDictionaryWithAppearance:(NSAppearance *)appearance {
+    NSMutableDictionary *result = [NSMutableDictionary dictionary];
+    [self enumerateKeysAndObjectsUsingBlock:^(id  _Nonnull key, id  _Nonnull obj, BOOL * _Nonnull stop) {
+        if ([obj isKindOfClass:[NSColor class]]) {
+            result[key] = [obj it_colorWithAppearance:appearance];
+        } else {
+            result[key] = obj;
+        }
+    }];
+    return result;
+}
+
 @end
 
 @implementation NSDictionary(HotKey)
@@ -405,6 +428,15 @@ static const NSEventModifierFlags iTermHotkeyModifierMask = (NSEventModifierFlag
     [other enumerateKeysAndObjectsUsingBlock:^(id  _Nonnull key, id  _Nonnull obj, BOOL * _Nonnull stop) {
         self[key] = obj;
     }];
+}
+
+- (void)it_addObject:(id)object toMutableArrayForKey:(id)key {
+    NSMutableArray *array = self[key];
+    if (!array) {
+        array = [NSMutableArray array];
+        self[key] = array;
+    }
+    [array addObject:object];
 }
 
 @end

@@ -10,10 +10,10 @@
 #import "iTermMemoryUtilization.h"
 
 #import "NSDictionary+iTerm.h"
+#import "NSImage+iTerm.h"
 #import "NSStringITerm.h"
 #import "NSView+iTerm.h"
 
-static const NSInteger iTermStatusBarMemoryUtilizationComponentMaximumNumberOfSamples = 60;
 static const CGFloat iTermMemoryUtilizationWidth = 120;
 
 NS_ASSUME_NONNULL_BEGIN
@@ -32,6 +32,10 @@ NS_ASSUME_NONNULL_BEGIN
         }];
     }
     return self;
+}
+
+- (NSImage *)statusBarComponentIcon {
+    return [NSImage it_imageNamed:@"StatusBarIconRAM" forClass:[self class]];
 }
 
 - (NSString *)statusBarComponentShortDescription {
@@ -77,8 +81,8 @@ NS_ASSUME_NONNULL_BEGIN
     NSRect textRect = rect;
     textRect.size.height = rightSize.height;
     textRect.origin.y = (self.view.bounds.size.height - rightSize.height) / 2.0;
-    [left drawInRect:textRect withAttributes:self.leftAttributes];
-    [right drawInRect:textRect withAttributes:self.rightAttributes];
+    [left drawInRect:textRect withAttributes:[self.leftAttributes it_attributesDictionaryWithAppearance:self.view.effectiveAppearance]];
+    [right drawInRect:textRect withAttributes:[self.rightAttributes it_attributesDictionaryWithAppearance:self.view.effectiveAppearance]];
 }
 
 - (NSRect)graphRectForRect:(NSRect)rect
@@ -90,18 +94,13 @@ NS_ASSUME_NONNULL_BEGIN
     CGFloat leftWidth = leftSize.width + margin;
     graphRect.origin.x += leftWidth;
     graphRect.size.width -= (leftWidth + rightWidth);
-    graphRect = NSInsetRect(graphRect, 0, [self.view retinaRound:-self.font.descender]);
+    graphRect = NSInsetRect(graphRect, 0, [self.view retinaRound:-self.font.descender] + self.statusBarComponentVerticalOffset);
 
     return graphRect;
 }
 
 - (NSFont *)font {
-    static NSFont *font;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        font = [NSFont fontWithName:@"Menlo" size:12];
-    });
-    return font;
+    return self.advancedConfiguration.font ?: [iTermStatusBarAdvancedConfiguration defaultFont];
 }
 
 - (NSDictionary *)leftAttributes {
@@ -112,7 +111,7 @@ NS_ASSUME_NONNULL_BEGIN
 
     return @{ NSParagraphStyleAttributeName: leftAlignStyle,
               NSFontAttributeName: self.font,
-              NSForegroundColorAttributeName: self.defaultTextColor };
+              NSForegroundColorAttributeName: self.textColor };
 }
 
 - (NSDictionary *)rightAttributes {
@@ -122,7 +121,7 @@ NS_ASSUME_NONNULL_BEGIN
     [rightAlignStyle setLineBreakMode:NSLineBreakByTruncatingTail];
     return @{ NSParagraphStyleAttributeName: rightAlignStyle,
               NSFontAttributeName: self.font,
-              NSForegroundColorAttributeName: self.defaultTextColor };
+              NSForegroundColorAttributeName: self.textColor };
 }
 
 - (CGSize)rightSize {
@@ -134,7 +133,7 @@ NS_ASSUME_NONNULL_BEGIN
 }
 
 - (NSString *)rightText {
-    return @"RAM";
+    return @"";
 }
 
 - (void)drawRect:(NSRect)rect {
@@ -157,7 +156,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)update:(double)value {
     double available = [[iTermMemoryUtilization sharedInstance] availableMemory];
     [_samples addObject:@(value / available)];
-    while (_samples.count > iTermStatusBarMemoryUtilizationComponentMaximumNumberOfSamples) {
+    while (_samples.count > self.maximumNumberOfValues) {
         [_samples removeObjectAtIndex:0];
     }
 }

@@ -134,7 +134,6 @@ static iTermController *gSharedInstance;
         _terminalWindows = [[NSMutableArray alloc] init];
         _restorableSessions = [[NSMutableArray alloc] init];
         _currentRestorableSessionsStack = [[NSMutableArray alloc] init];
-        // Activate Growl. This loads the Growl framework and initializes it.
         [iTermNotificationController sharedInstance];
 
         [[[NSWorkspace sharedWorkspace] notificationCenter] addObserver:self
@@ -806,7 +805,8 @@ static iTermController *gSharedInstance;
         [iTermWarning showWarningWithTitle:theTitle
                                    actions:@[ @"OK", @"Cancel" ]
                                 identifier:@"AboutToOpenManyProfiles"
-                               silenceable:kiTermWarningTypePermanentlySilenceable];
+                               silenceable:kiTermWarningTypePermanentlySilenceable
+                                    window:nil];
     switch (selection) {
         case kiTermWarningSelection0:
             return YES;
@@ -983,7 +983,8 @@ static iTermController *gSharedInstance;
                                           windowType:windowType
                                      savedWindowType:windowType
                                               screen:[iTermProfilePreferences intForKey:KEY_SCREEN inProfile:profile]
-                                    hotkeyWindowType:iTermHotkeyWindowTypeNone] autorelease];
+                                    hotkeyWindowType:iTermHotkeyWindowTypeNone
+                                             profile:profile] autorelease];
     if ([iTermProfilePreferences boolForKey:KEY_HIDE_AFTER_OPENING inProfile:profile]) {
         [term hideAfterOpening];
     }
@@ -1199,14 +1200,16 @@ static iTermController *gSharedInstance;
                                            windowType:windowType
                                       savedWindowType:WINDOW_TYPE_NORMAL
                                                screen:[aDict objectForKey:KEY_SCREEN] ? [[aDict objectForKey:KEY_SCREEN] intValue] : -1
-                                     hotkeyWindowType:hotkeyWindowType];
+                                     hotkeyWindowType:hotkeyWindowType
+                                              profile:aDict];
         } else {
             DLog(@"Create a new window controller");
             term = [[[PseudoTerminal alloc] initWithSmartLayout:YES
                                                      windowType:windowType
                                                 savedWindowType:windowType
                                                          screen:[aDict objectForKey:KEY_SCREEN] ? [[aDict objectForKey:KEY_SCREEN] intValue] : -1
-                                               hotkeyWindowType:hotkeyWindowType] autorelease];
+                                               hotkeyWindowType:hotkeyWindowType
+                                                        profile:aDict] autorelease];
         }
         if ([[aDict objectForKey:KEY_HIDE_AFTER_OPENING] boolValue]) {
             [term hideAfterOpening];

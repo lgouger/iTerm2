@@ -212,22 +212,35 @@ NS_ASSUME_NONNULL_BEGIN
     NSOpenPanel *panel = [[NSOpenPanel alloc] init];
     panel.allowedFileTypes = @[ @"zip" ];
     if ([panel runModal] == NSModalResponseOK) {
-        [iTermScriptImporter importScriptFromURL:panel.URL
-                                      completion:^(NSString * _Nullable errorMessage) {
-                                          if (errorMessage) {
-                                              NSAlert *alert = [[NSAlert alloc] init];
-                                              alert.messageText = @"Could Not Install Script";
-                                              alert.informativeText = errorMessage;
-                                              [alert runModal];
-                                          } else {
-                                              NSAlert *alert = [[NSAlert alloc] init];
-                                              alert.messageText = @"Script Imported Successfully";
-                                              [alert runModal];
-                                          }
-                                      }];
+        NSURL *url = panel.URL;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self importFromURL:url];
+        });
     }
 }
 
+- (void)importFromURL:(NSURL *)url {
+    [iTermScriptImporter importScriptFromURL:url
+                                  completion:^(NSString * _Nullable errorMessage) {
+                                      // Mojave deadlocks if you do this without the dispatch_async
+                                      dispatch_async(dispatch_get_main_queue(), ^{
+                                          [self importDidFinishWithErrorMessage:errorMessage];
+                                      });
+                                  }];
+}
+
+- (void)importDidFinishWithErrorMessage:(NSString *)errorMessage {
+    if (errorMessage) {
+        NSAlert *alert = [[NSAlert alloc] init];
+        alert.messageText = @"Could Not Install Script";
+        alert.informativeText = errorMessage;
+        [alert runModal];
+    } else {
+        NSAlert *alert = [[NSAlert alloc] init];
+        alert.messageText = @"Script Imported Successfully";
+        [alert runModal];
+    }
+}
 
 #pragma mark - Actions
 
@@ -377,7 +390,8 @@ NS_ASSUME_NONNULL_BEGIN
         iTermWarningSelection selection = [iTermWarning showWarningWithTitle:[NSString stringWithFormat:@"Open new script in %@?", app]
                                                                      actions:@[ @"OK", @"Show in Finder" ]
                                                                   identifier:@"NoSyncOpenNewPythonScriptInDefaultEditor"
-                                                                 silenceable:kiTermWarningTypePermanentlySilenceable];
+                                                                 silenceable:kiTermWarningTypePermanentlySilenceable
+                                                                      window:nil];
         if (selection == kiTermWarningSelection0) {
             [[NSWorkspace sharedWorkspace] openFile:destinationTemplatePath];
             return;
@@ -515,24 +529,33 @@ NS_ASSUME_NONNULL_BEGIN
     return template;
 }
 
-- (BOOL)path:(NSString *)possibleSuper isParentDirectoryOfPath:(NSString *)possibleSub {
+- (NSString *)relativePathFrom:(NSString *)possibleSuper toPath:(NSString *)possibleSub {
+    return [self relativePathFrom:possibleSuper toPath:possibleSub relative:@""];
+}
+
+- (NSString *)relativePathFrom:(NSString *)possibleSuper toPath:(NSString *)possibleSub relative:(NSString *)relative {
     if (possibleSub.length < possibleSuper.length) {
-        return NO;
+        return nil;
     }
     if ([possibleSub isEqualToString:possibleSuper]) {
-        return YES;
+        return relative;
     }
-    return [self path:possibleSuper isParentDirectoryOfPath:[possibleSub stringByDeletingLastPathComponent]];
+    return [self relativePathFrom:possibleSuper
+                           toPath:[possibleSub stringByDeletingLastPathComponent]
+                         relative:[relative stringByAppendingPathComponent:possibleSub.lastPathComponent]];
 }
 
 - (NSString *)folderForFullEnvironmentSavePanelURL:(NSURL *)url {
-    NSString *scriptsRoot = [[[NSURL fileURLWithPath:[[NSFileManager defaultManager] scriptsPathWithoutSpaces]] URLByResolvingSymlinksInPath] path];
+    NSString *noSpacesScriptsRoot = [[NSFileManager defaultManager] scriptsPathWithoutSpaces];
+    NSString *scriptsRoot = [[[NSURL fileURLWithPath:noSpacesScriptsRoot] URLByResolvingSymlinksInPath] path];
     NSString *selectedPath = [url URLByResolvingSymlinksInPath].path;
-    if ([self path:scriptsRoot isParentDirectoryOfPath:selectedPath]) {
-        return selectedPath;
+    NSString *relative = [self relativePathFrom:scriptsRoot
+                                         toPath:selectedPath];
+    if (relative) {
+        return [noSpacesScriptsRoot stringByAppendingPathComponent:relative];
     } else {
         NSString *name = url.path.lastPathComponent;
-        NSString *folder = [scriptsRoot stringByAppendingPathComponent:name];
+        NSString *folder = [noSpacesScriptsRoot stringByAppendingPathComponent:name];
         return folder;
     }
 }

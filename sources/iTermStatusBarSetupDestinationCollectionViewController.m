@@ -18,6 +18,44 @@
 #import "NSObject+iTerm.h"
 #import "NSView+iTerm.h"
 
+@interface iTermNoFirstResponderCollectionView : NSCollectionView
+@end
+
+@implementation iTermNoFirstResponderCollectionView
+
+- (BOOL)canBecomeKeyView {
+    return NO;
+}
+
+- (BOOL)becomeFirstResponder {
+    return NO;
+}
+
+@end
+
+@interface iTermStatusBarSetupDestinationCollectionView : NSCollectionView
+@end
+
+@implementation iTermStatusBarSetupDestinationCollectionView
+
+- (BOOL)canBecomeKeyView {
+    return YES;
+}
+
+- (BOOL)becomeFirstResponder {
+    [super becomeFirstResponder];
+    return YES;
+}
+
+- (void)doCommandBySelector:(SEL)selector {
+    if ([self.delegate respondsToSelector:selector]) {
+        NSObject *delegate = [NSObject castFrom:self.delegate];
+        [delegate it_performNonObjectReturningSelector:selector withObject:self];
+    }
+}
+
+@end
+
 @interface iTermStatusBarSetupDestinationCollectionViewController ()<
     iTermStatusBarSetupElementDelegate,
     NSCollectionViewDataSource,
@@ -53,9 +91,19 @@
     }
     NSInteger selectedIndex = [selections.anyObject indexAtPosition:1];
     [self deleteItemAtIndex:selectedIndex];
+    _configureButton.enabled = NO;
 }
 
 - (void)deleteItemAtIndex:(NSInteger)index {
+    NSRect rectInWindowCoords = [self.collectionView convertRect:[self.collectionView frameForItemAtIndex:index] toView:nil];
+    NSRect rect = [self.collectionView.window convertRectToScreen:rectInWindowCoords];
+    NSShowAnimationEffect(NSAnimationEffectPoof,
+                          NSMakePoint(NSMidX(rect), NSMidY(rect)),
+                          NSZeroSize,
+                          nil,
+                          nil,
+                          NULL);
+    [[[self.collectionView itemAtIndex:index] view] setHidden:YES];
     [self.collectionView.animator performBatchUpdates:
      ^{
          [self->_elements removeObjectAtIndex:index];
@@ -73,8 +121,7 @@
     [self.collectionView reloadData];
 }
 
-- (void)setLayoutDictionary:(NSDictionary *)layoutDictionary {
-    iTermStatusBarLayout *layout = [[iTermStatusBarLayout alloc] initWithDictionary:layoutDictionary];
+- (void)setLayout:(iTermStatusBarLayout *)layout {
     [layout.components enumerateObjectsUsingBlock:^(id<iTermStatusBarComponent>  _Nonnull component, NSUInteger idx, BOOL * _Nonnull stop) {
         [component statusBarComponentSetVariableScope:nil];
         iTermStatusBarSetupElement *element = [[iTermStatusBarSetupElement alloc] initWithComponent:component];
@@ -84,12 +131,17 @@
     [self.collectionView reloadData];
 }
 
-- (NSDictionary *)layoutDictionary {
+- (NSDictionary *)layoutDictionaryWithAdvancedConfiguration:(iTermStatusBarAdvancedConfiguration *)advancedConfiguration {
     NSArray<id<iTermStatusBarComponent>> *components = [_elements mapWithBlock:^id(iTermStatusBarSetupElement *element) {
         return element.component;
     }];
-    iTermStatusBarLayout *layout = [[iTermStatusBarLayout alloc] initWithComponents:components];
+    iTermStatusBarLayout *layout = [[iTermStatusBarLayout alloc] initWithComponents:components
+                                                              advancedConfiguration:advancedConfiguration];
     return layout.dictionaryValue;
+}
+
+- (void)deleteBackward:(id)sender {
+    [self deleteSelected];
 }
 
 #pragma mark - NSCollectionViewDataSource
@@ -145,6 +197,10 @@ canDragItemsAtIndexPaths:(NSSet<NSIndexPath *> *)indexPaths
              withEvent:(NSEvent *)event {
     _draggingIndexPath = indexPaths.anyObject;
     return YES;
+}
+
+- (void)collectionView:(NSCollectionView *)collectionView draggingSession:(NSDraggingSession *)session willBeginAtPoint:(NSPoint)screenPoint forItemsAtIndexes:(NSIndexSet *)indexes {
+    session.animatesToStartingPositionsOnCancelOrFail = NO;
 }
 
 - (void)collectionView:(NSCollectionView *)collectionView

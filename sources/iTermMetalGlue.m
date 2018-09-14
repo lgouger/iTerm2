@@ -376,12 +376,13 @@ static NSColor *ColorForVector(vector_float4 v) {
         if (_timestampsEnabled) {
             [_dates addObject:[textView drawingHelperTimestampForLine:i]];
         }
-        iTermData *data = [iTermData dataOfLength:rowSize];
+        iTermData *data = [iTermScreenCharData dataOfLength:rowSize];
         screen_char_t *myBuffer = data.mutableBytes;
         screen_char_t *line = [screen getLineAtIndex:i withBuffer:myBuffer];
         if (line != myBuffer) {
             memcpy(myBuffer, line, rowSize);
         }
+        [data checkForOverrun];
         [_lines addObject:data];
 
         [_selectedIndexes addObject:[textView.selection selectedIndexesOnLine:i]];
@@ -976,6 +977,13 @@ ambiguousIsDoubleWidth:(BOOL)ambiguousIsDoubleWidth
         attributes[x].backgroundColor.w = 1;
         attributes[x].annotation = annotated;
 
+        const BOOL characterIsDrawable = iTermTextDrawingHelperIsCharacterDrawable(&line[x],
+                                                                                   line[x].complexChar && (ScreenCharToStr(&line[x]) != nil),
+                                                                                   _blinkingItemsVisible,
+                                                                                   _blinkAllowed);
+        const BOOL isBoxDrawingCharacter = (characterIsDrawable &&
+                                            !line[x].complexChar &&
+                                            [boxCharacterSet characterIsMember:line[x].code]);
         // Foreground colors
         // Build up a compact key describing all the inputs to a text color
         currentColorKey->isMatch = findMatch;
@@ -1007,7 +1015,8 @@ ambiguousIsDoubleWidth:(BOOL)ambiguousIsDoubleWidth
                                                          selected:selected
                                                         findMatch:findMatch
                                                 inUnderlinedRange:inUnderlinedRange && !annotated
-                                                            index:x];
+                                                            index:x
+                                                       boxDrawing:isBoxDrawingCharacter];
             attributes[x].foregroundColor = textColor;
             attributes[x].foregroundColor.w = 1;
         }
@@ -1048,14 +1057,11 @@ ambiguousIsDoubleWidth:(BOOL)ambiguousIsDoubleWidth
                 [imageRuns addObject:run];
             }
             glyphKeys[x].drawable = NO;
-        } else if (annotated || iTermTextDrawingHelperIsCharacterDrawable(&line[x],
-                                                                          line[x].complexChar && (ScreenCharToStr(&line[x]) != nil),
-                                                                          _blinkingItemsVisible,
-                                                                          _blinkAllowed)) {
+        } else if (annotated || characterIsDrawable) {
             lastDrawableGlyph = x;
             glyphKeys[x].code = line[x].code;
             glyphKeys[x].isComplex = line[x].complexChar;
-            glyphKeys[x].boxDrawing = !line[x].complexChar && [boxCharacterSet characterIsMember:line[x].code];
+            glyphKeys[x].boxDrawing = isBoxDrawingCharacter;
             glyphKeys[x].thinStrokes = [self useThinStrokesWithAttributes:&attributes[x]];
 
             const int boldBit = line[x].bold ? (1 << 0) : 0;
@@ -1296,7 +1302,10 @@ ambiguousIsDoubleWidth:(BOOL)ambiguousIsDoubleWidth
                                                                                 emoji:(nonnull BOOL *)emoji {
     if (glyphKey->boxDrawing) {
         *emoji = NO;
-        iTermCharacterBitmap *bitmap = [self bitmapForBoxDrawingCode:glyphKey->code size:size scale:scale];
+        CGSize cellSize = _cellSize;
+        cellSize.width *= scale;
+        cellSize.height *= scale;
+        iTermCharacterBitmap *bitmap = [self bitmapForBoxDrawingCode:glyphKey->code glyphSize:size cellSize:cellSize scale:scale];
         return @{ @(iTermTextureMapMiddleCharacterPart): bitmap };
     }
 
@@ -1401,7 +1410,8 @@ ambiguousIsDoubleWidth:(BOOL)ambiguousIsDoubleWidth
                               selected:(BOOL)selected
                              findMatch:(BOOL)findMatch
                      inUnderlinedRange:(BOOL)inUnderlinedRange
-                                 index:(int)index {
+                                 index:(int)index
+                            boxDrawing:(BOOL)isBoxDrawingCharacter {
     vector_float4 rawColor = { 0, 0, 0, 0 };
     iTermColorMap *colorMap = _colorMap;
     const BOOL needsProcessing = (colorMap.minimumContrast > 0.001 ||
@@ -1465,7 +1475,8 @@ ambiguousIsDoubleWidth:(BOOL)ambiguousIsDoubleWidth
     vector_float4 result;
     if (needsProcessing) {
         result = VectorForColor([_colorMap processedTextColorForTextColor:ColorForVector(rawColor)
-                                                      overBackgroundColor:ColorForVector(unprocessedBackgroundColor)]);
+                                                      overBackgroundColor:ColorForVector(unprocessedBackgroundColor)
+                                                   disableMinimumContrast:isBoxDrawingCharacter]);
     } else {
         result = rawColor;
     }
@@ -1487,7 +1498,8 @@ ambiguousIsDoubleWidth:(BOOL)ambiguousIsDoubleWidth
 #pragma mark - Box Drawing
 
 - (iTermCharacterBitmap *)bitmapForBoxDrawingCode:(unichar)code
-                                             size:(CGSize)size
+                                        glyphSize:(CGSize)glyphSize
+                                         cellSize:(CGSize)cellSize
                                             scale:(CGFloat)scale {
     NSColor *backgroundColor;
     NSColor *foregroundColor;
@@ -1498,16 +1510,16 @@ ambiguousIsDoubleWidth:(BOOL)ambiguousIsDoubleWidth
         backgroundColor = [NSColor whiteColor];
         foregroundColor = [NSColor blackColor];
     }
-    NSMutableData *data = [NSImage argbDataForImageOfSize:size drawBlock:^(CGContextRef context) {
+    NSMutableData *data = [NSImage argbDataForImageOfSize:glyphSize drawBlock:^(CGContextRef context) {
         NSAffineTransform *transform = [NSAffineTransform transform];
         [transform concat];
         [backgroundColor set];
-        NSRectFill(NSMakeRect(0, 0, size.width, size.height));
+        NSRectFill(NSMakeRect(0, 0, glyphSize.width, glyphSize.height));
         [foregroundColor set];
 
         BOOL solid = NO;
         for (NSBezierPath *path in [iTermBoxDrawingBezierCurveFactory bezierPathsForBoxDrawingCode:code
-                                                                                          cellSize:size
+                                                                                          cellSize:cellSize
                                                                                              scale:scale
                                                                                              solid:&solid]) {
             if (solid) {
@@ -1521,7 +1533,7 @@ ambiguousIsDoubleWidth:(BOOL)ambiguousIsDoubleWidth
 
     iTermCharacterBitmap *bitmap = [[iTermCharacterBitmap alloc] init];
     bitmap.data = data;
-    bitmap.size = size;
+    bitmap.size = glyphSize;
     return bitmap;
 }
 

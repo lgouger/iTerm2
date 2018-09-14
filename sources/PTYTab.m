@@ -2,6 +2,7 @@
 #import "FakeWindow.h"
 #import "IntervalMap.h"
 #import "ITAddressBookMgr.h"
+#import "iTermAPIHelper.h"
 #import "iTermAdvancedSettingsModel.h"
 #import "iTermApplicationDelegate.h"
 #import "iTermController.h"
@@ -40,7 +41,7 @@
 NSString *const iTermTabDidChangeWindowNotification = @"iTermTabDidChangeWindowNotification";
 NSString *const iTermSessionBecameKey = @"iTermSessionBecameKey";
 
-// No growl output/idle alerts for a few seconds after a window is resized because there will be bogus bg activity
+// No user output/idle alerts for a few seconds after a window is resized because there will be bogus bg activity
 const int POST_WINDOW_RESIZE_SILENCE_SEC = 5;
 
 static CGFloat WithGrainDim(BOOL isVertical, NSSize size);
@@ -406,7 +407,6 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 
     root_ = nil;
     flexibleView_ = nil;
-
 }
 
 - (NSString *)description {
@@ -858,6 +858,10 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     return objectCount_;
 }
 
+- (NSImage *)psmTabGraphic {
+    return self.activeSession.tabGraphic;
+}
+
 - (int)objectCount {
     return [iTermPreferences boolForKey:kPreferenceKeyHideTabNumber] ? 0 : objectCount_;
 }
@@ -909,7 +913,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     BOOL result = NO;
     for (PTYSession* session in [self sessions]) {
         if ([session newOutput]) {
-            if ([session shouldPostGrowlNotification]) {
+            if ([session shouldPostUserNotification]) {
                 *okToNotify = YES;
             }
             result = YES;
@@ -974,6 +978,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 
     const CGFloat aTop = NSMinY(aRect);
     const CGFloat aBottom = NSMaxY(aRect);
+    const CGFloat safetyMargin = 1;
 
     return [self sessionsSatisfying:^BOOL(PTYSession *b) {
         if (b == aSession) {
@@ -991,8 +996,8 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
         const CGFloat bLeft = after ? NSMinX(bRect) : -NSMaxX(bRect);
         const CGFloat aRight = after ? NSMaxX(aRect) : -NSMinX(aRect);
 
-        return (bBottom >= aTop &&
-                bTop < aBottom &&
+        return (bBottom >= aTop + safetyMargin &&
+                bTop + safetyMargin < aBottom &&
                 bLeft >= aRight);
     }];
 }
@@ -4874,7 +4879,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
                 // Idle after new output
 
                 // See if a notification should be posted.
-                if (!session.havePostedIdleNotification && [session shouldPostGrowlNotification]) {
+                if (!session.havePostedIdleNotification && [session shouldPostUserNotification]) {
                     NSString *theDescription =
                         [NSString stringWithFormat:@"Session %@ in tab #%d became idle.",
                             [session name],
@@ -4882,7 +4887,6 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
                     if ([iTermProfilePreferences boolForKey:KEY_SEND_IDLE_ALERT inProfile:session.profile]) {
                         [[iTermNotificationController sharedInstance] notify:@"Idle"
                                                          withDescription:theDescription
-                                                         andNotification:@"Idle"
                                                              windowIndex:[session screenWindowIndex]
                                                                 tabIndex:[session screenTabIndex]
                                                                viewIndex:[session screenViewIndex]];
@@ -4921,11 +4925,10 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
             [[iTermNotificationController sharedInstance] notify:NSLocalizedStringFromTableInBundle(@"New Output",
                                                                                                 @"iTerm",
                                                                                                 [NSBundle bundleForClass:[self class]],
-                                                                                                @"Growl Alerts")
+                                                                                                @"User Alerts")
                                              withDescription:[NSString stringWithFormat:@"New output was received in %@, tab #%d.",
                                                               [[self activeSession] name],
                                                               [self tabNumber]]
-                                             andNotification:@"New Output"
                                                  windowIndex:[[self activeSession] screenWindowIndex]
                                                     tabIndex:[[self activeSession] screenTabIndex]
                                                    viewIndex:[[self activeSession] screenViewIndex]];
@@ -4952,11 +4955,11 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
         if (!amProcessing &&
             !aSession.havePostedNewOutputNotification &&
             !aSession.newOutput) {
-            // Avoid calling the potentially expensive -shouldPostGrowlNotification if there's
+            // Avoid calling the potentially expensive -shouldPostUserNotification if there's
             // nothing to do here, which is normal.
             continue;
         }
-        if (![aSession shouldPostGrowlNotification]) {
+        if (![aSession shouldPostUserNotification]) {
             [aSession setHavePostedNewOutputNotification:NO];
             shouldResetLabel = YES;
         }
@@ -5186,10 +5189,26 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 - (void)variables:(iTermVariables *)variables didChangeValuesForNames:(NSSet<NSString *> *)changedNames
             group:(dispatch_group_t)group {
     [_tabTitleOverrideSwiftyString variablesDidChange:changedNames];
+#warning TODO: Don't post a notif if the variable isn't in my scope
+    for (NSString *name in changedNames) {
+        id userInfo = iTermVariableDidChangeNotificationUserInfo(ITMVariableScope_Tab,
+                                                                 [@(self.uniqueId) stringValue],
+                                                                 name,
+                                                                 [variables discouragedValueForVariableName:name]);
+        [[NSNotificationCenter defaultCenter] postNotificationName:iTermVariableDidChangeNotification
+                                                            object:nil
+                                                          userInfo:userInfo];
+    }
 }
 
 - (BOOL)sessionShouldAutoClose:(PTYSession *)session {
     return _numberOfSplitViewDragsInProgress == 0;
+}
+
+- (void)sessionDidChangeGraphic:(PTYSession *)session {
+    if (session == self.activeSession) {
+        [self.delegate tabDidChangeGraphic:self];
+    }
 }
 
 @end

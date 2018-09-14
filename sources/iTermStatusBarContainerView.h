@@ -11,6 +11,8 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+extern const CGFloat iTermStatusBarViewControllerIconWidth;
+
 @interface iTermStatusBarContainerView : NSView
 
 @property (nonatomic, readonly) id<iTermStatusBarComponent> component;
@@ -22,6 +24,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readonly) NSColor *backgroundColor;
 @property (nonatomic) CGFloat leftSeparatorOffset;
 @property (nonatomic) CGFloat rightSeparatorOffset;
+@property (nonatomic, strong, readonly) NSImageView *iconImageView;
 
 - (nullable instancetype)initWithComponent:(id<iTermStatusBarComponent>)component NS_DESIGNATED_INITIALIZER;
 
@@ -30,6 +33,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (instancetype)init NS_UNAVAILABLE;
 
 - (void)variablesDidChange:(NSSet<NSString *> *)paths;
+- (void)layoutSubviews;
 
 @end
 

@@ -12,6 +12,7 @@
 #import "ITAddressBookMgr.h"
 #import "iTermCursor.h"
 #import "iTermPreferences.h"
+#import "iTermStatusBarLayout.h"
 #import "NSColor+iTerm.h"
 #import "NSDictionary+iTerm.h"
 #import "NSJSONSerialization+iTerm.h"
@@ -198,7 +199,7 @@ NSString *const kProfilePreferenceInitialDirectoryAdvancedValue = @"Advanced";
                          KEY_XTERM_MOUSE_REPORTING, KEY_XTERM_MOUSE_REPORTING_ALLOW_MOUSE_WHEEL,
                          KEY_UNICODE_VERSION, KEY_ALLOW_TITLE_REPORTING, KEY_ALLOW_TITLE_SETTING,
                          KEY_DISABLE_PRINTING, KEY_DISABLE_SMCUP_RMCUP, KEY_SILENCE_BELL,
-                         KEY_BOOKMARK_GROWL_NOTIFICATIONS, KEY_SEND_BELL_ALERT, KEY_SEND_IDLE_ALERT,
+                         KEY_BOOKMARK_USER_NOTIFICATIONS, KEY_SEND_BELL_ALERT, KEY_SEND_IDLE_ALERT,
                          KEY_SEND_NEW_OUTPUT_ALERT, KEY_SEND_SESSION_ENDED_ALERT,
                          KEY_SEND_TERMINAL_GENERATED_ALERT, KEY_FLASHING_BELL, KEY_VISUAL_BELL,
                          KEY_CLOSE_SESSIONS_ON_END, KEY_PROMPT_CLOSE,
@@ -226,6 +227,7 @@ NSString *const kProfilePreferenceInitialDirectoryAdvancedValue = @"Advanced";
     if (!dict) {
         dict = @{ KEY_NAME: @"Default",
                   KEY_SHORTCUT: [NSNull null],
+                  KEY_ICON: @(iTermProfileIconNone),
                   KEY_TAGS: [NSNull null],
                   KEY_CUSTOM_COMMAND: kProfilePreferenceCommandTypeLoginShellValue,
                   KEY_COMMAND_LINE: @"",
@@ -293,6 +295,8 @@ NSString *const kProfilePreferenceInitialDirectoryAdvancedValue = @"Advanced";
                   KEY_ROWS: @25,
                   KEY_HIDE_AFTER_OPENING: @NO,
                   KEY_WINDOW_TYPE: @(WINDOW_TYPE_NORMAL),
+                  KEY_USE_CUSTOM_WINDOW_TITLE: @NO,
+                  KEY_CUSTOM_WINDOW_TITLE: @"",
                   KEY_SCREEN: @-1,
                   KEY_SPACE: @(iTermProfileOpenInCurrentSpace),
                   KEY_SYNC_TITLE_DEPRECATED: @NO,
@@ -317,7 +321,7 @@ NSString *const kProfilePreferenceInitialDirectoryAdvancedValue = @"Advanced";
                   KEY_DISABLE_PRINTING: @NO,
                   KEY_DISABLE_SMCUP_RMCUP: @NO,
                   KEY_SILENCE_BELL: @NO,
-                  KEY_BOOKMARK_GROWL_NOTIFICATIONS: @NO,
+                  KEY_BOOKMARK_USER_NOTIFICATIONS: @NO,
                   KEY_SEND_BELL_ALERT: @YES,
                   KEY_SEND_IDLE_ALERT: @NO,
                   KEY_SEND_NEW_OUTPUT_ALERT: @NO,
@@ -417,7 +421,8 @@ NSString *const kProfilePreferenceInitialDirectoryAdvancedValue = @"Advanced";
                   KEY_UNICODE_NORMALIZATION: PROFILE_BLOCK(unicodeNormalizationForm),
                   KEY_UNICODE_VERSION: PROFILE_BLOCK(unicodeVersion),
                   KEY_TITLE_COMPONENTS: PROFILE_BLOCK(titleComponents),
-                  KEY_BACKGROUND_IMAGE_MODE: PROFILE_BLOCK(backgroundImageMode)
+                  KEY_BACKGROUND_IMAGE_MODE: PROFILE_BLOCK(backgroundImageMode),
+                  KEY_STATUS_BAR_LAYOUT: PROFILE_BLOCK(statusBarLayout)
                 };
     }
     return dict;
@@ -507,6 +512,21 @@ NSString *const kProfilePreferenceInitialDirectoryAdvancedValue = @"Advanced";
     }
     
     return @(iTermBackgroundImageModeStretch);
+}
+
++ (id)statusBarLayout:(Profile *)profile {
+    if (profile[KEY_STATUS_BAR_LAYOUT]) {
+        return profile[KEY_STATUS_BAR_LAYOUT];
+    }
+    static NSDictionary *defaultValue;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        iTermStatusBarLayout *layout;
+        layout = [[iTermStatusBarLayout alloc] init];
+        layout.advancedConfiguration.separatorColor = [NSColor colorWithRed:0 green:0 blue:0 alpha:0.25];
+        defaultValue = layout.dictionaryValue;
+    });
+    return defaultValue;
 }
 
 + (id)titleComponents:(Profile *)profile {

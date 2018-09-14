@@ -19,6 +19,8 @@ extern const CGFloat iTermStatusBarHeight;
 
 @protocol iTermStatusBarViewControllerDelegate<NSObject>
 - (NSColor *)statusBarDefaultTextColor;
+- (NSColor *)statusBarSeparatorColor;
+- (NSColor *)statusBarBackgroundColor;
 @end
 
 @protocol iTermStatusBarContainer<NSObject>
@@ -41,6 +43,7 @@ extern const CGFloat iTermStatusBarHeight;
 - (nullable instancetype)initWithCoder:(NSCoder *)coder NS_UNAVAILABLE;
 
 - (void)variablesDidChange:(NSSet<NSString *> *)names;
+- (void)updateColors;
 
 @end
 

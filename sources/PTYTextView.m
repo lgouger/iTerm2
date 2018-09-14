@@ -19,6 +19,7 @@
 #import "iTermFindOnPageHelper.h"
 #import "iTermImageInfo.h"
 #import "iTermLaunchServices.h"
+#import "iTermLocalHostNameGuesser.h"
 #import "iTermMouseCursor.h"
 #import "iTermNSKeyBindingEmulator.h"
 #import "iTermPreferences.h"
@@ -457,7 +458,8 @@ static const int kDragThreshold = 3;
 
 - (NSColor *)defaultTextColor {
     return [_colorMap processedTextColorForTextColor:[_colorMap colorForKey:kColorMapForeground]
-                                 overBackgroundColor:[self defaultBackgroundColor]];
+                                 overBackgroundColor:[self defaultBackgroundColor]
+                              disableMinimumContrast:NO];
 }
 
 - (NSColor *)selectionBackgroundColor {
@@ -467,7 +469,8 @@ static const int kDragThreshold = 3;
 
 - (NSColor *)selectedTextColor {
     return [_colorMap processedTextColorForTextColor:[_colorMap colorForKey:kColorMapSelectedText]
-                                 overBackgroundColor:[self selectionBackgroundColor]];
+                                 overBackgroundColor:[self selectionBackgroundColor]
+                              disableMinimumContrast:NO];
 }
 
 - (void)updateMarkedTextAttributes {
@@ -2598,7 +2601,9 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
             }
             case kURLActionOpenURL: {
                 NSURL *url = [NSURL URLWithUserSuppliedString:action.string];
-                if ([url.scheme isEqualToString:@"file"] && url.host.length > 0 && ![url.host isEqualToString:[VT100RemoteHost localHostName]]) {
+                if ([url.scheme isEqualToString:@"file"] &&
+                    url.host.length > 0 &&
+                    ![url.host isEqualToString:[[iTermLocalHostNameGuesser sharedInstance] name]]) {
                     SCPPath *path = [[[SCPPath alloc] init] autorelease];
                     path.path = url.path;
                     path.hostname = url.host;
@@ -2731,8 +2736,9 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
     VT100GridCoord coord = VT100GridCoordMake(x, y);
     iTermImageInfo *imageInfo = [self imageInfoAtCoord:coord];
 
+    const BOOL clickedInExistingSelection = [_selection containsCoord:VT100GridCoordMake(x, y)];
     if (!imageInfo &&
-        ![_selection containsCoord:VT100GridCoordMake(x, y)]) {
+        !clickedInExistingSelection) {
         // Didn't click on selection.
         // Save the selection and do a smart selection. If we don't like the result, restore it.
         iTermSelection *savedSelection = [[_selection copy] autorelease];
@@ -2749,6 +2755,8 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
         } else {
             self.savedSelectedText = text;
         }
+    } else if (clickedInExistingSelection && [self _haveShortSelection]) {
+        self.savedSelectedText = [self selectedText];
     }
     [self setNeedsDisplay:YES];
     NSMenu *contextMenu = [self menuAtCoord:coord];
@@ -3110,6 +3118,7 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
     warning.identifier = @"NoSyncInstallUtilitiesPackage";
     warning.warningType = kiTermWarningTypePermanentlySilenceable;
     warning.cancelLabel = @"Cancel";
+    warning.window = self.window;
     warning.showHelpBlock = ^() {
         [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:@"https://iterm2.com/utilities.html"]];
     };
@@ -3147,6 +3156,7 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
     warning.identifier = @"NoSyncConfirmShellIntegrationCommand";
     warning.warningType = kiTermWarningTypePermanentlySilenceable;
     warning.cancelLabel = @"Cancel";
+    warning.window = self.window;
     [warning runModal];
 }
 
@@ -3749,11 +3759,47 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
         return [[NSPasteboard generalPasteboard] dataForFirstFile] != nil;
     }
 
+    if (item.action == @selector(terminalStateToggleAlternateScreen:) ||
+        item.action == @selector(terminalStateToggleFocusReporting:) ||
+        item.action == @selector(terminalStateToggleMouseReporting:) ||
+        item.action == @selector(terminalStateTogglePasteBracketing:) ||
+        item.action == @selector(terminalStateToggleApplicationCursor:) ||
+        item.action == @selector(terminalStateToggleApplicationKeypad:)) {
+        item.state = [self.delegate textViewTerminalStateForMenuItem:item] ? NSOnState : NSOffState;
+        return YES;
+    }
+    if (item.action == @selector(terminalStateReset:)) {
+        return YES;
+    }
+
     SEL theSel = [item action];
     if ([NSStringFromSelector(theSel) hasPrefix:@"contextMenuAction"]) {
         return YES;
     }
     return NO;
+}
+
+- (IBAction)terminalStateToggleAlternateScreen:(id)sender {
+    [self.delegate textViewToggleTerminalStateForMenuItem:sender];
+}
+- (IBAction)terminalStateToggleFocusReporting:(id)sender {
+    [self.delegate textViewToggleTerminalStateForMenuItem:sender];
+}
+- (IBAction)terminalStateToggleMouseReporting:(id)sender {
+    [self.delegate textViewToggleTerminalStateForMenuItem:sender];
+}
+- (IBAction)terminalStateTogglePasteBracketing:(id)sender {
+    [self.delegate textViewToggleTerminalStateForMenuItem:sender];
+}
+- (IBAction)terminalStateToggleApplicationCursor:(id)sender {
+    [self.delegate textViewToggleTerminalStateForMenuItem:sender];
+}
+- (IBAction)terminalStateToggleApplicationKeypad:(id)sender {
+    [self.delegate textViewToggleTerminalStateForMenuItem:sender];
+}
+
+- (IBAction)terminalStateReset:(id)sender {
+    [self.delegate textViewResetTerminal];
 }
 
 - (BOOL)_haveShortSelection

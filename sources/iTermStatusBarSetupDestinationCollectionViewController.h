@@ -8,10 +8,15 @@
 #import <Cocoa/Cocoa.h>
 #import "iTermStatusBarSetupElement.h"
 
+@class iTermStatusBarLayout;
+@class iTermStatusBarAdvancedConfiguration;
+
 @interface iTermStatusBarSetupDestinationCollectionViewController : NSViewController
 
 @property (nonatomic, copy) NSArray<iTermStatusBarSetupElement *> *elements;
-@property (nonatomic, copy) NSDictionary *layoutDictionary;
+
+- (void)setLayout:(iTermStatusBarLayout *)layout;
+- (NSDictionary *)layoutDictionaryWithAdvancedConfiguration:(iTermStatusBarAdvancedConfiguration *)advancedConfiguration;
 
 - (void)deleteSelected;
 

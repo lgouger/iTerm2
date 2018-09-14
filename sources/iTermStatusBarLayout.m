@@ -9,12 +9,67 @@
 
 #import "DebugLogging.h"
 #import "NSArray+iTerm.h"
+#import "NSColor+iTerm.h"
+#import "NSDictionary+iTerm.h"
+#import "NSFont+iTerm.h"
+#import "NSStringITerm.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
 NSString *const iTermStatusBarLayoutKeyComponents = @"components";
+NSString *const iTermStatusBarLayoutKeyAdvancedConfiguration = @"advanced configuration";
+// NOTE: If you add keys you might also need to update the computed default value in iTermProfilePreferences
+
 static NSString *const iTermStatusBarLayoutKeyConfiguration = @"configuration";
 static NSString *const iTermStatusBarLayoutKeyClass = @"class";
+
+@implementation iTermStatusBarAdvancedConfiguration
+
++ (NSFont *)defaultFont {
+    return [NSFont fontWithName:@"Helvetica" size:12];
+}
+
++ (instancetype)advancedConfigurationFromDictionary:(NSDictionary *)dict {
+    iTermStatusBarAdvancedConfiguration *configuration = [[iTermStatusBarAdvancedConfiguration alloc] init];
+    configuration.separatorColor = [dict[@"separator color"] colorValue];
+    configuration.backgroundColor = [dict[@"background color"] colorValue];
+    configuration.defaultTextColor = [dict[@"default text color"] colorValue];
+    configuration.font = [dict[@"font"] fontValue];
+
+    return configuration;
+}
+
+- (nullable instancetype)initWithCoder:(NSCoder *)aDecoder {
+    self = [super init];
+    if (self) {
+        self.separatorColor = [[aDecoder decodeObjectOfClass:[NSDictionary class] forKey:@"separator color"] colorValue];
+        self.backgroundColor = [[aDecoder decodeObjectOfClass:[NSDictionary class] forKey:@"background color"] colorValue];
+        self.defaultTextColor = [[aDecoder decodeObjectOfClass:[NSDictionary class] forKey:@"default text color"] colorValue];
+        self.font = [[aDecoder decodeObjectOfClass:[NSString class] forKey:@"font"] fontValue];
+    }
+    return self;
+}
+
+- (NSDictionary *)dictionaryValue {
+    NSDictionary *dict = @{ @"separator color": [self.separatorColor dictionaryValue] ?: [NSNull null],
+                            @"background color": [self.backgroundColor dictionaryValue] ?: [NSNull null],
+                            @"default text color": [self.defaultTextColor dictionaryValue] ?: [NSNull null],
+                            @"font": [self.font stringValue] ?: [NSNull null] };
+    return [dict dictionaryByRemovingNullValues];
+}
+
++ (BOOL)supportsSecureCoding {
+    return YES;
+}
+
+- (void)encodeWithCoder:(NSCoder *)aCoder {
+    [aCoder encodeObject:[self.separatorColor dictionaryValue] forKey:@"separator color"];
+    [aCoder encodeObject:[self.backgroundColor dictionaryValue] forKey:@"background color"];
+    [aCoder encodeObject:[self.defaultTextColor dictionaryValue] forKey:@"default text color"];
+    [aCoder encodeObject:[self.font stringValue] forKey:@"font"];
+}
+
+@end
 
 @implementation iTermStatusBarLayout {
     NSMutableArray<id<iTermStatusBarComponent>> *_components;
@@ -34,6 +89,8 @@ static NSString *const iTermStatusBarLayoutKeyClass = @"class";
             DLog(@"Missing configuration for %@", dict);
             continue;
         }
+        configuration = [configuration dictionaryBySettingObject:dictionary[iTermStatusBarLayoutKeyAdvancedConfiguration] ?: @{}
+                                                          forKey:iTermStatusBarComponentConfigurationKeyLayoutAdvancedConfigurationDictionaryValue];
         id<iTermStatusBarComponent> component = [[theClass alloc] initWithConfiguration:configuration];
         [result addObject:component];
     }
@@ -41,12 +98,15 @@ static NSString *const iTermStatusBarLayoutKeyClass = @"class";
 }
 
 - (instancetype)initWithDictionary:(NSDictionary *)layout {
-    return [self initWithComponents:[iTermStatusBarLayout componentsArrayFromDictionary:layout]];
+    return [self initWithComponents:[iTermStatusBarLayout componentsArrayFromDictionary:layout]
+                      advancedConfiguration:[iTermStatusBarAdvancedConfiguration advancedConfigurationFromDictionary:layout[iTermStatusBarLayoutKeyAdvancedConfiguration]]];
 }
 
-- (instancetype)initWithComponents:(NSArray<iTermStatusBarComponent> *)components {
+- (instancetype)initWithComponents:(NSArray<iTermStatusBarComponent> *)components
+             advancedConfiguration:(iTermStatusBarAdvancedConfiguration *)advancedConfiguration {
     self = [super init];
     if (self) {
+        _advancedConfiguration = advancedConfiguration;
         _components = [components mutableCopy];
     }
     return self;
@@ -57,7 +117,8 @@ static NSString *const iTermStatusBarLayoutKeyClass = @"class";
 }
 
 - (nullable instancetype)initWithCoder:(NSCoder *)aDecoder {
-    return [self initWithComponents:[aDecoder decodeObjectOfClass:[NSArray class] forKey:@"components"]];
+    return [self initWithComponents:[aDecoder decodeObjectOfClass:[NSArray class] forKey:@"components"]
+              advancedConfiguration:[aDecoder decodeObjectOfClass:[iTermStatusBarAdvancedConfiguration class] forKey:@"advanced configuration"]];
 }
 
 - (void)setComponents:(NSArray<id<iTermStatusBarComponent>> *)components {
@@ -73,7 +134,8 @@ static NSString *const iTermStatusBarLayoutKeyClass = @"class";
 }
 
 - (NSDictionary *)dictionaryValue {
-    return @{ iTermStatusBarLayoutKeyComponents: [self arrayValue] };
+    return [@{ iTermStatusBarLayoutKeyComponents: [self arrayValue],
+               iTermStatusBarLayoutKeyAdvancedConfiguration: [_advancedConfiguration dictionaryValue] ?: [NSNull null] } dictionaryByRemovingNullValues];
 }
 
 
@@ -85,6 +147,7 @@ static NSString *const iTermStatusBarLayoutKeyClass = @"class";
 
 - (void)encodeWithCoder:(NSCoder *)aCoder {
     [aCoder encodeObject:_components forKey:@"components"];
+    [aCoder encodeObject:_advancedConfiguration forKey:@"advanced configuration"];
 }
 
 @end

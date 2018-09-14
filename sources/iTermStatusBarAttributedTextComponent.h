@@ -16,6 +16,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readonly) NSArray<NSAttributedString *> *attributedStringVariants;
 
 @property (nonatomic, readonly) NSTextField *textField;
+@property (nonatomic, readonly) NSColor *textColor;
 
 - (CGFloat)widthForAttributedString:(NSAttributedString *)string;
 - (void)updateTextFieldIfNeeded;

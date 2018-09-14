@@ -14,6 +14,26 @@
 #import "NSObject+iTerm.h"
 #import "PreferencePanel.h"
 
+@interface iTermStatusBarSetupPanel : NSPanel
+@end
+
+@implementation iTermStatusBarSetupPanel
+
+- (BOOL)canBecomeKeyWindow {
+    return YES;
+}
+
+- (BOOL)canBecomeMainWindow {
+    return YES;
+}
+
+- (BOOL)becomeFirstResponder {
+    [super becomeFirstResponder];
+    return YES;
+}
+
+@end
+
 @interface ProfilesSessionPreferencesViewController () <NSTableViewDelegate, NSTableViewDataSource>
 @end
 
@@ -41,7 +61,7 @@
     IBOutlet NSButton *_statusBarEnabled;
     IBOutlet NSButton *_configureStatusBar;
     iTermStatusBarSetupViewController *_statusBarSetupViewController;
-    NSWindow *_statusBarSetupWindow;
+    iTermStatusBarSetupPanel *_statusBarSetupWindow;
     BOOL _awoken;
 }
 
@@ -131,7 +151,8 @@
                                                    @"even with a code of “0”. Are you sure you want this?"
                                            actions:@[ @"Enable Send Code", @"Cancel" ]
                                         identifier:kWarnAboutSendCodeWhenIdle
-                                       silenceable:kiTermWarningTypePermanentlySilenceable];
+                                       silenceable:kiTermWarningTypePermanentlySilenceable
+                                            window:weakSelf.view.window];
             if (selection == kiTermWarningSelection0) {
                 [strongSelf setBool:YES forKey:KEY_SEND_CODE_WHEN_IDLE];
             }
@@ -213,10 +234,10 @@
         [[iTermStatusBarSetupViewController alloc] initWithLayoutDictionary:layoutDictionary];
 
     _statusBarSetupWindow =
-        [[NSPanel alloc] initWithContentRect:_statusBarSetupViewController.view.frame
-                                   styleMask:NSWindowStyleMaskResizable
-                                     backing:NSBackingStoreBuffered
-                                       defer:NO];
+        [[iTermStatusBarSetupPanel alloc] initWithContentRect:_statusBarSetupViewController.view.frame
+                                                    styleMask:NSWindowStyleMaskResizable
+                                                      backing:NSBackingStoreBuffered
+                                                        defer:NO];
     _statusBarSetupWindow.contentView = _statusBarSetupViewController.view;
     __weak __typeof(self) weakSelf = self;
     [self.view.window beginSheet:_statusBarSetupWindow completionHandler:^(NSModalResponse returnCode) {

@@ -7,8 +7,13 @@
 
 #import "iTermStatusBarContainerView.h"
 
+#import "DebugLogging.h"
 #import "NSDictionary+iTerm.h"
+#import "NSImageView+iTerm.h"
 #import "NSTimer+iTerm.h"
+
+const CGFloat iTermStatusBarViewControllerIconWidth = 17;
+static const CGFloat iTermStatusBarContainerViewIconBottomMargin = 1;
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -24,11 +29,28 @@ NS_ASSUME_NONNULL_BEGIN
     if (self) {
         self.wantsLayer = YES;
         _component = component;
-        _dependencies = [component statusBarComponentVariableDependencies];
         _backgroundColor = [component.configuration[iTermStatusBarComponentConfigurationKeyKnobValues][iTermStatusBarSharedBackgroundColorKey] colorValue];
         _view = component.statusBarComponentCreateView;
         [self addSubview:_view];
-        _view.frame = NSMakeRect(0, 0, self.frame.size.width, self.frame.size.height);
+        NSImage *icon = component.statusBarComponentIcon;
+        const BOOL hasIcon = (icon != nil);
+        const CGFloat x = self.minX;
+        if (hasIcon) {
+            icon.template = YES;
+            _iconImageView = [NSImageView imageViewWithImage:icon];
+            [_iconImageView it_setTintColor:[NSColor labelColor]];
+            [_iconImageView sizeToFit];
+            [self addSubview:_iconImageView];
+            _iconImageView.layer.borderWidth =1;
+            _iconImageView.layer.borderColor = [[NSColor blackColor] CGColor];
+            NSRect area = NSMakeRect(0, 0, iTermStatusBarViewControllerIconWidth, 21);
+            NSRect frame;
+            frame.size = NSMakeSize(icon.size.width, icon.size.height);
+            frame.origin.x = 0;
+            frame.origin.y = iTermStatusBarContainerViewIconBottomMargin + (area.size.height - frame.size.height) / 2.0;
+            _iconImageView.frame = frame;
+        }
+        _view.frame = NSMakeRect(x, 0, self.preferredWidthForComponentView, self.frame.size.height);
         _timer = [NSTimer scheduledWeakTimerWithTimeInterval:_component.statusBarComponentUpdateCadence
                                                       target:self
                                                     selector:@selector(reevaluateTimer:)
@@ -41,6 +63,17 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (void)dealloc {
     [_timer invalidate];
+}
+
+- (CGFloat)minX {
+    NSImage *icon = _component.statusBarComponentIcon;
+    const BOOL hasIcon = (icon != nil);
+    return hasIcon ? iTermStatusBarViewControllerIconWidth : 0;
+
+}
+
+- (CGFloat)preferredWidthForComponentView {
+    return self.frame.size.width - self.minX;
 }
 
 - (NSString *)description {
@@ -77,14 +110,25 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (void)resizeSubviewsWithOldSize:(NSSize)oldSize {
     [super resizeSubviewsWithOldSize:oldSize];
-    [self.component statusBarComponentSizeView:_view toFitWidth:self.frame.size.width];
+    [self layoutSubviews];
+}
+
+- (void)layoutSubviews {
+    CGFloat width = self.frame.size.width;
+    CGFloat x = 0;
+    if (self.component.statusBarComponentIcon) {
+        width -= iTermStatusBarViewControllerIconWidth;
+        x += iTermStatusBarViewControllerIconWidth;
+    }
+
+    [self.component statusBarComponentSizeView:_view toFitWidth:width];
     const CGFloat viewHeight = _view.frame.size.height;
     const CGFloat myHeight = self.frame.size.height;
-    const CGFloat myWidth = self.frame.size.width;
     const CGFloat viewWidth = _view.frame.size.width;
-    _view.frame = NSMakeRect((myWidth - viewWidth) / 2,
+    DLog(@"set frame of view %@ for component %@ width to %@", _view, self.component, @(viewWidth));
+    _view.frame = NSMakeRect(self.minX,
                              (myHeight - viewHeight) / 2 + _component.statusBarComponentVerticalOffset,
-                             viewWidth,
+                             self.preferredWidthForComponentView,
                              viewHeight);
 }
 

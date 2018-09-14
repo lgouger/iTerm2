@@ -12,6 +12,7 @@ NS_ASSUME_NONNULL_BEGIN
 extern NSString *const iTermVariableKeyGlobalScopeName;
 
 extern NSString *const iTermVariableKeyApplicationPID;
+extern NSString *const iTermVariableKeyApplicationLocalhostName;
 
 extern NSString *const iTermVariableKeyTabTitleOverride;
 extern NSString *const iTermVariableKeyTabCurrentSession;
@@ -47,10 +48,12 @@ extern NSString *const iTermVariableKeySessionJobPid;  // NSNumber. Process id o
 extern NSString *const iTermVariableKeySessionChildPid;  // NSNumber. Process id of child of session task.
 extern NSString *const iTermVariableKeySessionTmuxStatusLeft;  // String. Only set when in tmux integration mode.
 extern NSString *const iTermVariableKeySessionTmuxStatusRight;  // String. Only set when in tmux integration mode.
+extern NSString *const iTermVariableKeySessionMouseReportingMode;  // NSNumber (MouseMode)
 
 extern NSString *const iTermVariableKeyWindowTitleOverride;
 extern NSString *const iTermVariableKeyWindowCurrentTab;
 
+@class iTermVariableReference;
 @class iTermVariables;
 @class iTermVariableScope;
 
@@ -90,6 +93,9 @@ typedef NS_OPTIONS(NSUInteger, iTermVariablesSuggestionContext) {
 // open quickly does to find the names of all user variables.
 - (id)discouragedValueForVariableName:(NSString *)name;
 
+- (void)removeLinkToReference:(iTermVariableReference *)reference
+                         path:(NSString *)path;
+
 @end
 
 // Represents the variables that are visible from a particular callsite. Each
@@ -114,6 +120,7 @@ typedef NS_OPTIONS(NSUInteger, iTermVariablesSuggestionContext) {
 // Freaking KVO crap keeps autocompleting and causing havoc
 - (void)setValue:(nullable id)value forKey:(NSString *)key NS_UNAVAILABLE;
 - (void)setValuesForKeysWithDictionary:(NSDictionary<NSString *, id> *)keyedValues NS_UNAVAILABLE;
+- (void)addLinksToReference:(iTermVariableReference *)reference;
 
 @end
 

@@ -19,7 +19,8 @@
 @property (nonatomic, readonly) iTermStatusBarImageComponentView *view;
 @property (nonatomic, readonly) id model;
 @property (nonatomic, strong) id preferredModel;
-@property (nonatomic, readonly) NSColor *defaultTextColor;
+@property (nonatomic, readonly) NSColor *textColor;
+@property (nonatomic, readonly) BOOL shouldHaveTextColorKnob;
 
 - (void)drawRect:(NSRect)rect;
 
@@ -31,6 +32,7 @@
 @property (nonatomic, readonly) NSColor *lineColor;
 @property (nonatomic, readonly) NSInteger numberOfTimeSeries;
 @property (nonatomic, readonly) double ceiling;
+@property (nonatomic, readonly) NSInteger maximumNumberOfValues;
 
 - (void)invalidate;
 - (void)drawBezierPath:(NSBezierPath *)bezierPath

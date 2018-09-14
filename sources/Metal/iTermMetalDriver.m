@@ -133,7 +133,6 @@ typedef struct {
     int _total;
 
     // @synchronized(self)
-    int _framesInFlight;
     NSMutableArray *_currentFrames;
     NSTimeInterval _startTime;
     MovingAverage *_fpsMovingAverage;
@@ -363,7 +362,7 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
 
 - (BOOL)reallyDrawInMTKView:(nonnull MTKView *)view startToStartTime:(NSTimeInterval)startToStartTime {
     @synchronized (self) {
-        [_inFlightHistogram addValue:_framesInFlight];
+        [_inFlightHistogram addValue:_currentFrames.count];
     }
     if (self.mainThreadState->rows == 0 || self.mainThreadState->columns == 0) {
         DLog(@"  abort: uninitialized");
@@ -381,7 +380,7 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
     _total++;
     if (_total % 60 == 0) {
         @synchronized (self) {
-            DLog(@"fps=%f (%d in flight)", (_total - _dropped) / ([NSDate timeIntervalSinceReferenceDate] - _startTime), (int)_framesInFlight);
+            DLog(@"fps=%f (%d in flight)", (_total - _dropped) / ([NSDate timeIntervalSinceReferenceDate] - _startTime), (int)_currentFrames.count);
             DLog(@"%@", _currentFrames);
         }
     }
@@ -398,22 +397,16 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
         return NO;
     }
 
-    BOOL shouldDrop;
     @synchronized(self) {
-        shouldDrop = (_framesInFlight >= [self maximumNumberOfFramesInFlight]);
-        if (!shouldDrop) {
-            _framesInFlight++;
-        }
-    }
-    if (shouldDrop) {
-        DLog(@"  abort: busy (dropped %@%%, number in flight: %d)", @((_dropped * 100)/_total), (int)_framesInFlight);
-        @synchronized(self) {
+        const NSInteger framesInFlight = _currentFrames.count;
+        const BOOL shouldDrop = (framesInFlight >= [self maximumNumberOfFramesInFlight]);
+        if (shouldDrop) {
+            DLog(@"  abort: busy (dropped %@%%, number in flight: %d)", @((_dropped * 100)/_total), (int)framesInFlight);
             DLog(@"  current frames:\n%@", _currentFrames);
+            _dropped++;
+            self.needsDraw = YES;
+            return NO;
         }
-
-        _dropped++;
-        self.needsDraw = YES;
-        return NO;
     }
 
     if (self.captureDebugInfoForNextFrame) {
@@ -569,9 +562,9 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
         iTermMetalRowData *rowData = [[iTermMetalRowData alloc] init];
         [frameData.rows addObject:rowData];
         rowData.y = y;
-        rowData.keysData = [iTermData dataOfLength:sizeof(iTermMetalGlyphKey) * columns];
-        rowData.attributesData = [iTermData dataOfLength:sizeof(iTermMetalGlyphAttributes) * columns];
-        rowData.backgroundColorRLEData = [iTermData dataOfLength:sizeof(iTermMetalBackgroundColorRLE) * columns];
+        rowData.keysData = [iTermGlyphKeyData dataOfLength:sizeof(iTermMetalGlyphKey) * columns];
+        rowData.attributesData = [iTermAttributesData dataOfLength:sizeof(iTermMetalGlyphAttributes) * columns];
+        rowData.backgroundColorRLEData = [iTermBackgroundColorRLEsData dataOfLength:sizeof(iTermMetalBackgroundColorRLE) * columns];
         rowData.line = [frameData.perFrameState lineForRow:y];
         iTermMetalGlyphKey *glyphKeys = (iTermMetalGlyphKey *)rowData.keysData.mutableBytes;
         int drawableGlyphs = 0;
@@ -598,7 +591,9 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
                                  @(drawableGlyphs),
                                  @(rowData.keysData.length / sizeof(iTermMetalGlyphKey)));
         rowData.markStyle = markStyle;
-
+        [rowData.keysData checkForOverrun];
+        [rowData.attributesData checkForOverrun];
+        [rowData.backgroundColorRLEData checkForOverrun];
         [frameData.debugInfo addRowData:rowData];
     }
 
@@ -1760,11 +1755,8 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
                                        owner:_identifier];
 
     @synchronized(self) {
-        _framesInFlight--;
-        @synchronized(self) {
-            frameData.status = @"retired";
-            [_currentFrames removeObject:frameData];
-        }
+        frameData.status = @"retired";
+        [_currentFrames removeObject:frameData];
     }
     [self dispatchAsyncToPrivateQueue:^{
         [self scheduleDrawIfNeededInView:frameData.view];

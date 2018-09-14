@@ -53,6 +53,7 @@
 #define KEY_KEYBOARD_PROFILE            @"Keyboard Profile"  // Deprecated
 #define KEY_DISPLAY_PROFILE             @"Display Profile"  // Deprecated
 #define KEY_SHORTCUT                    @"Shortcut"
+#define KEY_ICON                        @"Icon"  // Number with iTermProfileIcon enum
 #define KEY_BONJOUR_GROUP               @"Bonjour Group"  // Deprecated
 #define KEY_BONJOUR_SERVICE             @"Bonjour Service"  // Deprecated
 #define KEY_BONJOUR_SERVICE_ADDRESS     @"Bonjour Service Address"  // Deprecated
@@ -114,6 +115,8 @@
 #define KEY_COLUMNS                @"Columns"
 #define KEY_FULLSCREEN             @"Full Screen"  // DEPRECATED
 #define KEY_WINDOW_TYPE            @"Window Type"
+#define KEY_USE_CUSTOM_WINDOW_TITLE           @"Use Custom Window Title"
+#define KEY_CUSTOM_WINDOW_TITLE               @"Custom Window Title"
 #define KEY_SCREEN                 @"Screen"
 #define KEY_SPACE                  @"Space"
 #define KEY_NORMAL_FONT            @"Normal Font"
@@ -166,8 +169,7 @@
 #define KEY_DISABLE_PRINTING                  @"Disable Printing"
 #define KEY_SCROLLBACK_WITH_STATUS_BAR        @"Scrollback With Status Bar"
 #define KEY_SCROLLBACK_IN_ALTERNATE_SCREEN    @"Scrollback in Alternate Screen"
-#define KEY_BOOKMARK_GROWL_NOTIFICATIONS      @"BM Growl"
-
+#define KEY_BOOKMARK_USER_NOTIFICATIONS       @"BM Growl"
 #define KEY_SEND_BELL_ALERT                   @"Send Bell Alert"
 #define KEY_SEND_IDLE_ALERT                   @"Send Idle Alert"
 #define KEY_SEND_NEW_OUTPUT_ALERT             @"Send New Output Alert"
@@ -324,6 +326,11 @@ typedef NS_OPTIONS(NSUInteger, iTermTitleComponents) {
     iTermTitleComponentsProfileAndSessionName = 1 << 6,
     iTermTitleComponentsUser = 1 << 7,
     iTermTitleComponentsHost = 1 << 8
+};
+
+typedef NS_ENUM(NSUInteger, iTermProfileIcon) {
+    iTermProfileIconNone = 0,
+    iTermProfileIconAutomatic = 1,
 };
 
 @interface ITAddressBookMgr : NSObject <NSNetServiceBrowserDelegate, NSNetServiceDelegate>

@@ -17,8 +17,6 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-static NSString *const iTermStatusBarTextComponentTextColorKey = @"text: text color";
-
 @implementation iTermStatusBarTextComponent {
     NSTextField *_textField;
     NSTextField *_measuringField;
@@ -31,7 +29,7 @@ static NSString *const iTermStatusBarTextComponentTextColorKey = @"text: text co
                                                           type:iTermStatusBarComponentKnobTypeColor
                                                    placeholder:nil
                                                   defaultValue:nil
-                                                           key:iTermStatusBarTextComponentTextColorKey];
+                                                           key:iTermStatusBarSharedTextColorKey];
     iTermStatusBarComponentKnob *backgroundColorKnob =
         [[iTermStatusBarComponentKnob alloc] initWithLabelText:@"Background Color"
                                                           type:iTermStatusBarComponentKnobTypeColor
@@ -44,7 +42,7 @@ static NSString *const iTermStatusBarTextComponentTextColorKey = @"text: text co
 
 - (NSTextField *)newTextField {
     NSTextField *textField = [[NSTextField alloc] initWithFrame:NSZeroRect];
-    textField.font = [NSFont fontWithName:@"Menlo" size:12];
+    textField.font = self.advancedConfiguration.font ?: [iTermStatusBarAdvancedConfiguration defaultFont];
     textField.drawsBackground = NO;
     textField.bordered = NO;
     textField.editable = NO;
@@ -60,12 +58,12 @@ static NSString *const iTermStatusBarTextComponentTextColorKey = @"text: text co
 
 - (NSColor *)textColor {
     NSDictionary *knobValues = self.configuration[iTermStatusBarComponentConfigurationKeyKnobValues];
-    return [knobValues[iTermStatusBarTextComponentTextColorKey] colorValue] ?: [self.delegate statusBarComponentDefaultTextColor];
+    return [knobValues[iTermStatusBarSharedTextColorKey] colorValue] ?: ([self defaultTextColor] ?: [self.delegate statusBarComponentDefaultTextColor]);
 }
 
 - (NSColor *)backgroundColor {
     NSDictionary *knobValues = self.configuration[iTermStatusBarComponentConfigurationKeyKnobValues];
-    return [knobValues[iTermStatusBarSharedBackgroundColorKey] colorValue];
+    return [knobValues[iTermStatusBarSharedBackgroundColorKey] colorValue] ?: [self statusBarBackgroundColor];
 }
 
 - (BOOL)shouldUpdateValue:(NSString *)proposed inField:(NSTextField *)textField {
@@ -189,6 +187,10 @@ static NSString *const iTermStatusBarTextComponentTextColorKey = @"text: text co
         return [obj1.secondObject compare:obj2.secondObject];
     }].secondObject;
     return number.doubleValue;
+}
+
+- (NSColor *)statusBarTextColor {
+    return [self textColor];
 }
 
 #pragma mark - iTermStatusBarComponent

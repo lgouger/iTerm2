@@ -185,7 +185,7 @@ NSString *const kProfileSessionHotkeyDidChange = @"kProfileSessionHotkeyDidChang
         NSView *view = tuple[1];
 
         // Maximum allowed height for a tab view item. Taller ones get a scroll view.
-        static const CGFloat kMaxHeight = 462;
+        static const CGFloat kMaxHeight = 492;
         if (view.frame.size.height > kMaxHeight) {
             // If the view is too tall, wrap it in a scroll view.
             NSRect theFrame = NSMakeRect(0, 0, view.frame.size.width, kMaxHeight);
@@ -365,7 +365,8 @@ NSString *const kProfileSessionHotkeyDidChange = @"kProfileSessionHotkeyDidChang
     if ([iTermWarning showWarningWithTitle:question
                                    actions:@[ @"Delete", @"Cancel" ]
                                 identifier:@"DeleteProfile"
-                               silenceable:kiTermWarningTypeTemporarilySilenceable] == kiTermWarningSelection0) {
+                               silenceable:kiTermWarningTypeTemporarilySilenceable
+                                    window:self.view.window] == kiTermWarningSelection0) {
         return YES;
     } else {
         return NO;
@@ -468,6 +469,10 @@ NSString *const kProfileSessionHotkeyDidChange = @"kProfileSessionHotkeyDidChang
 
 }
 
+- (void)invalidateSavedSize {
+    _desiredFrame = NSZeroRect;
+}
+
 #pragma mark - Actions
 
 - (IBAction)removeProfile:(id)sender {
@@ -561,7 +566,8 @@ NSString *const kProfileSessionHotkeyDidChange = @"kProfileSessionHotkeyDidChang
     if ([iTermWarning showWarningWithTitle:title
                                    actions:@[ @"Replace", @"Cancel" ]
                                  identifier:@"NoSyncReplaceProfileWarning"
-                               silenceable:kiTermWarningTypePermanentlySilenceable] == kiTermWarningSelection1) {
+                               silenceable:kiTermWarningTypePermanentlySilenceable
+                                    window:self.view.window] == kiTermWarningSelection1) {
         return;
     }
 

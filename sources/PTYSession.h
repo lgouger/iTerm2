@@ -208,6 +208,7 @@ typedef enum {
 - (void)sessionDuplicateTab;
 
 - (BOOL)sessionShouldAutoClose:(PTYSession *)session;
+- (void)sessionDidChangeGraphic:(PTYSession *)session;
 
 @end
 
@@ -252,10 +253,10 @@ typedef enum {
 // Array of subprocessess names.
 @property(nonatomic, readonly) NSArray *childJobNames;
 
-// Is the session idle? Used by updateLabelAttributes to send a growl message when processing ends.
+// Is the session idle? Used by updateLabelAttributes to send a user notification when processing ends.
 @property(nonatomic, assign) BOOL havePostedIdleNotification;
 
-// Is there new output for the purposes of growl notifications? They run on a different schedule
+// Is there new output for the purposes of user notifications? They run on a different schedule
 // than tab colors.
 @property(nonatomic, assign) BOOL havePostedNewOutputNotification;
 
@@ -390,7 +391,7 @@ typedef enum {
 @property(nonatomic, readonly) NSString *currentCommand;
 
 // Session is not in foreground and notifications are enabled on the screen.
-@property(nonatomic, readonly) BOOL shouldPostGrowlNotification;
+@property(nonatomic, readonly) BOOL shouldPostUserNotification;
 
 @property(nonatomic, readonly) BOOL hasSelection;
 
@@ -457,6 +458,8 @@ typedef enum {
 @property(nonatomic) BOOL isSingleUseSession;
 @property(nonatomic) BOOL overrideGlobalDisableMetalWhenIdleSetting;
 @property(nonatomic, readonly) BOOL canProduceMetalFramecap;
+@property(nonatomic, readonly) NSColor *textColorForStatusBar;
+@property(nonatomic, readonly) NSImage *tabGraphic;
 
 #pragma mark - methods
 
@@ -492,6 +495,8 @@ typedef enum {
 
 - (instancetype)init NS_UNAVAILABLE;
 - (instancetype)initSynthetic:(BOOL)synthetic NS_DESIGNATED_INITIALIZER;
+
+- (void)didFinishInitialization:(BOOL)ok;
 
 // Jump to a particular point in time.
 - (long long)irSeekToAtLeast:(long long)timestamp;
@@ -757,6 +762,7 @@ typedef enum {
 - (void)didInitializeSessionWithName:(NSString *)name;
 - (void)profileNameDidChangeTo:(NSString *)name;
 - (void)profileDidChangeToProfileWithName:(NSString *)name;
+- (void)updateStatusBarStyle;
 
 #pragma mark - API
 

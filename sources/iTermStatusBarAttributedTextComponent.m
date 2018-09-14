@@ -33,14 +33,11 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, copy) NSAttributedString *attributedStringValue;
 @property (nonatomic, strong) NSColor *backgroundColor;
 @property (nonatomic) BOOL drawsBackground;
+@property (nonatomic, strong) NSColor *textColor;
 @end
 
 @implementation iTermAttributedStringView {
     CGFloat _baselineOffset;
-}
-
-- (NSColor *)defaultTextColor {
-    return self.window.ptyWindow.it_terminalWindowDecorationTextColor;
 }
 
 - (void)drawString:(NSString *)string
@@ -50,7 +47,7 @@ NS_ASSUME_NONNULL_BEGIN
              width:(out CGFloat *)width {
     NSTextAttachment *attachment = attrs[NSAttachmentAttributeName];
     if (attachment) {
-        NSImage *image = [attachment.image it_imageWithTintColor:self.defaultTextColor];
+        NSImage *image = [attachment.image it_imageWithTintColor:self.textColor];
         if (reallyDraw) {
             [image drawAtPoint:NSMakePoint(point.x, point.y + _baselineOffset)
                       fromRect:NSZeroRect
@@ -64,7 +61,7 @@ NS_ASSUME_NONNULL_BEGIN
     if (reallyDraw) {
         NSColor *textColor = attrs[NSForegroundColorAttributeName];
         if (!textColor) {
-            attrs = [attrs dictionaryBySettingObject:self.defaultTextColor forKey:NSForegroundColorAttributeName];
+            attrs = [attrs dictionaryBySettingObject:self.textColor forKey:NSForegroundColorAttributeName];
         }
         [string drawAtPoint:point withAttributes:attrs];
     }
@@ -141,7 +138,33 @@ NS_ASSUME_NONNULL_BEGIN
                                                   defaultValue:nil
                                                            key:iTermStatusBarSharedBackgroundColorKey];
 
-    return [@[ backgroundColorKnob ] arrayByAddingObjectsFromArray:[super statusBarComponentKnobs]];
+    iTermStatusBarComponentKnob *textColorKnob =
+        [[iTermStatusBarComponentKnob alloc] initWithLabelText:@"Text Color"
+                                                          type:iTermStatusBarComponentKnobTypeColor
+                                                   placeholder:nil
+                                                  defaultValue:nil
+                                                           key:iTermStatusBarSharedTextColorKey];
+    return [@[ backgroundColorKnob, textColorKnob ] arrayByAddingObjectsFromArray:[super statusBarComponentKnobs]];
+}
+
+- (NSColor *)textColor {
+    NSDictionary *knobValues = self.configuration[iTermStatusBarComponentConfigurationKeyKnobValues];
+    NSColor *configuredColor = [knobValues[iTermStatusBarSharedTextColorKey] colorValue];
+    if (configuredColor) {
+        return configuredColor;
+    }
+
+    NSColor *defaultTextColor = [self defaultTextColor];
+    if (defaultTextColor) {
+        return defaultTextColor;
+    }
+
+    NSColor *provided = [self.delegate statusBarComponentDefaultTextColor];
+    if (provided) {
+        return provided;
+    } else {
+        return [NSColor labelColor];
+    }
 }
 
 - (NSTextField *)newTextField {
@@ -160,7 +183,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (NSColor *)backgroundColor {
     NSDictionary *knobValues = self.configuration[iTermStatusBarComponentConfigurationKeyKnobValues];
-    return [knobValues[iTermStatusBarSharedBackgroundColorKey] colorValue];
+    return [knobValues[iTermStatusBarSharedBackgroundColorKey] colorValue] ?: [self statusBarBackgroundColor];
 }
 
 - (BOOL)shouldUpdateValue:(NSAttributedString *)proposed inField:(id<iTermTextFieldish>)textField {
@@ -235,6 +258,10 @@ NS_ASSUME_NONNULL_BEGIN
     }].firstObject ?: [[NSAttributedString alloc] initWithString:@"" attributes:@{}];
 }
 
+- (CGFloat)statusBarComponentVerticalOffset {
+    return 1.5;
+}
+
 - (CGFloat)statusBarComponentPreferredWidth {
     NSAttributedString *longest = [self longestAttributedStringValue];
     if (!longest) {
@@ -247,6 +274,10 @@ NS_ASSUME_NONNULL_BEGIN
     id<iTermTextFieldish> textFieldish = (id<iTermTextFieldish>)view;
     [textFieldish sizeToFit];
     view.frame = NSMakeRect(0, 0, width, view.frame.size.height);
+}
+
+- (NSColor *)statusBarTextColor {
+    return [self textColor];
 }
 
 - (void)save {
@@ -273,6 +304,7 @@ NS_ASSUME_NONNULL_BEGIN
     }
     if (!_measuringField) {
         _measuringField = [[iTermAttributedStringView alloc] init];
+        _measuringField.textColor = self.textColor;
     }
     _measuringField.attributedStringValue = attributedString;
     [_measuringField sizeToFit];
@@ -292,6 +324,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (NSView *)statusBarComponentCreateView {
     if (!_attributedStringView) {
         _attributedStringView = [[iTermAttributedStringView alloc] init];
+        _attributedStringView.textColor = self.textColor;
         _attributedStringView.backgroundColor = self.backgroundColor;
         _attributedStringView.drawsBackground = (self.backgroundColor.alphaComponent > 0);
     }

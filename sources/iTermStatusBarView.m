@@ -10,33 +10,55 @@
 
 @implementation iTermStatusBarView
 
-- (void)drawRect:(NSRect)dirtyRect {
-    [super drawRect:dirtyRect];
-    
-    CGFloat alpha = 0.25;
-    if (self.window.ptyWindow.it_terminalWindowUseMinimalStyle) {
-        alpha = 0.1;
+- (CGFloat)drawSeparatorsInRect:(NSRect)dirtyRect {
+    CGFloat x = 1;
+    const CGFloat separatorTopBottomInset = 3;
+
+    if (self.separatorColor) {
+        [self.separatorColor set];
+        for (NSNumber *offsetNumber in _separatorOffsets) {
+            CGFloat offset = offsetNumber.doubleValue;
+            NSRect rect = NSMakeRect(offset, separatorTopBottomInset, 1, dirtyRect.size.height - separatorTopBottomInset * 2);
+            NSRectFillUsingOperation(rect, NSCompositingOperationSourceOver);
+            x = offset + 1;
+        }
     }
+    return x;
+}
 
-    __block CGFloat x = 1;
-    [_sections enumerateObjectsUsingBlock:^(iTermTuple<NSColor *, NSNumber *> * _Nonnull tuple, NSUInteger idx, BOOL * _Nonnull stop) {
-        CGFloat offset = tuple.secondObject.doubleValue;
-
+- (void)drawBackgroundColorsInRect:(NSRect)dirtyRect {
+    CGFloat lastX = 0;
+    CGFloat x = 0;
+    for (iTermTuple<NSColor *, NSNumber *> *tuple in self.backgroundColors) {
+        x = tuple.secondObject.doubleValue;
         if (tuple.firstObject) {
             [tuple.firstObject set];
-            NSRectFill(NSMakeRect(x, 1, offset - x, dirtyRect.size.height - 1));
+            NSRectFill(NSMakeRect(lastX,
+                                  self.verticalOffset,
+                                  x - lastX,
+                                  dirtyRect.size.height - self.verticalOffset));
         }
+        lastX = x;
+    }
+}
 
-        [[NSColor colorWithWhite:0 alpha:alpha] set];
-        NSRect rect = NSMakeRect(offset, 1, 1, dirtyRect.size.height - 1);
+- (void)drawRect:(NSRect)dirtyRect {
+    [super drawRect:dirtyRect];
+
+    if (self.backgroundColor) {
+        [self.backgroundColor set];
+        NSRectFill(dirtyRect);
+    }
+
+    [self drawBackgroundColorsInRect:dirtyRect];
+    [self drawSeparatorsInRect:dirtyRect];
+
+    if (self.separatorColor) {
+        [self.separatorColor set];
+        [[NSColor colorWithWhite:0 alpha:0.1] set];
+        NSRect rect = NSMakeRect(0, 1, 1, dirtyRect.size.height - 1);
         NSRectFillUsingOperation(rect, NSCompositingOperationSourceOver);
-
-        x = offset + 1;
-    }];
-    
-    [[NSColor colorWithWhite:0 alpha:alpha] set];
-    NSRect rect = NSMakeRect(0, 1, 1, dirtyRect.size.height - 1);
-    NSRectFillUsingOperation(rect, NSCompositingOperationSourceOver);
+    }
 }
 
 @end

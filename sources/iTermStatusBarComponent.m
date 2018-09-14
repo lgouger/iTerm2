@@ -9,3 +9,5 @@
 #import "iTermStatusBarComponent.h"
 
 iTermStatusBarComponentConfigurationKey iTermStatusBarComponentConfigurationKeyKnobValues = @"knobs";
+iTermStatusBarComponentConfigurationKey iTermStatusBarComponentConfigurationKeyLayoutAdvancedConfigurationDictionaryValue = @"layout advanced configuration dictionary value";
+

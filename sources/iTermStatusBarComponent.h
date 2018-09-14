@@ -13,9 +13,11 @@
 
 typedef NSString *iTermStatusBarComponentConfigurationKey NS_EXTENSIBLE_STRING_ENUM;
 extern iTermStatusBarComponentConfigurationKey iTermStatusBarComponentConfigurationKeyKnobValues;  // NSDictionary
+extern iTermStatusBarComponentConfigurationKey iTermStatusBarComponentConfigurationKeyLayoutAdvancedConfigurationDictionaryValue;  // NSDictionary
 
 // Knob key
 static NSString *const iTermStatusBarSharedBackgroundColorKey = @"shared background color";
+static NSString *const iTermStatusBarSharedTextColorKey = @"shared text color";
 
 @protocol iTermStatusBarComponent;
 @class iTermVariableScope;
@@ -45,6 +47,8 @@ static NSString *const iTermStatusBarSharedBackgroundColorKey = @"shared backgro
 + (NSDictionary *)statusBarComponentDefaultKnobs;
 
 - (instancetype)initWithConfiguration:(NSDictionary<iTermStatusBarComponentConfigurationKey, id> *)configuration;
+
+- (NSImage *)statusBarComponentIcon;
 
 - (NSArray<iTermStatusBarComponentKnob *> *)statusBarComponentKnobs;
 
@@ -111,5 +115,10 @@ static NSString *const iTermStatusBarSharedBackgroundColorKey = @"shared backgro
 
 // Vertical offset for components that don't center propertly
 - (CGFloat)statusBarComponentVerticalOffset;
+
+// Update colors if needed
+- (void)statusBarDefaultTextColorDidChange;
+
+- (NSColor *)statusBarTextColor;
 
 @end

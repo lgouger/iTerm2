@@ -13,6 +13,7 @@
 #import "VT100GridTypes.h"
 
 @class iTermTuple;
+@class NSAppearance;
 
 @interface NSDictionary<__covariant KeyType, __covariant ObjectType> (iTerm)
 
@@ -47,6 +48,7 @@
 - (NSDictionary *)dictionaryByRemovingNullValues;
 - (NSDictionary *)dictionaryBySettingObject:(ObjectType)object forKey:(KeyType)key;
 - (NSDictionary *)dictionaryByRemovingObjectForKey:(KeyType)key;
+- (NSDictionary<KeyType, ObjectType> *)dictionaryKeepingOnlyKeys:(NSArray<KeyType> *)keys;
 
 - (NSData *)propertyListData;
 - (NSString *)sizeInfo;
@@ -60,6 +62,8 @@
 - (NSDictionary<id, NSDictionary<KeyType, ObjectType> *> *)classifyWithBlock:(id (^NS_NOESCAPE)(KeyType key, ObjectType object))block;
 
 - (BOOL)it_writeToXMLPropertyListAt:(NSString *)path;
+
+- (NSDictionary *)it_attributesDictionaryWithAppearance:(NSAppearance *)appearance;
 
 @end
 
@@ -89,6 +93,6 @@ typedef NSDictionary iTermHotKeyDescriptor;
 @interface NSMutableDictionary<KeyType, ObjectType> (iTerm)
 - (NSInteger)removeObjectsPassingTest:(BOOL (^)(KeyType key, ObjectType obj))block;
 - (void)it_mergeFrom:(NSDictionary<KeyType, ObjectType> *)other;
-
+- (void)it_addObject:(id)object toMutableArrayForKey:(KeyType)key;
 @end
 

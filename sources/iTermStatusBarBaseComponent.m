@@ -7,6 +7,7 @@
 
 #import "iTermStatusBarBaseComponent.h"
 
+#import "iTermStatusBarLayout.h"
 #import "iTermStatusBarSetupKnobsViewController.h"
 #import "NSDictionary+iTerm.h"
 #import "NSObject+iTerm.h"
@@ -72,6 +73,8 @@ NSString *const iTermStatusBarPriorityKey = @"base: priority";
     self = [super init];
     if (self) {
         _configuration = [configuration copy];
+        _advancedConfiguration = [iTermStatusBarAdvancedConfiguration advancedConfigurationFromDictionary:configuration[iTermStatusBarComponentConfigurationKeyLayoutAdvancedConfigurationDictionaryValue]];
+        _defaultTextColor = _advancedConfiguration.defaultTextColor;
     }
     return self;
 }
@@ -83,6 +86,10 @@ NSString *const iTermStatusBarPriorityKey = @"base: priority";
         return nil;
     }
     return [self initWithConfiguration:configuration];
+}
+
+- (nullable NSImage *)statusBarComponentIcon {
+    return nil;
 }
 
 - (id<iTermStatusBarComponentFactory>)statusBarComponentFactory {
@@ -111,6 +118,14 @@ NSString *const iTermStatusBarPriorityKey = @"base: priority";
     }
     iTermStatusBarBaseComponent *otherBase = [iTermStatusBarBaseComponent castFrom:other];
     return [self.configuration isEqual:otherBase.configuration];
+}
+
+- (nullable NSColor *)statusBarTextColor {
+    return nil;
+}
+
+- (NSColor *)statusBarBackgroundColor {
+    return _advancedConfiguration.backgroundColor;
 }
 
 #pragma mark - iTermStatusBarComponent
@@ -214,8 +229,10 @@ NSString *const iTermStatusBarPriorityKey = @"base: priority";
 }
 
 - (CGFloat)statusBarComponentVerticalOffset {
-    // Since most components are text this improves the vertical alignment of latin characters
-    return 1.5;
+    return 0;
+}
+
+- (void)statusBarDefaultTextColorDidChange {
 }
 
 #pragma mark - NSSecureCoding
