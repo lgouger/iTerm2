@@ -65,18 +65,11 @@ typedef NS_OPTIONS(NSUInteger, iTermVariablesSuggestionContext) {
     iTermVariablesSuggestionContextWindow = (1 << 4),
 };
 
-@protocol iTermVariablesDelegate<NSObject>
-- (void)variables:(iTermVariables *)variables didChangeValuesForNames:(NSSet<NSString *> *)changedNames group:(dispatch_group_t)group;
-@end
-
-// Usage:
-// iTermVariables *child = [[iTermVariables alloc] initWithContext:(iTermVariablesSuggestionContext)context];
-// [child setValuesFromDictionary:dict];
-// child.delegate = self;
-// [parent setValue:child forVariableNamed:@"child name"];
+// Typically you would not use this directly. Create one and bind it to a
+// scope, then perform references to it from the scope.
 @interface iTermVariables : NSObject
 
-@property (nonatomic, weak) id<iTermVariablesDelegate> delegate;
+@property (nonatomic, readonly) id owner;
 @property (nonatomic, readonly) NSDictionary *dictionaryValue;
 @property (nonatomic, readonly) NSDictionary<NSString *,NSString *> *stringValuedDictionary;
 
@@ -87,7 +80,7 @@ typedef NS_OPTIONS(NSUInteger, iTermVariablesSuggestionContext) {
 + (NSSet<NSString *> *)recordedVariableNamesInContext:(iTermVariablesSuggestionContext)context;
 
 - (instancetype)init NS_UNAVAILABLE;
-- (instancetype)initWithContext:(iTermVariablesSuggestionContext)context NS_DESIGNATED_INITIALIZER;
+- (instancetype)initWithContext:(iTermVariablesSuggestionContext)context owner:(id)owner NS_DESIGNATED_INITIALIZER;
 
 // WARNING: You almost never want to use this. It is useful if you need to get a known child out, as
 // open quickly does to find the names of all user variables.
@@ -98,14 +91,18 @@ typedef NS_OPTIONS(NSUInteger, iTermVariablesSuggestionContext) {
 
 @end
 
-// Represents the variables that are visible from a particular callsite. Each
+@class iTermVariableRecordingScope;
+
+// Provides access to  the variables that are visible from a particular callsite. Each
 // set of variables except one (that of the most local scope) must have a name.
-// Variables are searched for one matching the name.
-@interface iTermVariableScope : NSObject
+// Variables are searched for one matching the name. You could get and set variables through
+// this object. If you want to get called back when a value changes, use iTermVariableReference.
+@interface iTermVariableScope : NSObject<NSCopying>
 @property (nonatomic, readonly) NSDictionary<NSString *, NSString *> *dictionaryWithStringValues;
-@property (nonatomic, readonly) id (^functionCallSource)(NSString *);
+@property (nonatomic) BOOL neverReturnNil;
 
 + (instancetype)globalsScope;
+- (iTermVariableRecordingScope *)recordingCopy;
 
 - (void)addVariables:(iTermVariables *)variables toScopeNamed:(nullable NSString *)scopeName;
 - (id)valueForVariableName:(NSString *)name;
@@ -121,6 +118,15 @@ typedef NS_OPTIONS(NSUInteger, iTermVariablesSuggestionContext) {
 - (void)setValue:(nullable id)value forKey:(NSString *)key NS_UNAVAILABLE;
 - (void)setValuesForKeysWithDictionary:(NSDictionary<NSString *, id> *)keyedValues NS_UNAVAILABLE;
 - (void)addLinksToReference:(iTermVariableReference *)reference;
+
+@end
+
+// A scope that remembers which variables were referred to.
+@interface iTermVariableRecordingScope : iTermVariableScope
+@property (nonatomic, readonly) NSArray<iTermVariableReference *> *recordedReferences;
+
+- (instancetype)initWithScope:(iTermVariableScope *)scope NS_DESIGNATED_INITIALIZER;
+- (instancetype)init NS_UNAVAILABLE;
 
 @end
 

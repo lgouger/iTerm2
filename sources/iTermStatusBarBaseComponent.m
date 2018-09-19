@@ -16,6 +16,8 @@ NS_ASSUME_NONNULL_BEGIN
 
 static NSString *const iTermStatusBarCompressionResistanceKey = @"base: compression resistance";
 NSString *const iTermStatusBarPriorityKey = @"base: priority";
+NSString *const iTermStatusBarMaximumWidthKey = @"maxwidth";
+NSString *const iTermStatusBarMinimumWidthKey = @"minwidth";
 
 @implementation iTermStatusBarBuiltInComponentFactory {
     Class _class;
@@ -42,8 +44,10 @@ NSString *const iTermStatusBarPriorityKey = @"base: priority";
     }
     return self;
 }
-- (id<iTermStatusBarComponent>)newComponentWithKnobs:(NSDictionary *)knobs {
-    return [[_class alloc] initWithConfiguration:@{iTermStatusBarComponentConfigurationKeyKnobValues: knobs}];
+- (id<iTermStatusBarComponent>)newComponentWithKnobs:(NSDictionary *)knobs
+                                               scope:(iTermVariableScope *)scope {
+    return [[_class alloc] initWithConfiguration:@{iTermStatusBarComponentConfigurationKeyKnobValues: knobs}
+                                           scope:scope];
 }
 
 - (void)encodeWithCoder:(NSCoder *)aCoder {
@@ -69,9 +73,11 @@ NSString *const iTermStatusBarPriorityKey = @"base: priority";
 @synthesize configuration = _configuration;
 @synthesize delegate = _delegate;
 
-- (instancetype)initWithConfiguration:(NSDictionary<iTermStatusBarComponentConfigurationKey, id> *)configuration {
+- (instancetype)initWithConfiguration:(NSDictionary<iTermStatusBarComponentConfigurationKey, id> *)configuration
+                                scope:(nullable iTermVariableScope *)scope {
     self = [super init];
     if (self) {
+        _scope = scope;
         _configuration = [configuration copy];
         _advancedConfiguration = [iTermStatusBarAdvancedConfiguration advancedConfigurationFromDictionary:configuration[iTermStatusBarComponentConfigurationKeyLayoutAdvancedConfigurationDictionaryValue]];
         _defaultTextColor = _advancedConfiguration.defaultTextColor;
@@ -85,7 +91,8 @@ NSString *const iTermStatusBarPriorityKey = @"base: priority";
     if (!configuration) {
         return nil;
     }
-    return [self initWithConfiguration:configuration];
+    return [self initWithConfiguration:configuration
+                                 scope:nil];
 }
 
 - (nullable NSImage *)statusBarComponentIcon {
@@ -126,6 +133,36 @@ NSString *const iTermStatusBarPriorityKey = @"base: priority";
 
 - (NSColor *)statusBarBackgroundColor {
     return _advancedConfiguration.backgroundColor;
+}
+
+- (NSArray<iTermStatusBarComponentKnob *> *)minMaxWidthKnobs {
+    iTermStatusBarComponentKnob *maxWidthKnob =
+    [[iTermStatusBarComponentKnob alloc] initWithLabelText:@"Maximum Width:"
+                                                      type:iTermStatusBarComponentKnobTypeDouble
+                                               placeholder:@""
+                                              defaultValue:@(INFINITY)
+                                                       key:iTermStatusBarMaximumWidthKey];
+    iTermStatusBarComponentKnob *minWidthKnob =
+    [[iTermStatusBarComponentKnob alloc] initWithLabelText:@"Minimum Width:"
+                                                      type:iTermStatusBarComponentKnobTypeDouble
+                                               placeholder:@""
+                                              defaultValue:0
+                                                       key:iTermStatusBarMinimumWidthKey];
+    return @[minWidthKnob, maxWidthKnob];
+}
+
+- (CGFloat)clampedWidth:(CGFloat)width {
+    NSDictionary *knobValues = self.configuration[iTermStatusBarComponentConfigurationKeyKnobValues];
+    CGFloat max = [knobValues[iTermStatusBarMaximumWidthKey] ?: @(INFINITY) doubleValue];
+    CGFloat min = [knobValues[iTermStatusBarMinimumWidthKey] ?: @0 doubleValue];
+    return MIN(max,
+               MAX(min,
+                   width));
+}
+
++ (NSDictionary *)defaultMinMaxWidthKnobValues {
+    return @{ iTermStatusBarMaximumWidthKey: @(INFINITY),
+              iTermStatusBarMinimumWidthKey: @0 };
 }
 
 #pragma mark - iTermStatusBarComponent
@@ -193,23 +230,11 @@ NSString *const iTermStatusBarPriorityKey = @"base: priority";
     return 5;
 }
 
-- (NSSet<NSString *> *)statusBarComponentVariableDependencies {
-    return [NSSet set];
-}
-
 - (NSTimeInterval)statusBarComponentUpdateCadence {
     return INFINITY;
 }
 
 - (void)statusBarComponentUpdate {
-}
-
-- (void)statusBarComponentVariablesDidChange:(NSSet<NSString *> *)variables {
-    [self statusBarComponentUpdate];
-}
-
-- (void)statusBarComponentSetVariableScope:(iTermVariableScope *)scope {
-    _scope = scope;
 }
 
 - (CGFloat)statusBarComponentSpringConstant {

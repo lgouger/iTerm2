@@ -7,6 +7,8 @@
 
 #import "iTermBuiltInFunctions.h"
 
+#import "iTermVariableReference.h"
+#import "NSArray+iTerm.h"
 #import "NSDictionary+iTerm.h"
 
 NSString *iTermFunctionSignatureFromNameAndArguments(NSString *name, NSArray<NSString *> *argumentNames) {
@@ -116,7 +118,7 @@ NSString *iTermFunctionSignatureFromNameAndArguments(NSString *name, NSArray<NSS
 
 - (void)callFunctionWithName:(NSString *)name
                   parameters:(NSDictionary<NSString *, id> *)parameters
-                      source:(id (^)(NSString *))source
+                       scope:(iTermVariableScope *)scope
                   completion:(nonnull iTermBuiltInFunctionCompletionBlock)completion {
     NSArray<NSString *> *arguments = parameters.allKeys;
     NSString *signature = iTermFunctionSignatureFromNameAndArguments(name, arguments);
@@ -135,7 +137,7 @@ NSString *iTermFunctionSignatureFromNameAndArguments(NSString *name, NSArray<NSS
         }
 
         NSString *path = function.defaultValues[arg];
-        id value = source(path);
+        id value = [scope valueForVariableName:path];
         if (value) {
             amendedParameters[arg] = value;
         }

@@ -33,8 +33,6 @@ extern NSString *const iTermDidDecodeWindowRestorableStateNotification;
 
 extern NSString *const iTermTabDidChangePositionInWindowNotification;
 
-extern NSString *const iTermWindowAppearanceDidChange;
-
 extern NSString *const iTermSelectedTabDidChange;
 
 extern NSString *const iTermBroadcastDomainsDidChangeNotification;
@@ -95,6 +93,7 @@ extern NSString *const iTermBroadcastDomainsDidChangeNotification;
 @property(nonatomic, readonly) iTermSessionFactory *sessionFactory;
 @property(nonatomic, readonly) int number;
 @property(nonatomic, readonly) Profile *initialProfile;
+@property(nonatomic, readonly) iTermVariableScope *scope;
 
 // Draws a mock-up of a window arrangement into the current graphics context.
 // |frames| gives an array of NSValue's having NSRect values for each screen,

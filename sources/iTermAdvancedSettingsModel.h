@@ -27,6 +27,9 @@ extern NSString *const kAdvancedSettingDescription;
 extern NSString *const iTermAdvancedSettingsDidChange;
 
 + (void)enumerateDictionaries:(void (^)(NSDictionary *))block;
++ (void)loadAdvancedSettingsFromUserDefaults;
+
+#pragma mark - Accessors
 
 + (BOOL)aboutToPasteTabsWithCancel;
 + (BOOL)acceptOSC7;
@@ -51,6 +54,7 @@ extern NSString *const iTermAdvancedSettingsDidChange;
 + (BOOL)cmdClickWhenInactiveInvokesSemanticHistory;
 + (double)coloredSelectedTabOutlineStrength;
 + (double)coloredUnselectedTabTextProminence;
++ (double)compactMinimalTabBarHeight;
 + (BOOL)conservativeURLGuessing;
 + (BOOL)copyWithStylesByDefault;
 + (BOOL)darkThemeHasBlackTitlebar;
@@ -227,6 +231,7 @@ extern NSString *const iTermAdvancedSettingsDidChange;
 + (NSString *)URLCharacterSet;
 + (BOOL)useAdaptiveFrameRate;
 + (BOOL)useColorfgbgFallback;
++ (BOOL)useDivorcedProfileToSplit;
 + (BOOL)useExperimentalFontMetrics;
 + (BOOL)useGCDUpdateTimer;
 

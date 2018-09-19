@@ -140,7 +140,8 @@ static id sAdvancedSetting_##name; \
 } \
 + (NSString *)load_##name { \
     NSString *key = [self name##UserDefaultsKey]; \
-    sAdvancedSetting_##name = [[NSUserDefaults standardUserDefaults] objectForKey:key] ?: inverseTransformation(default); \
+    id valueFromUserDefaults = [[NSUserDefaults standardUserDefaults] objectForKey:key]; \
+    sAdvancedSetting_##name = valueFromUserDefaults ?: inverseTransformation(default); \
     return key; \
 } \
 + (podtype)name { \
@@ -231,9 +232,10 @@ DEFINE_INT(minimumTabDragDistance, 10, SECTION_TABS @"How far must the mouse mov
 DEFINE_BOOL(tabTitlesUseSmartTruncation, YES, SECTION_TABS @"Use “smart truncation” for tab titles.\nIf a tab‘s title is too long to fit, ellipsize the start of the title if more tabs have unique suffixes than prefixes in a given window.");
 DEFINE_BOOL(middleClickClosesTab, YES, SECTION_TABS @"Should middle-click on a tab in the tab bar close the tab?");
 DEFINE_FLOAT(coloredSelectedTabOutlineStrength, 0.5, SECTION_TABS @"How prominent should the outline around the selected tab be drawn when there are colored tabs in a window?\nTakes a value in 0 to 3, where 0 means no outline and 3 means a very prominent outline.");
-DEFINE_FLOAT(minimalTabStyleBackgroundColorDifference, 0, SECTION_TABS @"In minimal tab style, how different should the background color of the selected tab be from the others?\nTakes a value in 0 to 1, where 0 is no difference and 1 very different.");
-DEFINE_FLOAT(minimalTabStyleOutlineStrength, 0.3, SECTION_TABS @"In minimal tab style, how prominent should the tab outline be?\nTakes a value in 0 to 1, where 0 is invisible and 1 is very prominent");
+DEFINE_FLOAT(minimalTabStyleBackgroundColorDifference, 0.05, SECTION_TABS @"In minimal tab style, how different should the background color of the selected tab be from the others?\nTakes a value in 0 to 1, where 0 is no difference and 1 very different.");
+DEFINE_FLOAT(minimalTabStyleOutlineStrength, 0.2, SECTION_TABS @"In minimal tab style, how prominent should the tab outline be?\nTakes a value in 0 to 1, where 0 is invisible and 1 is very prominent");
 DEFINE_FLOAT(coloredUnselectedTabTextProminence, 0.1, SECTION_TABS @"How prominent should the text in a non-selected tab be when there are colored tabs in a window?\nTakes a value in 0 to 0.5, the distance from middle gray.");
+DEFINE_FLOAT(compactMinimalTabBarHeight, 40, SECTION_TABS @"Tab bar height (points) for compact windows with minimal theme.");
 
 #pragma mark Mouse
 
@@ -524,6 +526,7 @@ DEFINE_BOOL(throttleMetalConcurrentFrames, YES, SECTION_EXPERIMENTAL @"Reduce nu
 DEFINE_BOOL(evaluateSwiftyStrings, NO, SECTION_EXPERIMENTAL @"Evaluate certain strings with inline expressions using a Swift-like syntax?\nThis applies to session names and will eventually apply in other places.");
 DEFINE_BOOL(metalDeferCurrentDrawable, NO, SECTION_EXPERIMENTAL @"Defer invoking currentDrawable.\nThis may improve overall performance at the cost of a lower frame rate.");
 DEFINE_BOOL(sshURLsSupportPath, YES_IF_BETA_ELSE_NO, SECTION_EXPERIMENTAL @"SSH URLs respect the path.\nThey run the command: ssh -t \"cd $$PATH$$; exec \\$SHELL -l\"");
+DEFINE_BOOL(useDivorcedProfileToSplit, YES_IF_BETA_ELSE_NO, SECTION_EXPERIMENTAL @"When splitting a pane, use the profile with local modifications, not the backing profile.");
 
 #pragma mark - Scripting
 #define SECTION_SCRIPTING @"Scripting: "
@@ -551,5 +554,14 @@ DEFINE_STRING(pythonRuntimeDownloadURL, @"https://iterm2.com/downloads/pyenv/man
     }
 }
 
++ (void)loadAdvancedSettingsFromUserDefaults {
+    [self enumerateMethods:^(Method method, SEL selector) {
+        NSString *name = NSStringFromSelector(selector);
+        if ([name hasPrefix:@"load_"]) {
+            NSString *(*impl)(id, SEL) = (NSString *(*)(id, SEL))method_getImplementation(method);
+            impl(self, selector);
+        }
+    }];
+}
 
 @end

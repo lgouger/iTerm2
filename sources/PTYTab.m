@@ -113,7 +113,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     SetWithGrainDim(!isVertical, dest, value);
 }
 
-@interface PTYTab()<iTermVariablesDelegate>
+@interface PTYTab()
 @property(nonatomic, strong) NSMapTable<SessionView *, PTYSession *> *viewToSessionMap;
 @end
 
@@ -366,10 +366,11 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
                                                           capacity:1];
     _tabNumberForItermSessionId = -1;
     hiddenLiveViews_ = [[NSMutableArray alloc] init];
-    _variables = [[iTermVariables alloc] initWithContext:iTermVariablesSuggestionContextTab];
-    _userVariables = [[iTermVariables alloc] initWithContext:iTermVariablesSuggestionContextTab];
+    _variables = [[iTermVariables alloc] initWithContext:iTermVariablesSuggestionContextTab
+                                                   owner:self];
+    _userVariables = [[iTermVariables alloc] initWithContext:iTermVariablesSuggestionContextTab
+                                                       owner:self];
     [self.variablesScope setValue:_userVariables forVariableNamed:@"user"];
-    _variables.delegate = self;
 
     self.tmuxWindow = -1;
     [[NSNotificationCenter defaultCenter] addObserver:self
@@ -4048,11 +4049,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     __weak __typeof(self) weakSelf = self;
     _tabTitleOverrideSwiftyString =
         [[iTermSwiftyString alloc] initWithString:titleOverride
-                                           source:
-         ^id _Nonnull(NSString * _Nonnull name) {
-             return [weakSelf valueForVariable:name];
-         }
-                                          mutates:[NSSet setWithObject:iTermVariableKeyTabTitleOverride]
+                                            scope:self.variablesScope
                                          observer:
          ^(NSString * _Nonnull newValue) {
              [weakSelf.variablesScope setValue:newValue forVariableNamed:iTermVariableKeyTabTitleOverride];
@@ -5182,23 +5179,6 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 
 - (void)sessionDuplicateTab {
     [parentWindow_ createDuplicateOfTab:self];
-}
-
-#pragma mark - iTermVariablesDelegate
-
-- (void)variables:(iTermVariables *)variables didChangeValuesForNames:(NSSet<NSString *> *)changedNames
-            group:(dispatch_group_t)group {
-    [_tabTitleOverrideSwiftyString variablesDidChange:changedNames];
-#warning TODO: Don't post a notif if the variable isn't in my scope
-    for (NSString *name in changedNames) {
-        id userInfo = iTermVariableDidChangeNotificationUserInfo(ITMVariableScope_Tab,
-                                                                 [@(self.uniqueId) stringValue],
-                                                                 name,
-                                                                 [variables discouragedValueForVariableName:name]);
-        [[NSNotificationCenter defaultCenter] postNotificationName:iTermVariableDidChangeNotification
-                                                            object:nil
-                                                          userInfo:userInfo];
-    }
 }
 
 - (BOOL)sessionShouldAutoClose:(PTYSession *)session {

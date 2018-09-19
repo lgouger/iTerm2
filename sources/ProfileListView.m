@@ -38,6 +38,7 @@
 #import "ProfileTagsView.h"
 #import "iTermSearchField.h"
 #import "NSView+RecursiveDescription.h"
+#import "NSWindow+iTerm.h"
 
 #define kProfileTableViewDataType @"iTerm2ProfileGuid"
 

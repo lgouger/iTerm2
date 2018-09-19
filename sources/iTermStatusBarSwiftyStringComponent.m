@@ -20,6 +20,15 @@ NSString *const iTermStatusBarSwiftyStringComponentExpressionKey = @"expression"
     NSString *_value;
 }
 
+- (instancetype)initWithConfiguration:(NSDictionary<iTermStatusBarComponentConfigurationKey,id> *)configuration
+                                scope:(nullable iTermVariableScope *)scope {
+    self = [super initWithConfiguration:configuration scope:scope];
+    if (self) {
+        [self updateWithKnobValues:self.configuration[iTermStatusBarComponentConfigurationKeyKnobValues]];
+    }
+    return self;
+}
+
 - (NSString *)statusBarComponentShortDescription {
     return @"Interpolated String";
 }
@@ -60,15 +69,6 @@ NSString *const iTermStatusBarSwiftyStringComponentExpressionKey = @"expression"
     return _swiftyString.dependencies;
 }
 
-- (void)statusBarComponentVariablesDidChange:(NSSet<NSString *> *)variables {
-    [_swiftyString variablesDidChange:variables];
-}
-
-- (void)statusBarComponentSetVariableScope:(iTermVariableScope *)scope {
-    [super statusBarComponentSetVariableScope:scope];
-    [self updateWithKnobValues:self.configuration[iTermStatusBarComponentConfigurationKeyKnobValues]];
-}
-
 - (void)setStringValue:(NSString *)value {
     _value = [value copy];
     [self updateTextFieldIfNeeded];
@@ -86,10 +86,7 @@ NSString *const iTermStatusBarSwiftyStringComponentExpressionKey = @"expression"
         self.stringValue = expression;
     } else {
         _swiftyString = [[iTermSwiftyString alloc] initWithString:expression
-                                                           source:^id _Nonnull(NSString * _Nonnull name) {
-                                                               return [weakSelf.scope valueForVariableName:name] ?: @"";
-                                                           }
-                                                          mutates:[NSSet set]
+                                                            scope:self.scope
                                                          observer:^(NSString * _Nonnull newValue) {
                                                              [weakSelf setStringValue:newValue];
                                                          }];

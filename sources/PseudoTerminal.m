@@ -64,6 +64,7 @@
 #import "NSStringITerm.h"
 #import "NSView+iTerm.h"
 #import "NSView+RecursiveDescription.h"
+#import "NSWindow+iTerm.h"
 #import "NSWindow+PSM.h"
 #import "NSWorkspace+iTerm.h"
 #import "PasteboardHistory.h"
@@ -163,7 +164,6 @@ static NSRect iTermRectCenteredVerticallyWithinRect(NSRect frameToCenter, NSRect
     PTYTabDelegate,
     iTermRootTerminalViewDelegate,
     iTermToolbeltViewDelegate,
-    iTermVariablesDelegate,
     NSComboBoxDelegate,
     PSMMinimalTabStyleDelegate>
 
@@ -181,7 +181,6 @@ static NSRect iTermRectCenteredVerticallyWithinRect(NSRect frameToCenter, NSRect
 
 @property(nonatomic, retain) NSString *titleOverride;
 @property(nonatomic, readonly) iTermVariables *variables;
-@property(nonatomic, readonly) iTermVariableScope *scope;
 @property(nonatomic, readonly) iTermSwiftyString *windowTitleOverrideSwiftyString;
 @end
 
@@ -2319,11 +2318,7 @@ ITERM_WEAKLY_REFERENCEABLE
     __weak __typeof(self) weakSelf = self;
     _windowTitleOverrideSwiftyString =
     [[iTermSwiftyString alloc] initWithString:titleOverride
-                                       source:
-     ^id _Nonnull(NSString * _Nonnull name) {
-         return [weakSelf.scope valueForVariableName:name];
-     }
-                                      mutates:[NSSet setWithObject:iTermVariableKeyWindowTitleOverride]
+                                        scope:self.scope
                                      observer:
      ^(NSString * _Nonnull newValue) {
          [weakSelf.scope setValue:newValue forVariableNamed:iTermVariableKeyWindowTitleOverride];
@@ -2337,8 +2332,8 @@ ITERM_WEAKLY_REFERENCEABLE
 
 - (iTermVariables *)variables {
     if (!_variables) {
-        _variables = [[iTermVariables alloc] initWithContext:iTermVariablesSuggestionContextWindow];
-        _variables.delegate = self;
+        _variables = [[iTermVariables alloc] initWithContext:iTermVariablesSuggestionContextWindow
+                                                       owner:self];
     }
     return _variables;
 }
@@ -3075,6 +3070,10 @@ ITERM_WEAKLY_REFERENCEABLE
 - (NSRect)visibleFrameForScreen:(NSScreen *)screen {
     if ([[[iTermHotKeyController sharedInstance] profileHotKeyForWindowController:self] floats]) {
         DLog(@"visibleFrameForScreen: floating hotkey window gets frameExceptMenuBar");
+        const BOOL menuBarIsHidden = ![[iTermMenuBarObserver sharedInstance] menuBarVisibleOnScreen:screen];
+        if (menuBarIsHidden) {
+            return screen.frame;
+        }
         return screen.frameExceptMenuBar;
     }
 
@@ -5458,6 +5457,7 @@ ITERM_WEAKLY_REFERENCEABLE
     } else {
         self.window.appearance = nil;
     }
+    [_contentView.toolbelt windowBackgroundColorDidChange];
 }
 
 - (void)tabsDidReorder {
@@ -6413,14 +6413,20 @@ ITERM_WEAKLY_REFERENCEABLE
     return newSession;
 }
 
-- (Profile*)_bookmarkToSplit
-{
-    Profile* theBookmark = nil;
+- (Profile *)profileForSplittingCurrentSession {
+    Profile *theBookmark = nil;
+    PTYSession *sourceSession = self.currentSession;
+
+    if ([iTermAdvancedSettingsModel useDivorcedProfileToSplit]) {
+        if (sourceSession.isDivorced) {
+            // NOTE: This counts on splitVertically:before:profile:targetSession: rewriting the GUID.
+            return self.currentSession.profile;
+        }
+    }
 
     // Get the bookmark this session was originally created with. But look it up from its GUID because
     // it might have changed since it was copied into originalProfile when the bookmark was
     // first created.
-    PTYSession *sourceSession = self.currentSession;
     Profile* originalBookmark = [sourceSession originalProfile];
     if (originalBookmark && [originalBookmark objectForKey:KEY_GUID]) {
         theBookmark = [[ProfileModel sharedInstance] bookmarkWithGuid:[originalBookmark objectForKey:KEY_GUID]];
@@ -6448,14 +6454,14 @@ ITERM_WEAKLY_REFERENCEABLE
 - (IBAction)splitVertically:(id)sender
 {
     [self splitVertically:YES
-             withBookmark:[self _bookmarkToSplit]
+             withBookmark:[self profileForSplittingCurrentSession]
             targetSession:[[self currentTab] activeSession]];
 }
 
 - (IBAction)splitHorizontally:(id)sender
 {
     [self splitVertically:NO
-             withBookmark:[self _bookmarkToSplit]
+             withBookmark:[self profileForSplittingCurrentSession]
             targetSession:[[self currentTab] activeSession]];
 }
 
@@ -7113,6 +7119,9 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (BOOL)rootTerminalViewWindowNumberLabelShouldBeVisible {
+    if (@available(macOS 10.14, *)) { } else {
+        return NO;
+    }
     if ([iTermPreferences intForKey:kPreferenceKeyTabPosition] == PSMTab_LeftTab) {
         return !self.anyFullScreen;
     }
@@ -7124,9 +7133,6 @@ ITERM_WEAKLY_REFERENCEABLE
     }
     if (windowType_ == WINDOW_TYPE_COMPACT) {
         return YES;
-    }
-    if (self.anyFullScreen) {
-        return self.tabBarShouldBeVisible;
     }
 
     return NO;
@@ -7185,7 +7191,7 @@ ITERM_WEAKLY_REFERENCEABLE
 
 - (CGFloat)rootTerminalViewHeightOfTabBar:(iTermRootTerminalView *)sender {
     if ([self shouldHaveTallTabBar]) {
-        return 40;
+        return [iTermAdvancedSettingsModel compactMinimalTabBarHeight];
     } else {
         return iTermTabBarControlViewDefaultHeight;
     }
@@ -7193,7 +7199,7 @@ ITERM_WEAKLY_REFERENCEABLE
 
 - (CGFloat)rootTerminalViewStoplightButtonsOffset:(iTermRootTerminalView *)sender {
     if ([self shouldHaveTallTabBar]) {
-        return 7.5;
+        return ([iTermAdvancedSettingsModel compactMinimalTabBarHeight] - 25) / 2.0;
     } else {
         return 0;
     }
@@ -7206,7 +7212,24 @@ ITERM_WEAKLY_REFERENCEABLE
         style = [[[PSMMinimalTabStyle alloc] init] autorelease];
         [(PSMMinimalTabStyle *)style setDelegate:self];
     } else {
-        switch ([self.window.effectiveAppearance it_tabStyle:preferredStyle]) {
+        iTermPreferencesTabStyle tabStyle = preferredStyle;
+        switch (preferredStyle) {
+            case TAB_STYLE_AUTOMATIC:
+            case TAB_STYLE_MINIMAL:
+                // 10.14 path
+                tabStyle = [self.window.effectiveAppearance it_tabStyle:preferredStyle];
+
+            case TAB_STYLE_LIGHT:
+            case TAB_STYLE_DARK:
+            case TAB_STYLE_LIGHT_HIGH_CONTRAST:
+            case TAB_STYLE_DARK_HIGH_CONTRAST:
+                // Use the stated style. it_tabStyle assumes you want a style based on the current
+                // appearance but this is the one case where that is not true.
+                // If there is only one tab and it has a dark tab color the style will be adjusted
+                // later in the call to updateTabColors.
+                break;
+        }
+        switch (tabStyle) {
             case TAB_STYLE_AUTOMATIC:
             case TAB_STYLE_MINIMAL:
                 assert(NO);
@@ -8719,22 +8742,6 @@ ITERM_WEAKLY_REFERENCEABLE
     }
     if ([[self superclass] instancesRespondToSelector:_cmd]) {
         [super controlTextDidChange:aNotification];
-    }
-}
-
-#pragma mark - iTermVariablesDelegate
-
-- (void)variables:(iTermVariables *)variables didChangeValuesForNames:(NSSet<NSString *> *)changedNames group:(dispatch_group_t)group {
-    [self.windowTitleOverrideSwiftyString variablesDidChange:changedNames];
-#warning TODO: Don't post a notif if the variable isn't in my scope
-    for (NSString *name in changedNames) {
-        id userInfo = iTermVariableDidChangeNotificationUserInfo(ITMVariableScope_App,
-                                                                 self.terminalGuid,
-                                                                 name,
-                                                                 [variables discouragedValueForVariableName:name]);
-        [[NSNotificationCenter defaultCenter] postNotificationName:iTermVariableDidChangeNotification
-                                                            object:nil
-                                                          userInfo:userInfo];
     }
 }
 

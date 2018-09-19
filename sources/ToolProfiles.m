@@ -34,6 +34,9 @@ static const CGFloat kInnerMargin = 5;
         [listView_ disableArrowHandler];
         [listView_ allowMultipleSelections];
         [listView_.tableView setHeaderView:nil];
+        if (@available(macOS 10.14, *)) { } else {
+            listView_.tableView.enclosingScrollView.drawsBackground = NO;
+        }
 
         [self addSubview:listView_];
         [listView_ release];
@@ -69,6 +72,10 @@ static const CGFloat kInnerMargin = 5;
         }
         [self addSubview:popup_];
         [popup_ setAutoresizingMask:NSViewMinYMargin | NSViewWidthSizable];
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(refreshTerminal:)
+                                                     name:kRefreshTerminalNotification
+                                                   object:nil];
 
         [popup_ bind:@"enabled" toObject:listView_ withKeyPath:@"hasSelection" options:nil];
 
@@ -76,11 +83,19 @@ static const CGFloat kInnerMargin = 5;
     return self;
 }
 
-- (void)dealloc
-{
+- (void)dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
     [popup_ unbind:@"enabled"];
     [_openButton unbind:@"enabled"];
     [super dealloc];
+}
+
+- (void)refreshTerminal:(NSNotification *)notification {
+    [listView_ reloadData];
+}
+
+- (void)windowBackgroundColorDidChange {
+    [listView_ reloadData];
 }
 
 - (void)relayout {
