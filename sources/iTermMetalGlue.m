@@ -370,7 +370,7 @@ static NSColor *ColorForVector(vector_float4 v) {
 - (void)loadLinesWithDrawingHelper:(iTermTextDrawingHelper *)drawingHelper
                           textView:(PTYTextView *)textView
                             screen:(VT100Screen *)screen {
-    const int width = _visibleRange.end.x - _visibleRange.start.x;
+    const int width = _gridSize.width;
     const BOOL allowOtherMarkStyle = [iTermAdvancedSettingsModel showYellowMarkForJobStoppedBySignal];
     const long long totalScrollbackOverflow = [screen totalScrollbackOverflow];
     const size_t rowSize = sizeof(screen_char_t) * (width + 1);
@@ -858,7 +858,7 @@ ambiguousIsDoubleWidth:(BOOL)ambiguousIsDoubleWidth
 
 - (vector_float4)processedDefaultBackgroundColor {
     float alpha;
-    if (@available(macOS 10.14, *)) {
+    if (iTermTextIsMonochrome()) {
         alpha = _backgroundImage ? 1 - _backgroundImageBlending : _transparencyAlpha;
     } else {
         alpha = _backgroundImage ? 1 - _backgroundImageBlending : 1;
@@ -915,7 +915,7 @@ ambiguousIsDoubleWidth:(BOOL)ambiguousIsDoubleWidth
     vector_float4 lastUnprocessedBackgroundColor = simd_make_float4(0, 0, 0, 0);
     BOOL lastSelected = NO;
     float alpha;
-    if (@available(macOS 10.14, *)) {
+    if (iTermTextIsMonochrome()) {
         alpha = _transparencyAlpha;
     } else {
         alpha = 1;
@@ -1337,7 +1337,7 @@ ambiguousIsDoubleWidth:(BOOL)ambiguousIsDoubleWidth
     assert(font);
 
     int radius = iTermTextureMapMaxCharacterParts / 2;
-    if (@available(macOS 10.14, *)) {
+    if (iTermTextIsMonochrome()) {
         if (isAscii) {
             // These are always guaranteed to fit in a single part.
             radius = 0;
@@ -1517,7 +1517,7 @@ ambiguousIsDoubleWidth:(BOOL)ambiguousIsDoubleWidth
                                             scale:(CGFloat)scale {
     NSColor *backgroundColor;
     NSColor *foregroundColor;
-    if (@available(macOS 10.14, *)) {
+    if (iTermTextIsMonochrome()) {
         backgroundColor = [NSColor clearColor];
         foregroundColor = [NSColor whiteColor];
     } else {

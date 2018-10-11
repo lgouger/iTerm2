@@ -73,30 +73,70 @@ class Connection:
         connection = Connection()
         cookie, key = _cookie_and_key()
         connection.websocket = await websockets.connect(_uri(), extra_headers=_headers(), subprotocols=_subprotocols())
+        connection.__dispatch_forever_future = asyncio.ensure_future(connection._async_dispatch_forever(connection, asyncio.get_event_loop()))
         return connection
 
     def __init__(self):
-        self.__deferred = None
         self.websocket = None
-        # It is possible for multiple calls to async_recv_message() to be made.
-        # For example, if you have an asyncio webserver you might want to call
-        # an API in a handler while the event loop is awaiting in
-        # async_recv_message. If there are two concurrent calls to
-        # websocket.recv() I don't know exactly what happens but I can tell you
-        # it isn't good (it looks like the second one hangs indefinitely).
-        # To avoid this misfortune, this is a list of "receivers" from earliest to
-        # latest. A receiver is a tuple of (matchFunc, future). The matchFunc,
-        # if not None, is a function that takes a message as input and returns
-        # True if it is the one and only handler for it (i.e., because it's waiting
-        # for the response to an API call). When the first async_recv_message gets
-        # a message from the websocket it searches __receivers for a receiver that
-        # wants to handle the just-received message. If one is found, the
-        # mesasge is placed in its future. Otherwise, it dispatches it itself.
-        # Notifications always get dispatched by the "first" receiver, while
-        # subsequent receivers should only dispatch API responses.
+        # A list of tuples of (matchFunc, future). When a message is received
+        # each matchFunc is called with the message as an argument. The first
+        # one that returns true gets its future's result set with that message.
+        # If none returns True it is dispatched through the helpers. Typically
+        # that would be a notification.
         self.__receivers = []
 
-    def run(self, coro, *args):
+    def _collect_garbage(self):
+        """Asyncio seems to want you to keep a reference to a task that's begin
+        run with ensure_future. If you don't, it says "task was destroyed but
+        it is still pending". So, ok, we'll keep references around until we
+        don't need to any more."""
+        self.__tasks = list(filter(lambda t: not t.done(), self.__tasks))
+
+    def run_until_complete(self, coro):
+        self.run(False, coro)
+
+    def run_forever(self, coro):
+        self.run(True, coro)
+
+    def set_message_in_future(self, loop, message, future):
+        assert future is not None
+        # Is the response to an RPC that is being awaited.
+        def setResult():
+            assert future is not None
+            if not future.done():
+                future.set_result(message)
+        loop.call_soon(setResult)
+
+    async def _async_dispatch_forever(self, connection, loop):
+        """Read messages from websocket and call helpers or message responders."""
+        self.__tasks = []
+        try:
+            while True:
+                data = await self.websocket.recv()
+                self._collect_garbage()
+
+                message = iterm2.api_pb2.ServerOriginatedMessage()
+                message.ParseFromString(data)
+
+                future = self._get_receiver_future(message)
+                # Note that however we decide to handle this message,
+                # it must be done *after* we await on the websocket.
+                # Otherwise we might never get the chance.
+                if future is None:
+                    # May be a notification.
+                    self.__tasks.append(asyncio.ensure_future(self._async_dispatch_to_helper(message)))
+                else:
+                    self.set_message_in_future(loop, message, future)
+        except concurrent.futures._base.CancelledError:
+            # Presumably a run_until_complete script
+            pass
+        except:
+            # I'm not quite sure why this is necessary, but if we don't
+            # catch and re-raise the exception it gets swallowed.
+            traceback.print_exc()
+            raise
+
+    def run(self, forever, coro):
         """
         Convenience method to start a program.
 
@@ -104,13 +144,21 @@ class Connection:
         passed in coroutine. Exceptions will be caught and printed to stdout.
 
         :param coro: A coroutine (async function) to run after connecting.
-        :param args: Passed to coro after its first argument (this connection).
         """
-        async def async_main(_loop):
-            """Wrapper around the user-provided coroutine that passes it argv."""
-            await self.async_connect(coro, *args)
         loop = asyncio.get_event_loop()
-        loop.run_until_complete(async_main(loop))
+
+        async def async_main(connection):
+            dispatch_forever_task = asyncio.ensure_future(self._async_dispatch_forever(connection, loop))
+            await coro(connection)
+            if forever:
+                await dispatch_forever_task
+            dispatch_forever_task.cancel()
+
+        # This keeps you from pulling your hair out. The downside is uncertain, but
+        # I do know that pulling my hair out hurts.
+        loop.set_debug(True)
+        self.loop = loop
+        loop.run_until_complete(self.async_connect(async_main))
 
 
     async def async_send_message(self, message):
@@ -130,68 +178,16 @@ class Connection:
             if matchFunc and matchFunc(message):
                 return i
         # This says that the first receiver always gets the message if no other receiver can handle it.
-        # That means that async_dispatch_for_duration or async_dispatch_until_future won't work if
-        # async_recv_message is already running.
-        return 0
+        return None
 
     def _get_receiver_future(self, message):
         """Removes the receiver for message and returns its future."""
         i = self._receiver_index(message)
+        if i is None:
+            return None
         matchFunc, future = self.__receivers[i]
         del self.__receivers[i]
         return future
-
-    async def async_recv_message(self, matchFunc=None):
-        """
-        Asynchronously receives a message.
-
-        This is a low-level operation that is not generally called by user code.
-
-        :param matchFunc: A function taking one argument (a message) that returns True if it must be handled by the caller.
-
-        Returns: a protocol buffer message of type iterm2.api_pb2.ServerOriginatedMessage.
-        """
-        my_future = asyncio.Future()
-        my_receiver = (matchFunc, my_future)
-        self.__receivers.append(my_receiver)
-
-        if len(self.__receivers) == 1:
-            while not my_future.done():
-                data = await self.websocket.recv()
-                message = iterm2.api_pb2.ServerOriginatedMessage()
-                message.ParseFromString(data)
-
-                future = self._get_receiver_future(message)
-                future.set_result(message)
-            return future.result()
-        else:
-            while not my_future.done():
-                message = await my_future
-                return message
-
-    async def async_connect(self, coro, *args):
-        """
-        Establishes a websocket connection.
-
-        You probably want to use Connection.run(), which takes care of runloop
-        setup for you. Connects to iTerm2 on localhost. Once connected, awaits
-        execution of coro.
-
-        This uses ITERM2_COOKIE and ITERM2_KEY environment variables to help with
-        authentication. ITERM2_COOKIE has a shared secret that lets user-launched
-        scripts skip the auth dialog. ITERM2_KEY is used to tie together the output
-        of this program with its entry in the scripting console.
-
-        coro: A coroutine to run once connected.
-        args: Passed to coro after its first argument (this connection)
-        """
-        async with websockets.connect(_uri(), extra_headers=_headers(), subprotocols=_subprotocols()) as websocket:
-            self.websocket = websocket
-            try:
-                await coro(self, *args)
-            except Exception as _err:
-                traceback.print_exc()
-                sys.exit(1)
 
     async def async_dispatch_until_id(self, reqid):
         """
@@ -207,100 +203,53 @@ class Connection:
 
         Returns: A message with the specified request id.
         """
-        owns_deferred = self._begin_deferring()
-        while True:
-            message = await self.async_recv_message(lambda m: m.id == reqid)
-            if message.id == reqid:
-                if owns_deferred:
-                    for deferred_message in self._iterate_deferred():
-                        await self._async_dispatch(deferred_message)
-                return message
-            else:
-                self._defer(message)
+        my_future = asyncio.Future()
+        def matchFunc(m):
+            return m.id == reqid
+        my_receiver = (matchFunc, my_future)
+        self.__receivers.append(my_receiver)
+        return await my_future
 
-    async def async_dispatch_for_duration(self, duration):
-        """
-        Handle incoming messages for a fixed duration of time.
-
-        This is typically used when you wish to receive notifications for a fixed period of time.
-
-        :param duration: The minimum time to run while waiting for incoming messages.
-        """
-        async def sleep():
-            await asyncio.sleep(duration)
-        await self.async_dispatch_until_future(asyncio.Task(sleep()))
-
-    async def async_dispatch_until_future(self, future):
-        """
-        Handle incoming messages until a future has a result.
-
-        This is used when you wish to receive notifications indefinitely, or until
-        some condition satisfied by reciving a notification is reached.
-
-        :param future: An asyncio.Future that will get a result.
-        """
-        async def async_recv_dispatch():
-            message = await self.async_recv_message()
-            await self._async_dispatch(message)
-
-        message_future = async_recv_dispatch()
-        while not future.done():
-            # asyncio.wait is a tricky API. AFAICT there's no way to find
-            # if your Future is done because it is transmogrified into a Task.
-            # Its absence in pending appears to imply its presence in done.
-            done, pending = await asyncio.wait([future, message_future], return_when=asyncio.FIRST_COMPLETED)
-            # There might be tasks in done with exception (e.g., if the connection was closed)
-            for task in done:
-                exc = None
-                try:
-                    exc = task.exception()
-                except:
-                    pass
-                if exc:
-                    raise exc
-            if future not in pending:
-                break
-            if message_future not in pending:
-                message_future = async_recv_dispatch()
-
-
-    def _begin_deferring(self):
-        """
-        Enter a mode where incoming notifications are added to an array to be
-        processed later.
-        """
-        if self.__deferred is None:
-            self.__deferred = []
-            return True
-        return False
-
-    def _defer(self, message):
-        """
-        Add message to the deferred list.
-        """
-        assert self.__deferred is not None
-        self.__deferred.append(message)
-
-    def _iterate_deferred(self):
-        """
-        A generator that yeilds deferred messages in the order they were added.
-        """
-        while self.__deferred:
-            deferred = self.__deferred
-            self.__deferred = []
-            for deferred_message in deferred:
-                yield deferred_message
-        self.__deferred = None
-
-    async def _async_dispatch(self, message):
+    async def _async_dispatch_to_helper(self, message):
         """
         Dispatch a message to all registered helpers.
         """
         for helper in Connection.helpers:
             assert helper is not None
-            if await helper(self, message):
-                break
+            try:
+                if await helper(self, message):
+                    break
+            except Exception:
+                raise
 
-def run(coro):
+    async def async_connect(self, coro):
+        """
+        Establishes a websocket connection.
+
+        You probably want to use Connection.run(), which takes care of runloop
+        setup for you. Connects to iTerm2 on localhost. Once connected, awaits
+        execution of coro.
+
+        This uses ITERM2_COOKIE and ITERM2_KEY environment variables to help with
+        authentication. ITERM2_COOKIE has a shared secret that lets user-launched
+        scripts skip the auth dialog. ITERM2_KEY is used to tie together the output
+        of this program with its entry in the scripting console.
+
+        coro: A coroutine to run once connected.
+        """
+        async with websockets.connect(_uri(), extra_headers=_headers(), subprotocols=_subprotocols()) as websocket:
+            self.websocket = websocket
+            try:
+                await coro(self)
+            except Exception as _err:
+                traceback.print_exc()
+                sys.exit(1)
+
+
+def run_until_complete(coro):
     """Convenience method to run an async function taking an :class:`iterm2.Connection` as an argument."""
-    Connection().run(coro)
+    Connection().run_until_complete(coro)
+
+def run_forever(coro):
+    """Convenience method to run an async function taking an :class:`iterm2.Connection` as an argument."""
+    Connection().run_forever(coro)

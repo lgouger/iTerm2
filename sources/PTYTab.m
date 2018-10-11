@@ -6,6 +6,7 @@
 #import "iTermAdvancedSettingsModel.h"
 #import "iTermApplicationDelegate.h"
 #import "iTermController.h"
+#import "iTermFlexibleView.h"
 #import "iTermNotificationController.h"
 #import "iTermPowerManager.h"
 #import "iTermPreferences.h"
@@ -147,7 +148,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 
     // If there is a flexible root view, this is set and is the tabview's view.
     // Otherwise it is nil.
-    SolidColorView *flexibleView_;
+    iTermFlexibleView *flexibleView_;
 
     // The root of a tree of split views whose leaves are SessionViews. The root is the view of the
     // NSTabViewItem.
@@ -571,7 +572,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 }
 
 - (void)updateTabTitleForCurrentSessionName:(NSString *)newName {
-    NSString *value = (self.evaluatedTitleOverride ?: newName) ?: @"🖥";
+    NSString *value = (self.evaluatedTitleOverride ?: newName) ?: @" ";
     [tabViewItem_ setLabel:value];  // PSM uses bindings to bind the label to its title
     [self.realParentWindow tabTitleDidChange:self];
 }
@@ -807,6 +808,12 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
         // Set flexible view's color to the default background color for tmux tabs.
         NSColor *bgColor;
         bgColor = [ITAddressBookMgr decodeColor:self.tmuxController.profile[KEY_BACKGROUND_COLOR]];
+        if ([self.delegate tabShouldUseTransparency:self]) {
+            CGFloat alpha = [iTermProfilePreferences floatForKey:KEY_TRANSPARENCY inProfile:self.tmuxController.profile];
+            if (alpha < 1) {
+                bgColor = [bgColor colorWithAlphaComponent:alpha];
+            }
+        }
         [flexibleView_ setColor:bgColor];
     } else {
         // Fullscreen, overly large flexible view, or exact size flex view.
@@ -2573,8 +2580,8 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 - (void)enableFlexibleView {
     assert(!flexibleView_);
     // Interpose a vew between the tab and the root so the root can be smaller than the tab.
-    flexibleView_ = [[SolidColorView alloc] initWithFrame:root_.frame
-                                                    color:[self flexibleViewColor]];
+    flexibleView_ = [[iTermFlexibleView alloc] initWithFrame:root_.frame
+                                                       color:[self flexibleViewColor]];
     [flexibleView_ setFlipped:YES];
     tabView_ = flexibleView_;
     [root_ setAutoresizingMask:NSViewMaxXMargin | NSViewMaxYMargin];
@@ -3843,16 +3850,8 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     beforeFrame.size.width += movement.width;
     beforeFrame.size.height += movement.height;
 
-    NSView *after = subviews[splitterIndex + 1];
-    NSRect afterFrame = after.frame;
-    afterFrame.size.width -= movement.width;
-    afterFrame.size.height -= movement.height;
-    afterFrame.origin.x -= movement.width;
-    afterFrame.origin.y -= movement.height;
-
     // See if any constraint would be violated.
-    CGFloat proposed = [self _positionOfDivider:splitterIndex inSplitView:split];
-    proposed += (horizontally ? movement.width : movement.height);
+    const CGFloat proposed = horizontally ? NSMaxX(beforeFrame) : NSMaxY(beforeFrame);
 
     CGFloat constraint = [self splitView:split
                   constrainMinCoordinate:proposed
@@ -3861,10 +3860,8 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
         return NULL;
     }
 
-    proposed = [self _positionOfDivider:splitterIndex inSplitView:split];
-    proposed += (horizontally ? movement.width : movement.height);
-    proposed -= [split dividerThickness];
-    constraint = [self splitView:split constrainMaxCoordinate:proposed ofSubviewAt:splitterIndex];
+    const CGFloat proposedMinusDivider = proposed - split.dividerThickness;
+    constraint = [self splitView:split constrainMaxCoordinate:proposedMinusDivider ofSubviewAt:splitterIndex];
     if (constraint < proposed) {
         return NULL;
     }
@@ -3872,9 +3869,9 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     // It would be ok to move the divider. Return a block that updates views' frames.
     void (^block)(void) = ^void() {
         [self splitView:split draggingWillBeginOfSplit:splitterIndex];
-        before.frame = beforeFrame;
-        after.frame = afterFrame;
+        [split setPosition:proposed ofDividerAtIndex:splitterIndex];
         [self splitView:split draggingDidEndOfSplit:splitterIndex pixels:movement];
+        [split adjustSubviews];
         [split setNeedsDisplay:YES];
     };
     return [block copy];
@@ -4973,7 +4970,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 - (void)updateUseMetal NS_AVAILABLE_MAC(10_11) {
     const BOOL resizing = self.realParentWindow.windowIsResizing;
     const BOOL powerOK = [[iTermPowerManager sharedInstance] metalAllowed];
-    __block NSString *sessionReason;
+    __block iTermMetalUnavailableReason sessionReason = iTermMetalUnavailableReasonNone;
     const BOOL allSessionsAllowMetal = [self.sessions allWithBlock:^BOOL(PTYSession *anObject) {
         return [anObject metalAllowed:&sessionReason];
     }];
@@ -4988,16 +4985,16 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     const NSInteger maxNumberOfSplitPanesForMetal = 6;
     const BOOL numberOfSplitPanesIsReasonable = self.sessions.count < maxNumberOfSplitPanesForMetal;
 
-    NSString *reason = nil;
+    iTermMetalUnavailableReason reason = iTermMetalUnavailableReasonNone;
     BOOL allowed = NO;
     if (resizing) {
-        _metalUnavailableReason = @"the window is being resized.";
+        _metalUnavailableReason = iTermMetalUnavailableReasonWindowResizing;
     } else if (!powerOK) {
-        _metalUnavailableReason = @"the computer is not connected to power. You can enable GPU rendering while disconnected from power in Prefs>General>Advanced GPU Settings.";
+        _metalUnavailableReason = iTermMetalUnavailableReasonDisconnectedFromPower;
     } else if (!allSessionsAllowMetal) {
         _metalUnavailableReason = sessionReason;
     } else if (allSessionsIdle) {
-        _metalUnavailableReason = @"the session is idle. You can enable Metal while idle in Prefs>Advanced.";
+        _metalUnavailableReason = iTermMetalUnavailableReasonIdle;
     } else if (!numberOfSplitPanesIsReasonable) {
         static NSString *tooManyPanesReason;
         static dispatch_once_t onceToken;
@@ -5005,22 +5002,22 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
             tooManyPanesReason = [NSString stringWithFormat:@"there are more than %@ split frames in this tab.",
                                   @(maxNumberOfSplitPanesForMetal - 1)];
         });
-        _metalUnavailableReason = tooManyPanesReason;
+        _metalUnavailableReason = iTermMetalUnavailableReasonTooManyPanesReason;
     } else if (![_delegate tabCanUseMetal:self reason:&reason]) {
         _metalUnavailableReason = reason;
     } else {
-        _metalUnavailableReason = nil;
+        _metalUnavailableReason = iTermMetalUnavailableReasonNone;
         allowed = YES;
     }
     const BOOL ONLY_KEY_WINDOWS_USE_METAL = NO;
     const BOOL isKey = [[[self realParentWindow] window] isKeyWindow];
     const BOOL satisfiesKeyRequirement = (isKey || !ONLY_KEY_WINDOWS_USE_METAL);
     if (!satisfiesKeyRequirement) {
-        _metalUnavailableReason = @"the window does not have keyboard focus.";
+        _metalUnavailableReason = iTermMetalUnavailableReasonNoFocus;
     }
     const BOOL foregroundTab = [self isForegroundTab];
     if (!foregroundTab) {
-        _metalUnavailableReason = @"this tab is not active.";
+        _metalUnavailableReason = iTermMetalUnavailableReasonTabInactive;
     }
     const BOOL useMetal = allowed && satisfiesKeyRequirement && foregroundTab;
     [self.sessions enumerateObjectsUsingBlock:^(PTYSession * _Nonnull obj, NSUInteger idx, BOOL * _Nonnull stop) {
@@ -5185,9 +5182,11 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     return _numberOfSplitViewDragsInProgress == 0;
 }
 
-- (void)sessionDidChangeGraphic:(PTYSession *)session {
+- (void)sessionDidChangeGraphic:(PTYSession *)session shouldShow:(BOOL)shouldShow image:(NSImage *)image {
     if (session == self.activeSession) {
-        [self.delegate tabDidChangeGraphic:self];
+        [self.delegate tabDidChangeGraphic:self
+                                shouldShow:shouldShow
+                                     image:image];
     }
 }
 

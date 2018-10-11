@@ -28,6 +28,7 @@ NS_ASSUME_NONNULL_BEGIN
     double _cachedTotalOcclusion;
 
     NSTimeInterval _timeOfLastWindowTitleChange;
+    BOOL _needsInvalidateShadow;
 }
 
 @synthesize it_openingSheet;
@@ -71,8 +72,13 @@ ITERM_WEAKLY_REFERENCEABLE
 
 - (BOOL)validateMenuItem:(NSMenuItem *)item {
     if (item.action == @selector(performMiniaturize:)) {
-        // This makes borderless windows miniaturizable.
-        return ![self.ptyDelegate anyFullScreen];
+        if (@available(macOS 10.13, *)) {
+            // Can miniaturize borderless windows
+            return ![self.ptyDelegate lionFullScreen];
+        } else {
+            // This was originally for #4402. Not sure how it worked, but I don't want to mess with 10.12.
+            return ![self.ptyDelegate anyFullScreen];
+        }
     } else {
         return [super validateMenuItem:item];
     }
@@ -80,9 +86,12 @@ ITERM_WEAKLY_REFERENCEABLE
 
 - (void)performMiniaturize:(nullable id)sender {
     if ([self.ptyDelegate anyFullScreen]) {
-        [super performMiniaturize:sender];
+        if (@available(macOS 10.13, *)) {
+            [super miniaturize:sender];
+        } else {
+            [super performMiniaturize:sender];
+        }
     } else {
-        // NSWindow's performMiniaturize gates miniaturization on the presence of a miniaturize button.
         DLog(@"performMiniaturize calling [self miniaturize:]");
         [self miniaturize:self];
     }
@@ -439,6 +448,14 @@ ITERM_WEAKLY_REFERENCEABLE
     self.it_openingSheet = self.it_openingSheet + 1;
     [super beginSheet:sheetWindow completionHandler:handler];
     self.it_openingSheet = self.it_openingSheet - 1;
+}
+
+- (void)it_setNeedsInvalidateShadow {
+    _needsInvalidateShadow = YES;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        _needsInvalidateShadow = NO;
+        [self invalidateShadow];
+    });
 }
 
 NS_ASSUME_NONNULL_END

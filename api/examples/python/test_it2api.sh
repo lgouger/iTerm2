@@ -1,5 +1,5 @@
 #!/bin/bash
-PYTHON=~/Library/ApplicationSupport/iTerm2/iterm2env/versions/3.6.5/bin/python3.6
+PYTHON=~/Library/ApplicationSupport/iTerm2/iterm2env/versions/3.7.0/bin/python3.7
 
 function expect_contains() {
     echo -n "$1: "
@@ -58,9 +58,14 @@ expect_contains "activate+show-focus" "$FIRST_SESSION_ID" "$($PYTHON it2api show
 # Can't really test this since I can't deactivate it
 expect_nothing "activate-app" "$($PYTHON it2api activate session $FIRST_SESSION_ID)"
 
-expect_nothing set-variable "$($PYTHON it2api set-variable $SESSION_ID user.foo 123)"
-expect_contains get-variable 123 "$($PYTHON it2api get-variable $SESSION_ID user.foo)"
-expect_contains list-variables user.foo "$($PYTHON it2api list-variables $SESSION_ID)"
+expect_nothing set-variable "$($PYTHON it2api set-variable --session $SESSION_ID user.foo 123)"
+expect_contains get-variable 123 "$($PYTHON it2api get-variable --session $SESSION_ID user.foo)"
+expect_contains list-variables user.foo "$($PYTHON it2api list-variables --session $SESSION_ID)"
+
+expect_nothing "initialize preset" "$($PYTHON it2api set-color-preset Default "Dark Background")"
+expect_contains set-prset-initialized 0,0,0,255 "$($PYTHON it2api get-profile-property $FIRST_SESSION_ID background_color)"
+expect_nothing "initialize preset" "$($PYTHON it2api set-color-preset Default "Light Background")"
+expect_contains set-prset-initialized 255,255,255,255 "$($PYTHON it2api get-profile-property $FIRST_SESSION_ID background_color)"
 
 # Missing tests:
 # saved-arrangement

@@ -33,6 +33,13 @@ CF_EXTERN_C_BEGIN
 @class ITMBroadcastDomain;
 @class ITMBroadcastDomainsChangedNotification;
 @class ITMCodePointsPerCell;
+@class ITMColorPresetRequest;
+@class ITMColorPresetRequest_GetPreset;
+@class ITMColorPresetRequest_ListPresets;
+@class ITMColorPresetResponse;
+@class ITMColorPresetResponse_GetPreset;
+@class ITMColorPresetResponse_GetPreset_ColorSetting;
+@class ITMColorPresetResponse_ListPresets;
 @class ITMCoord;
 @class ITMCoordRange;
 @class ITMCreateTabRequest;
@@ -106,6 +113,13 @@ CF_EXTERN_C_BEGIN
 @class ITMSavedArrangementRequest;
 @class ITMSavedArrangementResponse;
 @class ITMScreenUpdateNotification;
+@class ITMSelection;
+@class ITMSelectionRequest;
+@class ITMSelectionRequest_GetSelectionRequest;
+@class ITMSelectionRequest_SetSelectionRequest;
+@class ITMSelectionResponse;
+@class ITMSelectionResponse_GetSelectionResponse;
+@class ITMSelectionResponse_SetSelectionResponse;
 @class ITMSendTextRequest;
 @class ITMSendTextResponse;
 @class ITMServerOriginatedRPC;
@@ -126,6 +140,10 @@ CF_EXTERN_C_BEGIN
 @class ITMSplitPaneResponse;
 @class ITMSplitTreeNode;
 @class ITMSplitTreeNode_SplitTreeLink;
+@class ITMStatusBarComponentRequest;
+@class ITMStatusBarComponentRequest_OpenPopover;
+@class ITMStatusBarComponentResponse;
+@class ITMSubSelection;
 @class ITMTerminateSessionNotification;
 @class ITMTmuxRequest;
 @class ITMTmuxRequest_CreateWindow;
@@ -145,8 +163,28 @@ CF_EXTERN_C_BEGIN
 @class ITMVariableRequest;
 @class ITMVariableRequest_Set;
 @class ITMVariableResponse;
+@class ITMWindowedCoordRange;
 
 NS_ASSUME_NONNULL_BEGIN
+
+#pragma mark - Enum ITMSelectionMode
+
+typedef GPB_ENUM(ITMSelectionMode) {
+  ITMSelectionMode_Character = 0,
+  ITMSelectionMode_Word = 1,
+  ITMSelectionMode_Line = 2,
+  ITMSelectionMode_Smart = 3,
+  ITMSelectionMode_Box = 4,
+  ITMSelectionMode_WholeLine = 5,
+};
+
+GPBEnumDescriptor *ITMSelectionMode_EnumDescriptor(void);
+
+/**
+ * Checks to see if the given value is defined by the enum or was not known at
+ * the time this source was generated.
+ **/
+BOOL ITMSelectionMode_IsValidValue(int32_t value);
 
 #pragma mark - Enum ITMNotificationType
 
@@ -211,6 +249,56 @@ GPBEnumDescriptor *ITMVariableScope_EnumDescriptor(void);
  * the time this source was generated.
  **/
 BOOL ITMVariableScope_IsValidValue(int32_t value);
+
+#pragma mark - Enum ITMStatusBarComponentResponse_Status
+
+typedef GPB_ENUM(ITMStatusBarComponentResponse_Status) {
+  ITMStatusBarComponentResponse_Status_Ok = 0,
+  ITMStatusBarComponentResponse_Status_SessionNotFound = 1,
+  ITMStatusBarComponentResponse_Status_RequestMalformed = 2,
+  ITMStatusBarComponentResponse_Status_InvalidIdentifier = 3,
+};
+
+GPBEnumDescriptor *ITMStatusBarComponentResponse_Status_EnumDescriptor(void);
+
+/**
+ * Checks to see if the given value is defined by the enum or was not known at
+ * the time this source was generated.
+ **/
+BOOL ITMStatusBarComponentResponse_Status_IsValidValue(int32_t value);
+
+#pragma mark - Enum ITMSelectionResponse_Status
+
+typedef GPB_ENUM(ITMSelectionResponse_Status) {
+  ITMSelectionResponse_Status_Ok = 0,
+  ITMSelectionResponse_Status_InvalidSession = 1,
+  ITMSelectionResponse_Status_InvalidRange = 2,
+  ITMSelectionResponse_Status_RequestMalformed = 3,
+};
+
+GPBEnumDescriptor *ITMSelectionResponse_Status_EnumDescriptor(void);
+
+/**
+ * Checks to see if the given value is defined by the enum or was not known at
+ * the time this source was generated.
+ **/
+BOOL ITMSelectionResponse_Status_IsValidValue(int32_t value);
+
+#pragma mark - Enum ITMColorPresetResponse_Status
+
+typedef GPB_ENUM(ITMColorPresetResponse_Status) {
+  ITMColorPresetResponse_Status_Ok = 0,
+  ITMColorPresetResponse_Status_PresetNotFound = 1,
+  ITMColorPresetResponse_Status_RequestMalformed = 2,
+};
+
+GPBEnumDescriptor *ITMColorPresetResponse_Status_EnumDescriptor(void);
+
+/**
+ * Checks to see if the given value is defined by the enum or was not known at
+ * the time this source was generated.
+ **/
+BOOL ITMColorPresetResponse_Status_IsValidValue(int32_t value);
 
 #pragma mark - Enum ITMPreferencesResponse_Result_SetPreferenceResult_Status
 
@@ -803,6 +891,9 @@ typedef GPB_ENUM(ITMClientOriginatedMessage_FieldNumber) {
   ITMClientOriginatedMessage_FieldNumber_TmuxRequest = 124,
   ITMClientOriginatedMessage_FieldNumber_ReorderTabsRequest = 125,
   ITMClientOriginatedMessage_FieldNumber_PreferencesRequest = 126,
+  ITMClientOriginatedMessage_FieldNumber_ColorPresetRequest = 127,
+  ITMClientOriginatedMessage_FieldNumber_SelectionRequest = 128,
+  ITMClientOriginatedMessage_FieldNumber_StatusBarComponentRequest = 129,
 };
 
 typedef GPB_ENUM(ITMClientOriginatedMessage_Submessage_OneOfCase) {
@@ -834,6 +925,9 @@ typedef GPB_ENUM(ITMClientOriginatedMessage_Submessage_OneOfCase) {
   ITMClientOriginatedMessage_Submessage_OneOfCase_TmuxRequest = 124,
   ITMClientOriginatedMessage_Submessage_OneOfCase_ReorderTabsRequest = 125,
   ITMClientOriginatedMessage_Submessage_OneOfCase_PreferencesRequest = 126,
+  ITMClientOriginatedMessage_Submessage_OneOfCase_ColorPresetRequest = 127,
+  ITMClientOriginatedMessage_Submessage_OneOfCase_SelectionRequest = 128,
+  ITMClientOriginatedMessage_Submessage_OneOfCase_StatusBarComponentRequest = 129,
 };
 
 /**
@@ -901,6 +995,12 @@ typedef GPB_ENUM(ITMClientOriginatedMessage_Submessage_OneOfCase) {
 
 @property(nonatomic, readwrite, strong, null_resettable) ITMPreferencesRequest *preferencesRequest;
 
+@property(nonatomic, readwrite, strong, null_resettable) ITMColorPresetRequest *colorPresetRequest;
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMSelectionRequest *selectionRequest;
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMStatusBarComponentRequest *statusBarComponentRequest;
+
 @end
 
 /**
@@ -940,6 +1040,9 @@ typedef GPB_ENUM(ITMServerOriginatedMessage_FieldNumber) {
   ITMServerOriginatedMessage_FieldNumber_TmuxResponse = 124,
   ITMServerOriginatedMessage_FieldNumber_ReorderTabsResponse = 125,
   ITMServerOriginatedMessage_FieldNumber_PreferencesResponse = 126,
+  ITMServerOriginatedMessage_FieldNumber_ColorPresetResponse = 127,
+  ITMServerOriginatedMessage_FieldNumber_SelectionResponse = 128,
+  ITMServerOriginatedMessage_FieldNumber_StatusBarComponentResponse = 129,
   ITMServerOriginatedMessage_FieldNumber_Notification = 1000,
 };
 
@@ -973,6 +1076,9 @@ typedef GPB_ENUM(ITMServerOriginatedMessage_Submessage_OneOfCase) {
   ITMServerOriginatedMessage_Submessage_OneOfCase_TmuxResponse = 124,
   ITMServerOriginatedMessage_Submessage_OneOfCase_ReorderTabsResponse = 125,
   ITMServerOriginatedMessage_Submessage_OneOfCase_PreferencesResponse = 126,
+  ITMServerOriginatedMessage_Submessage_OneOfCase_ColorPresetResponse = 127,
+  ITMServerOriginatedMessage_Submessage_OneOfCase_SelectionResponse = 128,
+  ITMServerOriginatedMessage_Submessage_OneOfCase_StatusBarComponentResponse = 129,
   ITMServerOriginatedMessage_Submessage_OneOfCase_Notification = 1000,
 };
 
@@ -1045,6 +1151,12 @@ typedef GPB_ENUM(ITMServerOriginatedMessage_Submessage_OneOfCase) {
 
 @property(nonatomic, readwrite, strong, null_resettable) ITMPreferencesResponse *preferencesResponse;
 
+@property(nonatomic, readwrite, strong, null_resettable) ITMColorPresetResponse *colorPresetResponse;
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMSelectionResponse *selectionResponse;
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMStatusBarComponentResponse *statusBarComponentResponse;
+
 /** This is the only response that is sent spontaneously. The 'id' field will not be set. */
 @property(nonatomic, readwrite, strong, null_resettable) ITMNotification *notification;
 
@@ -1054,6 +1166,386 @@ typedef GPB_ENUM(ITMServerOriginatedMessage_Submessage_OneOfCase) {
  * Clears whatever value was set for the oneof 'submessage'.
  **/
 void ITMServerOriginatedMessage_ClearSubmessageOneOfCase(ITMServerOriginatedMessage *message);
+
+#pragma mark - ITMStatusBarComponentRequest
+
+typedef GPB_ENUM(ITMStatusBarComponentRequest_FieldNumber) {
+  ITMStatusBarComponentRequest_FieldNumber_OpenPopover = 1,
+  ITMStatusBarComponentRequest_FieldNumber_Identifier = 2,
+};
+
+typedef GPB_ENUM(ITMStatusBarComponentRequest_Request_OneOfCase) {
+  ITMStatusBarComponentRequest_Request_OneOfCase_GPBUnsetOneOfCase = 0,
+  ITMStatusBarComponentRequest_Request_OneOfCase_OpenPopover = 1,
+};
+
+@interface ITMStatusBarComponentRequest : GPBMessage
+
+@property(nonatomic, readonly) ITMStatusBarComponentRequest_Request_OneOfCase requestOneOfCase;
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMStatusBarComponentRequest_OpenPopover *openPopover;
+
+/** ID of statusbar component */
+@property(nonatomic, readwrite, copy, null_resettable) NSString *identifier;
+/** Test to see if @c identifier has been set. */
+@property(nonatomic, readwrite) BOOL hasIdentifier;
+
+@end
+
+/**
+ * Clears whatever value was set for the oneof 'request'.
+ **/
+void ITMStatusBarComponentRequest_ClearRequestOneOfCase(ITMStatusBarComponentRequest *message);
+
+#pragma mark - ITMStatusBarComponentRequest_OpenPopover
+
+typedef GPB_ENUM(ITMStatusBarComponentRequest_OpenPopover_FieldNumber) {
+  ITMStatusBarComponentRequest_OpenPopover_FieldNumber_SessionId = 1,
+  ITMStatusBarComponentRequest_OpenPopover_FieldNumber_Html = 2,
+  ITMStatusBarComponentRequest_OpenPopover_FieldNumber_Size = 3,
+};
+
+@interface ITMStatusBarComponentRequest_OpenPopover : GPBMessage
+
+@property(nonatomic, readwrite, copy, null_resettable) NSString *sessionId;
+/** Test to see if @c sessionId has been set. */
+@property(nonatomic, readwrite) BOOL hasSessionId;
+
+/** HTML to show in a popover that opens from the component. */
+@property(nonatomic, readwrite, copy, null_resettable) NSString *html;
+/** Test to see if @c html has been set. */
+@property(nonatomic, readwrite) BOOL hasHtml;
+
+/** Size in points of the content area of the popover. */
+@property(nonatomic, readwrite, strong, null_resettable) ITMSize *size;
+/** Test to see if @c size has been set. */
+@property(nonatomic, readwrite) BOOL hasSize;
+
+@end
+
+#pragma mark - ITMStatusBarComponentResponse
+
+typedef GPB_ENUM(ITMStatusBarComponentResponse_FieldNumber) {
+  ITMStatusBarComponentResponse_FieldNumber_Status = 1,
+};
+
+@interface ITMStatusBarComponentResponse : GPBMessage
+
+@property(nonatomic, readwrite) ITMStatusBarComponentResponse_Status status;
+
+@property(nonatomic, readwrite) BOOL hasStatus;
+@end
+
+#pragma mark - ITMWindowedCoordRange
+
+typedef GPB_ENUM(ITMWindowedCoordRange_FieldNumber) {
+  ITMWindowedCoordRange_FieldNumber_CoordRange = 1,
+  ITMWindowedCoordRange_FieldNumber_Columns = 2,
+};
+
+@interface ITMWindowedCoordRange : GPBMessage
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMCoordRange *coordRange;
+/** Test to see if @c coordRange has been set. */
+@property(nonatomic, readwrite) BOOL hasCoordRange;
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMRange *columns;
+/** Test to see if @c columns has been set. */
+@property(nonatomic, readwrite) BOOL hasColumns;
+
+@end
+
+#pragma mark - ITMSubSelection
+
+typedef GPB_ENUM(ITMSubSelection_FieldNumber) {
+  ITMSubSelection_FieldNumber_WindowedCoordRange = 1,
+  ITMSubSelection_FieldNumber_SelectionMode = 2,
+  ITMSubSelection_FieldNumber_Connected = 3,
+};
+
+@interface ITMSubSelection : GPBMessage
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMWindowedCoordRange *windowedCoordRange;
+/** Test to see if @c windowedCoordRange has been set. */
+@property(nonatomic, readwrite) BOOL hasWindowedCoordRange;
+
+@property(nonatomic, readwrite) ITMSelectionMode selectionMode;
+
+@property(nonatomic, readwrite) BOOL hasSelectionMode;
+@property(nonatomic, readwrite) BOOL connected;
+
+@property(nonatomic, readwrite) BOOL hasConnected;
+@end
+
+#pragma mark - ITMSelection
+
+typedef GPB_ENUM(ITMSelection_FieldNumber) {
+  ITMSelection_FieldNumber_SubSelectionsArray = 1,
+};
+
+@interface ITMSelection : GPBMessage
+
+@property(nonatomic, readwrite, strong, null_resettable) NSMutableArray<ITMSubSelection*> *subSelectionsArray;
+/** The number of items in @c subSelectionsArray without causing the array to be created. */
+@property(nonatomic, readonly) NSUInteger subSelectionsArray_Count;
+
+@end
+
+#pragma mark - ITMSelectionRequest
+
+typedef GPB_ENUM(ITMSelectionRequest_FieldNumber) {
+  ITMSelectionRequest_FieldNumber_GetSelectionRequest = 1,
+  ITMSelectionRequest_FieldNumber_SetSelectionRequest = 2,
+};
+
+typedef GPB_ENUM(ITMSelectionRequest_Request_OneOfCase) {
+  ITMSelectionRequest_Request_OneOfCase_GPBUnsetOneOfCase = 0,
+  ITMSelectionRequest_Request_OneOfCase_GetSelectionRequest = 1,
+  ITMSelectionRequest_Request_OneOfCase_SetSelectionRequest = 2,
+};
+
+@interface ITMSelectionRequest : GPBMessage
+
+@property(nonatomic, readonly) ITMSelectionRequest_Request_OneOfCase requestOneOfCase;
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMSelectionRequest_GetSelectionRequest *getSelectionRequest;
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMSelectionRequest_SetSelectionRequest *setSelectionRequest;
+
+@end
+
+/**
+ * Clears whatever value was set for the oneof 'request'.
+ **/
+void ITMSelectionRequest_ClearRequestOneOfCase(ITMSelectionRequest *message);
+
+#pragma mark - ITMSelectionRequest_GetSelectionRequest
+
+typedef GPB_ENUM(ITMSelectionRequest_GetSelectionRequest_FieldNumber) {
+  ITMSelectionRequest_GetSelectionRequest_FieldNumber_SessionId = 1,
+};
+
+@interface ITMSelectionRequest_GetSelectionRequest : GPBMessage
+
+@property(nonatomic, readwrite, copy, null_resettable) NSString *sessionId;
+/** Test to see if @c sessionId has been set. */
+@property(nonatomic, readwrite) BOOL hasSessionId;
+
+@end
+
+#pragma mark - ITMSelectionRequest_SetSelectionRequest
+
+typedef GPB_ENUM(ITMSelectionRequest_SetSelectionRequest_FieldNumber) {
+  ITMSelectionRequest_SetSelectionRequest_FieldNumber_SessionId = 1,
+  ITMSelectionRequest_SetSelectionRequest_FieldNumber_Selection = 2,
+};
+
+@interface ITMSelectionRequest_SetSelectionRequest : GPBMessage
+
+@property(nonatomic, readwrite, copy, null_resettable) NSString *sessionId;
+/** Test to see if @c sessionId has been set. */
+@property(nonatomic, readwrite) BOOL hasSessionId;
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMSelection *selection;
+/** Test to see if @c selection has been set. */
+@property(nonatomic, readwrite) BOOL hasSelection;
+
+@end
+
+#pragma mark - ITMSelectionResponse
+
+typedef GPB_ENUM(ITMSelectionResponse_FieldNumber) {
+  ITMSelectionResponse_FieldNumber_Status = 1,
+  ITMSelectionResponse_FieldNumber_GetSelectionResponse = 2,
+  ITMSelectionResponse_FieldNumber_SetSelectionResponse = 3,
+};
+
+typedef GPB_ENUM(ITMSelectionResponse_Response_OneOfCase) {
+  ITMSelectionResponse_Response_OneOfCase_GPBUnsetOneOfCase = 0,
+  ITMSelectionResponse_Response_OneOfCase_GetSelectionResponse = 2,
+  ITMSelectionResponse_Response_OneOfCase_SetSelectionResponse = 3,
+};
+
+@interface ITMSelectionResponse : GPBMessage
+
+@property(nonatomic, readwrite) ITMSelectionResponse_Status status;
+
+@property(nonatomic, readwrite) BOOL hasStatus;
+@property(nonatomic, readonly) ITMSelectionResponse_Response_OneOfCase responseOneOfCase;
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMSelectionResponse_GetSelectionResponse *getSelectionResponse;
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMSelectionResponse_SetSelectionResponse *setSelectionResponse;
+
+@end
+
+/**
+ * Clears whatever value was set for the oneof 'response'.
+ **/
+void ITMSelectionResponse_ClearResponseOneOfCase(ITMSelectionResponse *message);
+
+#pragma mark - ITMSelectionResponse_GetSelectionResponse
+
+typedef GPB_ENUM(ITMSelectionResponse_GetSelectionResponse_FieldNumber) {
+  ITMSelectionResponse_GetSelectionResponse_FieldNumber_Selection = 2,
+};
+
+@interface ITMSelectionResponse_GetSelectionResponse : GPBMessage
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMSelection *selection;
+/** Test to see if @c selection has been set. */
+@property(nonatomic, readwrite) BOOL hasSelection;
+
+@end
+
+#pragma mark - ITMSelectionResponse_SetSelectionResponse
+
+@interface ITMSelectionResponse_SetSelectionResponse : GPBMessage
+
+@end
+
+#pragma mark - ITMColorPresetRequest
+
+typedef GPB_ENUM(ITMColorPresetRequest_FieldNumber) {
+  ITMColorPresetRequest_FieldNumber_ListPresets = 1,
+  ITMColorPresetRequest_FieldNumber_GetPreset = 2,
+};
+
+typedef GPB_ENUM(ITMColorPresetRequest_Request_OneOfCase) {
+  ITMColorPresetRequest_Request_OneOfCase_GPBUnsetOneOfCase = 0,
+  ITMColorPresetRequest_Request_OneOfCase_ListPresets = 1,
+  ITMColorPresetRequest_Request_OneOfCase_GetPreset = 2,
+};
+
+@interface ITMColorPresetRequest : GPBMessage
+
+@property(nonatomic, readonly) ITMColorPresetRequest_Request_OneOfCase requestOneOfCase;
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMColorPresetRequest_ListPresets *listPresets;
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMColorPresetRequest_GetPreset *getPreset;
+
+@end
+
+/**
+ * Clears whatever value was set for the oneof 'request'.
+ **/
+void ITMColorPresetRequest_ClearRequestOneOfCase(ITMColorPresetRequest *message);
+
+#pragma mark - ITMColorPresetRequest_ListPresets
+
+@interface ITMColorPresetRequest_ListPresets : GPBMessage
+
+@end
+
+#pragma mark - ITMColorPresetRequest_GetPreset
+
+typedef GPB_ENUM(ITMColorPresetRequest_GetPreset_FieldNumber) {
+  ITMColorPresetRequest_GetPreset_FieldNumber_Name = 1,
+};
+
+@interface ITMColorPresetRequest_GetPreset : GPBMessage
+
+@property(nonatomic, readwrite, copy, null_resettable) NSString *name;
+/** Test to see if @c name has been set. */
+@property(nonatomic, readwrite) BOOL hasName;
+
+@end
+
+#pragma mark - ITMColorPresetResponse
+
+typedef GPB_ENUM(ITMColorPresetResponse_FieldNumber) {
+  ITMColorPresetResponse_FieldNumber_ListPresets = 1,
+  ITMColorPresetResponse_FieldNumber_GetPreset = 2,
+  ITMColorPresetResponse_FieldNumber_Status = 3,
+};
+
+typedef GPB_ENUM(ITMColorPresetResponse_Response_OneOfCase) {
+  ITMColorPresetResponse_Response_OneOfCase_GPBUnsetOneOfCase = 0,
+  ITMColorPresetResponse_Response_OneOfCase_ListPresets = 1,
+  ITMColorPresetResponse_Response_OneOfCase_GetPreset = 2,
+};
+
+@interface ITMColorPresetResponse : GPBMessage
+
+@property(nonatomic, readonly) ITMColorPresetResponse_Response_OneOfCase responseOneOfCase;
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMColorPresetResponse_ListPresets *listPresets;
+
+@property(nonatomic, readwrite, strong, null_resettable) ITMColorPresetResponse_GetPreset *getPreset;
+
+@property(nonatomic, readwrite) ITMColorPresetResponse_Status status;
+
+@property(nonatomic, readwrite) BOOL hasStatus;
+@end
+
+/**
+ * Clears whatever value was set for the oneof 'response'.
+ **/
+void ITMColorPresetResponse_ClearResponseOneOfCase(ITMColorPresetResponse *message);
+
+#pragma mark - ITMColorPresetResponse_ListPresets
+
+typedef GPB_ENUM(ITMColorPresetResponse_ListPresets_FieldNumber) {
+  ITMColorPresetResponse_ListPresets_FieldNumber_NameArray = 1,
+};
+
+@interface ITMColorPresetResponse_ListPresets : GPBMessage
+
+@property(nonatomic, readwrite, strong, null_resettable) NSMutableArray<NSString*> *nameArray;
+/** The number of items in @c nameArray without causing the array to be created. */
+@property(nonatomic, readonly) NSUInteger nameArray_Count;
+
+@end
+
+#pragma mark - ITMColorPresetResponse_GetPreset
+
+typedef GPB_ENUM(ITMColorPresetResponse_GetPreset_FieldNumber) {
+  ITMColorPresetResponse_GetPreset_FieldNumber_ColorSettingsArray = 1,
+};
+
+@interface ITMColorPresetResponse_GetPreset : GPBMessage
+
+@property(nonatomic, readwrite, strong, null_resettable) NSMutableArray<ITMColorPresetResponse_GetPreset_ColorSetting*> *colorSettingsArray;
+/** The number of items in @c colorSettingsArray without causing the array to be created. */
+@property(nonatomic, readonly) NSUInteger colorSettingsArray_Count;
+
+@end
+
+#pragma mark - ITMColorPresetResponse_GetPreset_ColorSetting
+
+typedef GPB_ENUM(ITMColorPresetResponse_GetPreset_ColorSetting_FieldNumber) {
+  ITMColorPresetResponse_GetPreset_ColorSetting_FieldNumber_Red = 1,
+  ITMColorPresetResponse_GetPreset_ColorSetting_FieldNumber_Green = 2,
+  ITMColorPresetResponse_GetPreset_ColorSetting_FieldNumber_Blue = 3,
+  ITMColorPresetResponse_GetPreset_ColorSetting_FieldNumber_Alpha = 4,
+  ITMColorPresetResponse_GetPreset_ColorSetting_FieldNumber_ColorSpace = 5,
+  ITMColorPresetResponse_GetPreset_ColorSetting_FieldNumber_Key = 6,
+};
+
+@interface ITMColorPresetResponse_GetPreset_ColorSetting : GPBMessage
+
+@property(nonatomic, readwrite) float red;
+
+@property(nonatomic, readwrite) BOOL hasRed;
+@property(nonatomic, readwrite) float green;
+
+@property(nonatomic, readwrite) BOOL hasGreen;
+@property(nonatomic, readwrite) float blue;
+
+@property(nonatomic, readwrite) BOOL hasBlue;
+@property(nonatomic, readwrite) float alpha;
+
+@property(nonatomic, readwrite) BOOL hasAlpha;
+@property(nonatomic, readwrite, copy, null_resettable) NSString *colorSpace;
+/** Test to see if @c colorSpace has been set. */
+@property(nonatomic, readwrite) BOOL hasColorSpace;
+
+@property(nonatomic, readwrite, copy, null_resettable) NSString *key;
+/** Test to see if @c key has been set. */
+@property(nonatomic, readwrite) BOOL hasKey;
+
+@end
 
 #pragma mark - ITMPreferencesRequest
 
@@ -2056,6 +2548,16 @@ typedef GPB_ENUM(ITMGetPropertyRequest_Identifier_OneOfCase) {
 /** Does not accept "all". Accepts "active". */
 @property(nonatomic, readwrite, copy, null_resettable) NSString *sessionId;
 
+/**
+ * For sessions:
+ * "grid_size" -> { "width": number, "height": number }
+ * "buried" -> boolean
+ * "number_of_lines" -> { "overflow": number, "grid": number, "history": number }
+ *
+ * For windows:
+ * "frame" -> { "origin": { "x": number, "y": number }, "size": { "width": number, "height": number } }
+ * "fullscreen" -> boolean
+ **/
 @property(nonatomic, readwrite, copy, null_resettable) NSString *name;
 /** Test to see if @c name has been set. */
 @property(nonatomic, readwrite) BOOL hasName;
@@ -2325,6 +2827,7 @@ typedef GPB_ENUM(ITMRPCRegistrationRequest_StatusBarComponentAttributes_FieldNum
   ITMRPCRegistrationRequest_StatusBarComponentAttributes_FieldNumber_KnobsArray = 3,
   ITMRPCRegistrationRequest_StatusBarComponentAttributes_FieldNumber_Exemplar = 4,
   ITMRPCRegistrationRequest_StatusBarComponentAttributes_FieldNumber_UpdateCadence = 5,
+  ITMRPCRegistrationRequest_StatusBarComponentAttributes_FieldNumber_UniqueIdentifier = 6,
 };
 
 @interface ITMRPCRegistrationRequest_StatusBarComponentAttributes : GPBMessage
@@ -2349,6 +2852,14 @@ typedef GPB_ENUM(ITMRPCRegistrationRequest_StatusBarComponentAttributes_FieldNum
 @property(nonatomic, readwrite) float updateCadence;
 
 @property(nonatomic, readwrite) BOOL hasUpdateCadence;
+/**
+ * Identifies this component uniquely. Must not conflict with other components.
+ * Use a backwards domain name identifying yourself and the feature, like "com.example.featurename"
+ **/
+@property(nonatomic, readwrite, copy, null_resettable) NSString *uniqueIdentifier;
+/** Test to see if @c uniqueIdentifier has been set. */
+@property(nonatomic, readwrite) BOOL hasUniqueIdentifier;
+
 @end
 
 #pragma mark - ITMRPCRegistrationRequest_StatusBarComponentAttributes_Knob
@@ -2986,6 +3497,7 @@ typedef GPB_ENUM(ITMGetBufferResponse_FieldNumber) {
   ITMGetBufferResponse_FieldNumber_ContentsArray = 3,
   ITMGetBufferResponse_FieldNumber_Cursor = 4,
   ITMGetBufferResponse_FieldNumber_NumLinesAboveScreen = 5,
+  ITMGetBufferResponse_FieldNumber_WindowedCoordRange = 6,
 };
 
 /**
@@ -2997,9 +3509,9 @@ typedef GPB_ENUM(ITMGetBufferResponse_FieldNumber) {
 
 @property(nonatomic, readwrite) BOOL hasStatus;
 /** Which lines were returned */
-@property(nonatomic, readwrite, strong, null_resettable) ITMRange *range;
+@property(nonatomic, readwrite, strong, null_resettable) ITMRange *range DEPRECATED_ATTRIBUTE;
 /** Test to see if @c range has been set. */
-@property(nonatomic, readwrite) BOOL hasRange;
+@property(nonatomic, readwrite) BOOL hasRange DEPRECATED_ATTRIBUTE;
 
 /** Those lines' contents. */
 @property(nonatomic, readwrite, strong, null_resettable) NSMutableArray<ITMLineContents*> *contentsArray;
@@ -3015,9 +3527,14 @@ typedef GPB_ENUM(ITMGetBufferResponse_FieldNumber) {
  * the screen. Subtract this from cursor.y to get the cursor's position on the screen when it
  * is scrolled to the bottom.
  **/
-@property(nonatomic, readwrite) int64_t numLinesAboveScreen;
+@property(nonatomic, readwrite) int64_t numLinesAboveScreen DEPRECATED_ATTRIBUTE;
 
-@property(nonatomic, readwrite) BOOL hasNumLinesAboveScreen;
+@property(nonatomic, readwrite) BOOL hasNumLinesAboveScreen DEPRECATED_ATTRIBUTE;
+/** The returned range */
+@property(nonatomic, readwrite, strong, null_resettable) ITMWindowedCoordRange *windowedCoordRange;
+/** Test to see if @c windowedCoordRange has been set. */
+@property(nonatomic, readwrite) BOOL hasWindowedCoordRange;
+
 @end
 
 #pragma mark - ITMGetPromptRequest
@@ -3258,6 +3775,7 @@ typedef GPB_ENUM(ITMTransactionResponse_FieldNumber) {
 typedef GPB_ENUM(ITMLineRange_FieldNumber) {
   ITMLineRange_FieldNumber_ScreenContentsOnly = 1,
   ITMLineRange_FieldNumber_TrailingLines = 2,
+  ITMLineRange_FieldNumber_WindowedCoordRange = 3,
 };
 
 /**
@@ -3280,6 +3798,10 @@ typedef GPB_ENUM(ITMLineRange_FieldNumber) {
 @property(nonatomic, readwrite) int32_t trailingLines;
 
 @property(nonatomic, readwrite) BOOL hasTrailingLines;
+@property(nonatomic, readwrite, strong, null_resettable) ITMWindowedCoordRange *windowedCoordRange;
+/** Test to see if @c windowedCoordRange has been set. */
+@property(nonatomic, readwrite) BOOL hasWindowedCoordRange;
+
 @end
 
 #pragma mark - ITMRange

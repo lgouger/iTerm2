@@ -42,6 +42,9 @@ message ClientOriginatedMessage {
     TmuxRequest tmux_request = 124;
     ReorderTabsRequest reorder_tabs_request = 125;
     PreferencesRequest preferences_request = 126;
+    ColorPresetRequest color_preset_request = 127;
+    SelectionRequest selection_request = 128;
+    StatusBarComponentRequest status_bar_component_request = 129;
   }
 }
 
@@ -81,10 +84,134 @@ message ServerOriginatedMessage {
     TmuxResponse tmux_response = 124;
     ReorderTabsResponse reorder_tabs_response = 125;
     PreferencesResponse preferences_response = 126;
+    ColorPresetResponse color_preset_response = 127;
+    SelectionResponse selection_response = 128;
+    StatusBarComponentResponse status_bar_component_response = 129;
 
     // This is the only response that is sent spontaneously. The 'id' field will not be set.
     Notification notification = 1000;
   }
+}
+
+message StatusBarComponentRequest {
+  message OpenPopover {
+    optional string session_id = 1;
+    optional string html = 2;  // HTML to show in a popover that opens from the component.
+    optional Size size = 3;  // Size in points of the content area of the popover.
+  }
+  oneof request {
+    OpenPopover open_popover = 1;
+  }
+  optional string identifier = 2;  // ID of statusbar component
+}
+
+message StatusBarComponentResponse {
+  enum Status {
+    OK = 0;
+    SESSION_NOT_FOUND = 1;
+    REQUEST_MALFORMED = 2;
+    INVALID_IDENTIFIER = 3;
+  }
+  optional Status status = 1;
+}
+
+message WindowedCoordRange {
+  optional CoordRange coord_range = 1;
+  optional Range columns = 2;
+}
+
+enum SelectionMode {
+  CHARACTER = 0;
+  WORD = 1;
+  LINE = 2;
+  SMART = 3;
+  BOX = 4;
+  WHOLE_LINE = 5;
+}
+
+message SubSelection {
+  optional WindowedCoordRange windowed_coord_range = 1;
+  optional SelectionMode selection_mode = 2;
+  optional bool connected = 3;
+}
+
+message Selection {
+  repeated SubSelection sub_selections = 1;
+}
+
+message SelectionRequest {
+  message GetSelectionRequest {
+    optional string session_id = 1;
+  }
+  message SetSelectionRequest {
+    optional string session_id = 1;
+    optional Selection selection = 2;
+  }
+  oneof request {
+    GetSelectionRequest get_selection_request = 1;
+    SetSelectionRequest set_selection_request = 2;
+  }
+}
+
+message SelectionResponse {
+  enum Status {
+    OK = 0;
+    INVALID_SESSION = 1;
+    INVALID_RANGE = 2;
+    REQUEST_MALFORMED = 3;
+  }
+  optional Status status = 1;
+  message GetSelectionResponse {
+    optional Selection selection = 2;
+  }
+  message SetSelectionResponse {
+  }
+  oneof response {
+    GetSelectionResponse get_selection_response = 2;
+    SetSelectionResponse set_selection_response = 3;
+  }
+}
+
+message ColorPresetRequest {
+  message ListPresets {
+  }
+  message GetPreset {
+    optional string name = 1;
+  }
+  oneof request {
+    ListPresets list_presets = 1;
+    GetPreset get_preset = 2;
+  }
+}
+
+message ColorPresetResponse {
+  message ListPresets {
+    repeated string name = 1;
+  }
+
+  message GetPreset {
+    message ColorSetting {
+      optional float red = 1;
+      optional float green = 2;
+      optional float blue = 3;
+      optional float alpha = 4;
+      optional string color_space = 5;
+      optional string key = 6;
+    }
+    repeated ColorSetting color_settings = 1;
+  }
+
+  oneof response {
+    ListPresets list_presets = 1;
+    GetPreset get_preset = 2;
+  }
+
+  enum Status {
+    OK = 0;
+    PRESET_NOT_FOUND = 1;
+    REQUEST_MALFORMED = 2;
+  }
+  optional Status status = 3;
 }
 
 message PreferencesRequest {
@@ -435,6 +562,14 @@ message GetPropertyRequest {
     string window_id = 1;
     string session_id = 3;  // Does not accept "all". Accepts "active".
   }
+  // For sessions:
+  // "grid_size" -> { "width": number, "height": number }
+  // "buried" -> boolean
+  // "number_of_lines" -> { "overflow": number, "grid": number, "history": number }
+  //
+  // For windows:
+  // "frame" -> { "origin": { "x": number, "y": number }, "size": { "width": number, "height": number } }
+  // "fullscreen" -> boolean
   optional string name = 2;
 }
 
@@ -563,6 +698,10 @@ message RPCRegistrationRequest {
 
     optional string exemplar = 4;
     optional float update_cadence = 5;
+
+    // Identifies this component uniquely. Must not conflict with other components.
+    // Use a backwards domain name identifying yourself and the feature, like "com.example.featurename"
+    optional string unique_identifier = 6;
   }
 
   oneof RoleSpecificAttributes {
@@ -821,7 +960,7 @@ message GetBufferResponse {
   optional Status status = 1 [default = OK];
 
   // Which lines were returned
-  optional Range range = 2;
+  optional Range range = 2 [deprecated=true];
 
   // Those lines' contents.
   repeated LineContents contents = 3;
@@ -831,7 +970,10 @@ message GetBufferResponse {
   // The number of lines (including lines lost from the head of scrollback history) that precede
   // the screen. Subtract this from cursor.y to get the cursor's position on the screen when it
   // is scrolled to the bottom.
-  optional int64 num_lines_above_screen = 5;
+  optional int64 num_lines_above_screen = 5 [deprecated=true];
+
+  // The returned range
+  optional WindowedCoordRange windowed_coord_range = 6;
 }
 
 // Requests metadata about the current shell prompt.
@@ -1067,6 +1209,8 @@ message LineRange {
   // Return the last `trailing lines` of the buffer, which could go back into
   // scrollback history.
   optional int32 trailing_lines = 2;
+
+  optional WindowedCoordRange windowed_coord_range = 3;
 }
 
 // Describes a range of values.

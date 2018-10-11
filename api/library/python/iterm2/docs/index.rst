@@ -28,17 +28,24 @@ Visit the :ref:`examples <examples-index>` for a collection of working examples.
 
    app
    arrangement
+   color
+   colorpresets
    connection
+   focus
    mainmenu
    notifications
    profile
    registration
+   screen
+   selection
    session
+   statusbar
    tab
    tmux
    tool
    transaction
    util
+   variables
    window
 
 ----

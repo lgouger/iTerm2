@@ -1,4 +1,10 @@
 """Defines interfaces for accessing menu items."""
+import iterm2.api_pb2
+import iterm2.rpc
+
+class MenuItemException(Exception):
+    """A problem was encountered while selecting a menu item."""
+    pass
 
 class MenuItemState:
     """Describes the current state of a menu item.
@@ -31,7 +37,7 @@ class MainMenu:
         """Queries a menu item for its state.
 
         :param identifier: A string. See list of identifiers in :doc:`menu_ids`
-        :returns: :class:`App.MenuItemState`
+        :returns: :class:`MenuItemState`
 
         :throws MenuItemException: if something goes wrong.
         """
@@ -39,6 +45,7 @@ class MainMenu:
         status = response.menu_item_response.status
         if status != iterm2.api_pb2.MenuItemResponse.Status.Value("OK"):
             raise MenuItemException(iterm2.api_pb2.MenuItemResponse.Status.Name(status))
-        return iterm2.App.MenuItemState(response.menu_item_response.checked,
-                                        response.menu_item_response.enabled)
+        return iterm2.MenuItemState(
+                response.menu_item_response.checked,
+                response.menu_item_response.enabled)
 

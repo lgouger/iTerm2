@@ -5,6 +5,7 @@
 //  Created by George Nachman on 12/22/17.
 //
 
+#import "FutureMethods.h"
 #import "iTermTextRendererTransientState.h"
 #import "iTermTextRendererTransientState+Private.h"
 #import "iTermPIUArray.h"
@@ -296,7 +297,7 @@ NS_INLINE vector_int3 GetColorModelIndexForPIU(iTermTextRendererTransientState *
                    @(_defaultBackgroundColor.y),
                    @(_defaultBackgroundColor.z),
                    @(_defaultBackgroundColor.w)];
-    if (@available(macOS 10.14, *)) {} else {
+    if (iTermTextIsMonochrome()) {} else {
         s = [s stringByAppendingFormat:@"\ndisableIndividualColorModels=%@", @(_disableIndividualColorModels)];
     }
     [s writeToURL:[folder URLByAppendingPathComponent:@"state.txt"]
@@ -317,6 +318,7 @@ NS_INLINE vector_int3 GetColorModelIndexForPIU(iTermTextRendererTransientState *
     return [@[ @"text.newQuad",
                @"text.newPIU",
                @"text.newDims",
+               @"text.info",
                @"text.subpixel",
                @"text.draw" ] objectAtIndex:i];
 }
@@ -557,7 +559,7 @@ static inline int iTermOuterPIUIndex(const bool &annotation, const bool &underli
     }
 
     iTermTextPIU *piu;
-    if (@available(macOS 10.14, *)) {
+    if (iTermTextIsMonochrome()) {
         // There is only a center part for ASCII on Mojave because the glyph size is increased to contain the largest ASCII glyph.
         piu = iTermTextRendererTransientStateAddASCIIPart(_asciiPIUArrays[outerPIUIndex][asciiAttrs].get_next(),
                                                           code,
@@ -679,9 +681,9 @@ static inline BOOL GlyphKeyCanTakeASCIIFastPath(const iTermMetalGlyphKey &glyphK
             !glyphKey.boxDrawing);
 }
 
-- (void)setGlyphKeysData:(iTermData *)glyphKeysData
+- (void)setGlyphKeysData:(iTermGlyphKeyData *)glyphKeysData
                    count:(int)count
-          attributesData:(iTermData *)attributesData
+          attributesData:(iTermAttributesData *)attributesData
                      row:(int)row
   backgroundColorRLEData:(nonnull iTermData *)backgroundColorRLEData
        markedRangeOnLine:(NSRange)markedRangeOnLine
@@ -725,6 +727,8 @@ static inline BOOL GlyphKeyCanTakeASCIIFastPath(const iTermMetalGlyphKey &glyphK
                                  asciiAttrs:asciiAttrs
                                  attributes:attributes
                               inMarkedRange:inMarkedRange];
+            [glyphKeysData checkForOverrun1];
+            [attributesData checkForOverrun1];
         } else {
             // Non-ASCII slower path
             const iTerm2::GlyphKey glyphKey(&glyphKeys[x]);
@@ -802,10 +806,10 @@ static inline BOOL GlyphKeyCanTakeASCIIFastPath(const iTermMetalGlyphKey &glyphK
                 }
             }
         }
+        [glyphKeysData checkForOverrun2];
+        [attributesData checkForOverrun2];
     }
     //DLog(@"END setGlyphKeysData for %@", self);
-    [glyphKeysData checkForOverrun];
-    [attributesData checkForOverrun];
 }
 
 static vector_int3 SlowGetColorModelIndexForPIU(iTermTextRendererTransientState *self, iTermTextPIU *piu) {

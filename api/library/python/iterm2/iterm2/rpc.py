@@ -3,6 +3,7 @@ import json
 
 import iterm2.api_pb2
 import iterm2.connection
+import iterm2.selection
 
 ACTIVATE_RAISE_ALL_WINDOWS = 1
 ACTIVATE_IGNORING_OTHER_APPS = 2
@@ -154,20 +155,20 @@ async def async_get_buffer_with_screen_contents(connection, session=None):
     request.get_buffer_request.line_range.screen_contents_only = True
     return await _async_call(connection, request)
 
-async def async_get_buffer_lines(connection, trailing_lines, session=None):
+async def async_get_screen_contents(connection, session, windowedCoordRange):
     """
-    Gets the last lines of text from a session
+    Gets screen contents.
 
     connection: A connected iterm2.Connection.
-    trailing_lines: The number of lines to fetch (Int)
     session: Session ID
+    windowedCoordRange: The range of characters to fetch.
 
     Returns: iterm2.api_pb2.ServerOriginatedMessage
     """
     request = _alloc_request()
     if session is not None:
         request.get_buffer_request.session = session
-    request.get_buffer_request.line_range.trailing_lines = trailing_lines
+    request.get_buffer_request.line_range.windowed_coord_range.CopyFrom(windowedCoordRange.proto)
     return await _async_call(connection, request)
 
 async def async_get_prompt(connection, session=None):
@@ -288,13 +289,16 @@ async def async_set_property(connection, name, json_value, window_id=None, sessi
     request.set_property_request.json_value = json_value
     return await _async_call(connection, request)
 
-async def async_get_property(connection, name, window_id=None):
+async def async_get_property(connection, name, window_id=None, session_id=None):
     """
-    Gets a property of an object (currently only of a window).
+    Gets a property of a window or session.
     """
     request = _alloc_request()
     request.get_property_request.SetInParent()
-    request.get_property_request.window_id = window_id
+    if window_id:
+        request.get_property_request.window_id = window_id
+    elif session_id:
+        request.get_property_request.session_id = session_id
     request.get_property_request.name = name
     return await _async_call(connection, request)
 
@@ -521,6 +525,45 @@ async def async_get_preference(connection, key):
     my_request.get_preference_request.SetInParent()
     my_request.get_preference_request.key = key
     request.preferences_request.requests.extend([my_request])
+    return await _async_call(connection, request)
+
+async def async_list_color_presets(connection):
+    """Gets a list of color preset names."""
+    request = _alloc_request()
+    request.color_preset_request.SetInParent()
+    request.color_preset_request.list_presets.SetInParent()
+    return await _async_call(connection, request)
+
+async def async_get_color_preset(connection, name):
+    """Gets the content of a color preset by name."""
+    request = _alloc_request()
+    request.color_preset_request.SetInParent()
+    request.color_preset_request.get_preset.SetInParent()
+    request.color_preset_request.get_preset.name = name
+    return await _async_call(connection, request)
+
+async def async_get_selection(connection, session_id):
+    request = _alloc_request()
+    request.selection_request.get_selection_request.SetInParent()
+    request.selection_request.get_selection_request.session_id = session_id
+    return await _async_call(connection, request)
+
+async def async_set_selection(connection, session_id, selection):
+    request = _alloc_request()
+    request.selection_request.set_selection_request.SetInParent()
+    request.selection_request.set_selection_request.session_id = session_id
+    request.selection_request.set_selection_request.selection.SetInParent()
+    for sub in selection.subSelections:
+        request.selection_request.set_selection_request.selection.sub_selections.extend([sub.proto])
+    return await _async_call(connection, request)
+
+async def async_open_status_bar_component_popover(connection, identifier, session_id, html, size):
+    request = _alloc_request()
+    request.status_bar_component_request.SetInParent()
+    request.status_bar_component_request.identifier = identifier
+    request.status_bar_component_request.open_popover.session_id = session_id
+    request.status_bar_component_request.open_popover.html = html
+    request.status_bar_component_request.open_popover.size.CopyFrom(size.proto)
     return await _async_call(connection, request)
 
 ## Private --------------------------------------------------------------------

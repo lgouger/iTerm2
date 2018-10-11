@@ -185,6 +185,7 @@ static NSRect iTermRectCenteredVerticallyWithinRect(NSRect frameToCenter, NSRect
 @end
 
 @implementation PseudoTerminal {
+    NSTimer *_shadowTimer;
     NSPoint preferredOrigin_;
 
     ////////////////////////////////////////////////////////////////////////////
@@ -420,7 +421,11 @@ static NSRect iTermRectCenteredVerticallyWithinRect(NSRect frameToCenter, NSRect
             return mask | NSWindowStyleMaskBorderless | NSWindowStyleMaskResizable;
 
         case WINDOW_TYPE_TRADITIONAL_FULL_SCREEN:
-            return mask | NSWindowStyleMaskBorderless;
+            if (@available(macOS 10.13, *)) {
+                return mask | NSWindowStyleMaskBorderless | NSWindowStyleMaskMiniaturizable;
+            } else {
+                return mask | NSWindowStyleMaskBorderless;
+            }
 
         case WINDOW_TYPE_COMPACT:
             return (mask |
@@ -3748,6 +3753,7 @@ ITERM_WEAKLY_REFERENCEABLE
     for (PTYSession* aSession in [self allSessions]) {
         [aSession useTransparencyDidChange];
         [[aSession view] setNeedsDisplay:YES];
+        [[aSession textview] setNeedsDisplay:YES];
     }
     [[self currentTab] recheckBlur];
 }
@@ -3958,8 +3964,14 @@ ITERM_WEAKLY_REFERENCEABLE
     }
     [PseudoTerminal updateDecorationsOfWindow:myWindow forType:windowTypeForStyleMask];
     [self setWindow:myWindow];
-    if ([myWindow respondsToSelector:@selector(_setContentHasShadow:)]) {
-        [myWindow _setContentHasShadow:NO];
+    if (@available(macOS 10.14, *)) {
+        // This doesn't work on 10.14. See it_setNeedsInvalidateShadow for a saner approach.
+    } else {
+        // This had been in iTerm2 for years and was removed, but I can't tell why. Issue 3833 reveals
+        // that it is still needed, at least on OS 10.9.
+        if ([myWindow respondsToSelector:@selector(_setContentHasShadow:)]) {
+            [myWindow _setContentHasShadow:NO];
+        }
     }
     return myWindow;
 }
@@ -5435,24 +5447,41 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (void)setLegacyBackgroundColor:(nullable NSColor *)backgroundColor {
-    if (backgroundColor == nil && [iTermAdvancedSettingsModel darkThemeHasBlackTitlebar]) {
+    BOOL darkAppearance = NO;
+    if (@available(macOS 10.13, *)) {
         switch ([iTermPreferences intForKey:kPreferenceKeyTabStyle]) {
             case TAB_STYLE_LIGHT:
-                break;
-            case TAB_STYLE_LIGHT_HIGH_CONTRAST:
+            case TAB_STYLE_LIGHT_HIGH_CONTRAST:  // fall through
+                darkAppearance = NO;
                 break;
 
             case TAB_STYLE_DARK:
-                backgroundColor = [PSMDarkTabStyle tabBarColor];
-                break;
-
-            case TAB_STYLE_DARK_HIGH_CONTRAST:
-                backgroundColor = [PSMDarkTabStyle tabBarColor];
+            case TAB_STYLE_DARK_HIGH_CONTRAST:  // fall through
+                darkAppearance = YES;
                 break;
         }
+    } else {  // 10.12 branch
+        // Preserve 10.12 behavior. It can change the window title bar color so the appearance
+        // is important to keep the title legible. This adds the weird behavior of making the
+        // toolbar look buggy when there's a single tab with no visible tabbar and a dark tab
+        // color. It's likely 10.12 support will be dropped before I have time to fix this, alas.
+        if (backgroundColor == nil && [iTermAdvancedSettingsModel darkThemeHasBlackTitlebar]) {
+            switch ([iTermPreferences intForKey:kPreferenceKeyTabStyle]) {
+                case TAB_STYLE_LIGHT:
+                case TAB_STYLE_LIGHT_HIGH_CONTRAST:  // fall through
+                    break;
+
+                case TAB_STYLE_DARK:
+                case TAB_STYLE_DARK_HIGH_CONTRAST:  // fall through
+                    backgroundColor = [PSMDarkTabStyle tabBarColor];
+                    darkAppearance = YES;
+                    break;
+            }
+        }
+        darkAppearance = (backgroundColor != nil && backgroundColor.perceivedBrightness < 0.5);
     }
     [self.window setBackgroundColor:backgroundColor];
-    if (backgroundColor != nil && backgroundColor.perceivedBrightness < 0.5) {
+    if (darkAppearance) {
         self.window.appearance = [NSAppearance appearanceNamed:NSAppearanceNameVibrantDark];
     } else {
         self.window.appearance = nil;
@@ -7205,6 +7234,10 @@ ITERM_WEAKLY_REFERENCEABLE
     }
 }
 
+- (NSImage *)rootTerminalViewCurrentTabIcon {
+    return self.currentSession.shouldShowTabGraphic ? self.currentSession.tabGraphic : nil;
+}
+
 - (void)updateTabBarStyle {
     id<PSMTabStyle> style;
     iTermPreferencesTabStyle preferredStyle = [iTermPreferences intForKey:kPreferenceKeyTabStyle];
@@ -8612,8 +8645,9 @@ ITERM_WEAKLY_REFERENCEABLE
     }
 }
 
-- (void)tabDidChangeGraphic:(PTYTab *)tab {
+- (void)tabDidChangeGraphic:(PTYTab *)tab shouldShow:(BOOL)shouldShow image:(NSImage *)image {
     [_contentView.tabBarControl graphicDidChangeForTabWithIdentifier:tab];
+    [_contentView setWindowTitleIcon:shouldShow ? image : nil];
 }
 
 - (void)tabDidChangeTmuxLayout:(PTYTab *)tab {
@@ -8652,14 +8686,18 @@ ITERM_WEAKLY_REFERENCEABLE
     _contentView.useMetal = useMetal;
 }
 
-- (BOOL)tabCanUseMetal:(PTYTab *)tab reason:(out NSString **)reason {
+- (BOOL)tabCanUseMetal:(PTYTab *)tab reason:(out iTermMetalUnavailableReason *)reason {
     if (_contentView.tabBarControl.flashing) {
         if (reason) {
-            *reason = @"the tab bar is temporarily visible.";
+            *reason = iTermMetalUnavailableReasonTabBarTemporarilyVisible;
             return NO;
         }
     }
     return YES;
+}
+
+- (BOOL)tabShouldUseTransparency:(PTYTab *)tab {
+    return self.useTransparency;
 }
 
 - (void)currentSessionWordAtCursorDidBecome:(NSString *)word {

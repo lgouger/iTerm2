@@ -15,6 +15,7 @@
 #import "NSAppearance+iTerm.h"
 #import "NSColor+iTerm.h"
 #import "NSView+iTerm.h"
+#import "NSView+RecursiveDescription.h"
 #import "MovePaneController.h"
 #import "NSResponder+iTerm.h"
 #import "PSMMinimalTabStyle.h"
@@ -366,7 +367,7 @@ static NSDate* lastResizeDate_;
     _metalView = [[MTKView alloc] initWithFrame:_scrollview.contentView.frame
                                          device:[self metalDevice]];
 #if ENABLE_TRANSPARENT_METAL_WINDOWS
-    if (@available(macOS 10.14, *)) {
+    if (iTermTextIsMonochrome()) {
         _metalView.layer.opaque = NO;
     } else {
         _metalView.layer.opaque = YES;
@@ -458,7 +459,10 @@ static NSDate* lastResizeDate_;
 }
 
 - (void)updateLayout {
+    DLog(@"PTYSession begin updateLayout. delegate=%@\n%@", _delegate, [NSThread callStackSymbols]);
+    DLog(@"Before:\n%@", [self iterm_recursiveDescription]);
     if ([_delegate sessionViewShouldUpdateSubviewsFramesAutomatically]) {
+        DLog(@"Automatically updating subview frames");
         if (self.showTitle) {
             [self updateTitleFrame];
         } else {
@@ -469,6 +473,7 @@ static NSDate* lastResizeDate_;
             [self updateBottomStatusBarFrame];
         }
     } else {
+        DLog(@"Keep everything top aligned.");
         // Don't resize anything but do keep it all top-aligned.
         if (self.showTitle) {
             NSRect aRect = [self frame];
@@ -511,16 +516,17 @@ static NSDate* lastResizeDate_;
     if (_useMetal) {
         [self updateMetalViewFrame];
     }
+    DLog(@"After:\n%@", [self iterm_recursiveDescription]);
 }
 
 - (void)updateMetalViewFrame {
+    DLog(@"update metalView frame");
     // The metal view looks awful while resizing because it insists on scaling
     // its contents. Just switch off the metal renderer until it catches up.
     [_delegate sessionViewNeedsMetalFrameUpdate];
 }
 
 - (void)reallyUpdateMetalViewFrame {
-    [_delegate sessionViewHideMetalViewUntilNextFrame];
     NSRect frame = _scrollview.contentView.frame;
     if (self.showBottomStatusBar) {
         frame.origin.y += iTermStatusBarHeight;
@@ -876,13 +882,24 @@ static NSDate* lastResizeDate_;
     if (_useMetal && _metalView.alphaValue == 1) {
         [self drawAroundFrame:_metalView.frame dirtyRect:dirtyRect];
     } else {
-        [self drawAroundFrame:self.scrollview.frame dirtyRect:dirtyRect];
+        NSRect frame = self.scrollview.frame;
+        if (@available(macOS 10.14, *)) {
+            // work around issue 7101. Draw a window background colored area under the legacy scroller.
+            if (_scrollview.isLegacyScroller &&
+                ![iTermPreferences boolForKey:kPreferenceKeyHideScrollbar]) {
+                frame.size.width -= 15;
+            }
+        }
+        [self drawAroundFrame:frame dirtyRect:dirtyRect];
     }
     if (@available(macOS 10.14, *)) {
         return;
     }
     // 10.13 path: work around issue 6974
-    if (_useMetal && _scrollview.isLegacyScroller && [_scrollview.effectiveAppearance.name isEqualToString:NSAppearanceNameVibrantDark]) {
+    if (_useMetal &&
+        _scrollview.isLegacyScroller &&
+        ![iTermPreferences boolForKey:kPreferenceKeyHideScrollbar] &&
+        [_scrollview.effectiveAppearance.name isEqualToString:NSAppearanceNameVibrantDark]) {
         [[NSColor colorWithWhite:20.0 / 255.0 alpha:1] set];
         NSRectFill(NSMakeRect(self.frame.size.width - 15, 0, self.frame.size.height, self.frame.size.height));
     }
@@ -1222,6 +1239,7 @@ static NSDate* lastResizeDate_;
 }
 
 - (void)updateTitleFrame {
+    DLog(@"Update title frame");
     NSRect aRect = [self frame];
     if (_showTitle) {
         [_title setFrame:NSMakeRect(0,
@@ -1251,6 +1269,7 @@ static NSDate* lastResizeDate_;
 }
 
 - (void)updateFindViewFrame {
+    DLog(@"update findview frame");
     NSRect aRect = self.frame;
     NSView *findView = _dropDownFindViewController.view;
     [_dropDownFindViewController setFrameOrigin:NSMakePoint(aRect.size.width - [findView frame].size.width - 30,
@@ -1258,6 +1277,7 @@ static NSDate* lastResizeDate_;
 }
 
 - (void)updateScrollViewFrame {
+    DLog(@"update scrollview frame");
     CGFloat titleHeight = _showTitle ? _title.frame.size.height : 0;
     CGFloat bottomStatusBarHeight = _showBottomStatusBar ? iTermStatusBarHeight : 0;
     NSSize proposedSize = NSMakeSize(self.frame.size.width,
@@ -1267,6 +1287,9 @@ static NSDate* lastResizeDate_;
                              bottomStatusBarHeight + proposedSize.height - size.height,
                              size.width,
                              size.height);
+    DLog(@"titleHeight=%@ bottomStatusBarHeight=%@ proposedSize=%@ size=%@ rect=%@",
+         @(titleHeight), @(bottomStatusBarHeight), NSStringFromSize(proposedSize), NSStringFromSize(size),
+         NSStringFromRect(rect));
     [self scrollview].frame = rect;
 
     rect.origin = NSZeroPoint;

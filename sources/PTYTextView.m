@@ -25,6 +25,7 @@
 #import "iTermPreferences.h"
 #import "iTermPrintAccessoryViewController.h"
 #import "iTermQuickLookController.h"
+#import "iTermRateLimitedUpdate.h"
 #import "iTermScrollAccumulator.h"
 #import "iTermSelection.h"
 #import "iTermSelectionScrollHelper.h"
@@ -64,6 +65,7 @@
 #import "PTYScrollView.h"
 #import "PTYTab.h"
 #import "PTYTask.h"
+#import "PTYWindow.h"
 #import "RegexKitLite.h"
 #import "SCPPath.h"
 #import "SearchResult.h"
@@ -253,6 +255,7 @@ static const int kDragThreshold = 3;
     iTermScrollAccumulator *_scrollAccumulator;
 
     BOOL _haveSeenScrollWheelEvent;
+    iTermRateLimitedUpdate *_shadowRateLimit;
 }
 
 
@@ -424,6 +427,7 @@ static const int kDragThreshold = 3;
     [_altScreenMouseScrollInferer release];
     [_highlightedRows release];
     [_scrollAccumulator release];
+    [_shadowRateLimit release];
 
     [super dealloc];
 }
@@ -1179,10 +1183,30 @@ static const int kDragThreshold = 3;
     [scrollView.verticalScroller setNeedsDisplay];
 }
 
+- (void)maybeInvalidateWindowShadow {
+    if (@available(macOS 10.14, *)) {
+        if ([iTermAdvancedSettingsModel invalidateShadowAfterEachDraw]) {
+            if (self.transparencyAlpha < 1) {
+                if ([self.window conformsToProtocol:@protocol(PTYWindow)]) {
+                    if (_shadowRateLimit == nil) {
+                        _shadowRateLimit = [[iTermRateLimitedUpdate alloc] init];
+                        _shadowRateLimit.minimumInterval = 1;
+                    }
+                    id<PTYWindow> ptyWindow = (id<PTYWindow>)self.window;
+                    [_shadowRateLimit performRateLimitedBlock:^{
+                        [ptyWindow it_setNeedsInvalidateShadow];
+                    }];
+                }
+            }
+        }
+    }
+}
+
 - (void)drawRect:(NSRect)rect {
     if (![_delegate textViewShouldDrawRect]) {
         // Metal code path in use
         [super drawRect:rect];
+        [self maybeInvalidateWindowShadow];
         return;
     }
     if (_dataSource.width <= 0) {
@@ -1221,6 +1245,7 @@ static const int kDragThreshold = 3;
             [self.delegate textViewWillNeedUpdateForBlink];
         }
     }];
+    [self maybeInvalidateWindowShadow];
 }
 
 - (BOOL)getAndResetDrawingAnimatedImageFlag {
@@ -3273,7 +3298,7 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
         }
         if (cap != 0) {
             iTermTextExtractor *extractor =
-                [iTermTextExtractor textExtractorWithDataSource:_dataSource];
+            [iTermTextExtractor textExtractorWithDataSource:_dataSource];
             id content = [extractor contentInRange:range
                                  attributeProvider:attributeProvider
                                         nullPolicy:kiTermTextExtractorNullPolicyMidlineAsSpaceIgnoreTerminal
@@ -6018,6 +6043,12 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
     int start = [self coordForPoint:visibleRect.origin allowRightMarginOverflow:NO].y;
     int end = [self coordForPoint:NSMakePoint(0, NSMaxY(visibleRect) - 1) allowRightMarginOverflow:NO].y;
     return VT100GridRangeMake(start, MAX(0, end - start));
+}
+
+- (long long)firstVisibleAbsoluteLineNumber {
+    NSRect visibleRect = [[self enclosingScrollView] documentVisibleRect];
+    long long firstVisibleLine = visibleRect.origin.y / _lineHeight;
+    return firstVisibleLine + _dataSource.totalScrollbackOverflow;
 }
 
 - (void)scrollLineNumberRangeIntoView:(VT100GridRange)range {

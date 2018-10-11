@@ -87,7 +87,8 @@ NS_ASSUME_NONNULL_BEGIN
 }
 
 - (void)drawRect:(NSRect)dirtyRect width:(out nullable CGFloat *)widthOut {
-    if (self.drawsBackground) {
+    const BOOL reallyDraw = (dirtyRect.size.width > 0 && dirtyRect.size.height > 0);
+    if (self.drawsBackground && reallyDraw) {
         [self.backgroundColor set];
         NSRectFill(dirtyRect);
     }
@@ -101,7 +102,7 @@ NS_ASSUME_NONNULL_BEGIN
                                                 [self drawString:[self->_attributedStringValue.string substringWithRange:range]
                                                       attributes:attrs
                                                            point:CGPointMake(x, 0)
-                                                      reallyDraw:dirtyRect.size.width > 0 && dirtyRect.size.height > 0
+                                                      reallyDraw:reallyDraw
                                                            width:&width];
                                                 x += width;
                                        }];
@@ -259,7 +260,13 @@ NS_ASSUME_NONNULL_BEGIN
 }
 
 - (CGFloat)statusBarComponentVerticalOffset {
-    return 1.5;
+    NSFont *font = self.advancedConfiguration.font ?: [iTermStatusBarAdvancedConfiguration defaultFont];
+    const CGFloat containerHeight = _textField.superview.bounds.size.height;
+    const CGFloat capHeight = font.capHeight;
+    const CGFloat descender = font.descender - font.leading;  // negative (distance from bottom of bounding box to baseline)
+    const CGFloat frameY = (containerHeight - _attributedStringView.frame.size.height) / 2;
+    const CGFloat origin = containerHeight / 2.0 - frameY + descender - capHeight / 2.0;
+    return origin;
 }
 
 - (CGFloat)statusBarComponentPreferredWidth {

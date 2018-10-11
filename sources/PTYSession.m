@@ -15,6 +15,7 @@
 #import "iTermBackgroundDrawingHelper.h"
 #import "iTermBuriedSessions.h"
 #import "iTermBuiltInFunctions.h"
+#import "iTermCacheableImage.h"
 #import "iTermCarbonHotKeyController.h"
 #import "iTermCharacterSource.h"
 #import "iTermColorMap.h"
@@ -486,7 +487,6 @@ static NSString *const iTermSessionTitleSession = @"session";
     iTermVariables *_sessionVariables;
     iTermVariables *_userVariables;
     iTermSwiftyString *_badgeSwiftyString;
-    iTermStatusBarViewController *_statusBarViewController;
     iTermEchoProbe *_echoProbe;
     
     iTermBackgroundDrawingHelper *_backgroundDrawingHelper;
@@ -497,6 +497,7 @@ static NSString *const iTermSessionTitleSession = @"session";
     
     iTermGraphicSource *_graphicSource;
     iTermVariableReference *_jobPidRef;
+    iTermCacheableImage *_customIcon;
 }
 
 + (NSMapTable<NSString *, PTYSession *> *)sessionMap {
@@ -649,7 +650,7 @@ static NSString *const iTermSessionTitleSession = @"session";
         [self.variablesScope setValue:_guid forVariableNamed:iTermVariableKeySessionID];
         _jobPidRef = [[iTermVariableReference alloc] initWithPath:iTermVariableKeySessionJobPid
                                                             scope:self.variablesScope];
-        __weak __typeof(self) weakSelf;
+        __weak __typeof(self) weakSelf = self;
         _jobPidRef.onChangeBlock = ^{
             [weakSelf jobPidDidChange];
         };
@@ -848,6 +849,7 @@ ITERM_WEAKLY_REFERENCEABLE
     [_pwdPoller release];
     [_graphicSource release];
     [_jobPidRef release];
+    [_customIcon release];
 
     [super dealloc];
 }
@@ -973,7 +975,7 @@ ITERM_WEAKLY_REFERENCEABLE
     }
 
     if (!result.length) {
-        [result appendString:@"🖥"];
+        [result appendString:@" "];
     }
     return result;
 }
@@ -1076,7 +1078,13 @@ ITERM_WEAKLY_REFERENCEABLE
     for (NSUInteger i = 0; i < rangeOfLines.length; i++) {
         int row = rangeOfLines.location + i;
         screen_char_t *theLine = [source.screen getLineAtIndex:row];
-        [_screen appendScreenChars:theLine length:width continuation:theLine[width]];
+        if (i + 1 == rangeOfLines.length) {
+            screen_char_t continuation = { 0 };
+            continuation.code = EOL_SOFT;
+            [_screen appendScreenChars:theLine length:width continuation:continuation];
+        } else {
+            [_screen appendScreenChars:theLine length:width continuation:theLine[width]];
+        }
     }
 }
 
@@ -1375,9 +1383,12 @@ ITERM_WEAKLY_REFERENCEABLE
         }
 
         theBookmark = [arrangement objectForKey:SESSION_ARRANGEMENT_BOOKMARK];
-        needDivorce = YES;
+        if (theBookmark) {
+            needDivorce = YES;
+        } else {
+            theBookmark = [[ProfileModel sharedInstance] defaultBookmark];
+        }
     }
-
     PTYSession *aSession = [[[PTYSession alloc] initSynthetic:NO] autorelease];
     aSession.view = sessionView;
 
@@ -2024,7 +2035,10 @@ ITERM_WEAKLY_REFERENCEABLE
             }
         }
     }
-
+    if ([iTermAdvancedSettingsModel shouldSetLCTerminal]) {
+        env[@"LC_TERMINAL"] = @"iTerm2";
+        env[@"LC_TERMINAL_VERSION"] = [[[NSBundle mainBundle] infoDictionary] objectForKey:@"CFBundleShortVersionString"];
+    }
     if (env[PWD_ENVNAME] == nil) {
         // Set "PWD"
         env[PWD_ENVNAME] = [PWD_ENVVALUE stringByExpandingTildeInPath];
@@ -3670,7 +3684,7 @@ ITERM_WEAKLY_REFERENCEABLE
     }
 
     self.cursorGuideColor = [[iTermProfilePreferences objectForKey:KEY_CURSOR_GUIDE_COLOR
-                                                         inProfile:aDict] colorValueWithDefaultAlpha:0.25];
+                                                         inProfile:aDict] colorValueForKey:KEY_CURSOR_GUIDE_COLOR];
     if (!_cursorGuideSettingHasChanged) {
         _textview.highlightCursorLine = [iTermProfilePreferences boolForKey:KEY_USE_CURSOR_GUIDE
                                                                   inProfile:aDict];
@@ -3832,7 +3846,9 @@ ITERM_WEAKLY_REFERENCEABLE
         [self.tmuxController setTabColorString:tabColor ? [tabColor hexString] : iTermTmuxTabColorNone
                                  forWindowPane:self.tmuxPane];
     }
-    [self.delegate sessionDidChangeGraphic:self];
+    [self.delegate sessionDidChangeGraphic:self
+                                shouldShow:[self shouldShowTabGraphicForProfile:aDict]
+                                     image:[self tabGraphicForProfile:aDict]];
     [self.delegate sessionUpdateMetalAllowed];
     [self profileNameDidChangeTo:self.profile[KEY_NAME]];
     [_nameController setNeedsUpdate];
@@ -3905,23 +3921,46 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (BOOL)shouldShowTabGraphic {
-    const iTermProfileIcon icon = [iTermProfilePreferences unsignedIntegerForKey:KEY_ICON inProfile:self.profile];
+    return [self shouldShowTabGraphicForProfile:self.profile];
+}
+
+- (BOOL)shouldShowTabGraphicForProfile:(Profile *)profile {
+    const iTermProfileIcon icon = [iTermProfilePreferences unsignedIntegerForKey:KEY_ICON inProfile:profile];
     return icon != iTermProfileIconNone;
 }
 
 - (NSImage *)tabGraphic {
-    const iTermProfileIcon icon = [iTermProfilePreferences unsignedIntegerForKey:KEY_ICON inProfile:self.profile];
+    return [self tabGraphicForProfile:self.profile];
+}
+
+- (NSImage *)tabGraphicForProfile:(Profile *)profile {
+    const iTermProfileIcon icon = [iTermProfilePreferences unsignedIntegerForKey:KEY_ICON inProfile:profile];
     switch (icon) {
         case iTermProfileIconNone:
             return nil;
             
         case iTermProfileIconAutomatic:
-            [_graphicSource updateImageForProcessID:self.shell.pid enabled:[self shouldShowTabGraphic]];
+            [_graphicSource updateImageForProcessID:self.shell.pid enabled:[self shouldShowTabGraphicForProfile:profile]];
             return _graphicSource.image;
+
+        case iTermProfileIconCustom:
+            return [self customIconImageForProfile:profile];
     }
 
     DLog(@"Unexpected icon setting %@", @(icon));
     return nil;
+}
+
+- (NSImage *)customIconImage {
+    return [self customIconImageForProfile:self.profile];
+}
+
+- (NSImage *)customIconImageForProfile:(Profile *)profile {
+    if (!_customIcon) {
+        _customIcon = [[iTermCacheableImage alloc] init];
+    }
+    NSString *path = [iTermProfilePreferences stringForKey:KEY_ICON_PATH inProfile:profile];
+    return [_customIcon imageAtPath:path ofSize:NSMakeSize(16, 16) flipped:YES];
 }
 
 - (NSString *)windowTitle {
@@ -4047,6 +4086,7 @@ ITERM_WEAKLY_REFERENCEABLE
     }
     [_textview setTransparency:transparency];
     [self useTransparencyDidChange];
+    [self.view setNeedsDisplay:YES];
 }
 
 - (float)blend {
@@ -4964,18 +5004,7 @@ ITERM_WEAKLY_REFERENCEABLE
     return [self metalAllowed:nil];
 }
 
-- (BOOL)metalAllowed:(out NSString **)reason {
-    // While Metal is supported on macOS 10.11, it crashes a lot. It seems to have a memory stomping
-    // bug (lots of crashes in dtoa during printf formatting) and assertions in -[MTKView initCommon].
-    // All metal code except this is available on macOS 10.11, so this is the one place that
-    // restricts it to 10.12+.
-    if (@available(macOS 10.12, *)) { } else {
-        if (reason) {
-            *reason = @"macOS version 10.12 required";
-        }
-        return NO;
-    }
-
+- (BOOL)metalAllowed:(out iTermMetalUnavailableReason *)reason {
     static dispatch_once_t onceToken;
     static BOOL machineSupportsMetal;
     dispatch_once(&onceToken, ^{
@@ -4985,37 +5014,37 @@ ITERM_WEAKLY_REFERENCEABLE
     });
     if (!machineSupportsMetal) {
         if (reason) {
-            *reason = @"no usable GPU found on this machine.";
+            *reason = iTermMetalUnavailableReasonNoGPU;
         }
         return NO;
     }
     if (![iTermPreferences boolForKey:kPreferenceKeyUseMetal]) {
         if (reason) {
-            *reason = @"GPU Renderer is disabled in Preferences > General.";
+            *reason = iTermMetalUnavailableReasonDisabled;
         }
         return NO;
     }
     if ([self ligaturesEnabledInEitherFont]) {
         if (reason) {
-            *reason = @"ligatures are enabled. You can disable them in Prefs>Profiles>Text>Use ligatures.";
+            *reason = iTermMetalUnavailableReasonLigatures;
         }
         return NO;
     }
     if (_metalDeviceChanging) {
         if (reason) {
-            *reason = @"the GPU renderer is initializing. It should be ready soon.";
+            *reason = iTermMetalUnavailableReasonInitializing;
         }
         return NO;
     }
     if (![self metalViewSizeIsLegal]) {
         if (reason) {
-            *reason = @"the session is too large or too small.";
+            *reason = iTermMetalUnavailableReasonInvalidSize;
         }
         return NO;
     }
     if (!_textview) {
         if (reason) {
-            *reason = @"the session is initializing.";
+            *reason = iTermMetalUnavailableReasonSessionInitializing;
         }
         return NO;
     }
@@ -5023,12 +5052,14 @@ ITERM_WEAKLY_REFERENCEABLE
         BOOL transparencyAllowed = NO;
 #if ENABLE_TRANSPARENT_METAL_WINDOWS
         if (@available(macOS 10.14, *)) {
-            transparencyAllowed = YES;
+            if (iTermTextIsMonochrome()) {
+                transparencyAllowed = YES;
+            }
         }
 #endif
         if (!transparencyAllowed && _textview.transparencyAlpha < 1) {
             if (reason) {
-                *reason = @"transparent windows not supported. You can change window transparency in Prefs>Profiles>Window>Transparency";
+                *reason = iTermMetalUnavailableReasonTransparency;
             }
             return NO;
         }
@@ -5038,7 +5069,7 @@ ITERM_WEAKLY_REFERENCEABLE
         // Mojave fixed compositing of views over MTKView and removed subpixel antialiasing making blending of text easier.
         if ([_textview verticalSpacing] < 1) {
             if (reason) {
-                *reason = @"the font's vertical spacing set to less than 100%. You can change it in Prefs>Profiles>Text>Change Font.";
+                *reason = iTermMetalUnavailableReasonVerticalSpacing;
             }
             // Metal cuts off the tops of letters when line height reduced
             return NO;
@@ -5057,39 +5088,39 @@ ITERM_WEAKLY_REFERENCEABLE
         const BOOL safeForWindowCorners = (hasSquareCorners || marginsOk);
         if (!safeForWindowCorners) {
             if (reason) {
-                *reason = @"terminal window margins are too small. You can edit them in Prefs>Advanced.";
+                *reason = iTermMetalUnavailableReasonMarginSize;
             }
             return NO;
         }
         
         if ([PTYNoteViewController anyNoteVisible]) {
             if (reason) {
-                *reason = @"annotations are open. Find the session with visible annotations and close them with View>Show Annotations.";
+                *reason = iTermMetalUnavailableReasonAnnotations;
             }
             return NO;
         }
 #warning TODO: This is wrong. Is it called too soon when closing the dropdown find panel?
         if (_view.isDropDownSearchVisible) {
             if (reason) {
-                *reason = @"the find panel is open.";
+                *reason = iTermMetalUnavailableReasonFindPanel;
             }
             return NO;
         }
         if (_pasteHelper.dropDownPasteViewIsVisible) {
             if (reason) {
-                *reason = @"the paste progress indicator is open.";
+                *reason = iTermMetalUnavailableReasonPasteIndicator;
             }
             return NO;
         }
         if (_view.currentAnnouncement) {
             if (reason) {
-                *reason = @"an announcement (yellow bar) is visible.";
+            *reason = iTermMetalUnavailableReasonAnnouncement;
             }
             return NO;
         }
         if (_view.hasHoverURL) {
             if (reason) {
-                *reason = @"a URL preview is visible.";
+                *reason = iTermMetalUnavailableReasonURLPreview;
             }
             return NO;
         }
@@ -5142,6 +5173,7 @@ ITERM_WEAKLY_REFERENCEABLE
         if (useMetal == _useMetal) {
             return;
         }
+        DLog(@"setUseMetal:%@ %@", @(useMetal), self);
         _useMetal = useMetal;
         // The metalview's alpha will initially be 0. Once it has drawn a frame we'll swap what is visible.
         [self setUseMetal:useMetal dataSource:_metalGlue];
@@ -5164,24 +5196,37 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (void)renderTwoMetalFramesAndShowMetalView NS_AVAILABLE_MAC(10_11) {
+    // The first frame will be slow to draw. The second frame will be very
+    // recent to minimize jitter. For reasons I haven't understood yet it seems
+    // the first frame is sometimes transparent. I haven't seen that issue with
+    // the second frame yet.
+    [self renderMetalFramesAndShowMetalView:2];
+}
+
+- (void)renderMetalFramesAndShowMetalView:(NSInteger)count {
     if (_useMetal) {
-        // First draw asynchronously since it takes a long time (200 ms on my old mbp) to spin
-        // up a new metal driver. This frame will never be seen since PTYTextView is still visible.
-        DLog(@"Begin async draw for %@", self);
+        DLog(@"Begin async draw %@ for %@", @(count), self);
         [_view.driver drawAsynchronouslyInView:_view.metalView completion:^(BOOL ok) {
-            if (!_useMetal) {
+            if (!_useMetal || _exited) {
+                DLog(@"Finished async draw but metal off/exited for %@", self);
                 return;
             }
 
             if (!ok) {
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    [self renderTwoMetalFramesAndShowMetalView];
+                DLog(@"Finished async draw NOT OK for %@", self);
+                // Wait 10ms to avoid burning CPU if it failed because it's slow to draw the first frame.
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.01 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                    [self renderMetalFramesAndShowMetalView:count];
                 });
                 return;
             }
 
-            // Now that everything's hot we can draw a frame synchronously without the UI hiccupping.
-            [self showMetalViewImmediately];
+            if (count <= 1) {
+                DLog(@"Finished async draw ok for %@", self);
+                [self showMetalViewImmediately];
+            } else {
+                [self renderMetalFramesAndShowMetalView:count - 1];
+            }
         }];
     }
 }
@@ -5208,7 +5253,11 @@ ITERM_WEAKLY_REFERENCEABLE
              self, _textview.dataSource, @(_screen.width), @(_screen.height));
         return;
     }
+    [self reallyShowMetalViewImmediately];
+}
 
+- (void)reallyShowMetalViewImmediately {
+    DLog(@"reallyShowMetalViewImmediately");
     [_view setNeedsDisplay:YES];
     [self showMetalAndStopDrawingTextView];
     _view.metalView.enableSetNeedsDisplay = YES;
@@ -5233,7 +5282,7 @@ ITERM_WEAKLY_REFERENCEABLE
 - (void)updateMetalDriver NS_AVAILABLE_MAC(10_11) {
     const CGSize cellSize = CGSizeMake(_textview.charWidth, _textview.lineHeight);
     CGSize glyphSize;
-    if (@available(macOS 10.14, *)) {
+    if (iTermTextIsMonochrome()) {
         // Mojave can use a glyph size larger than cell size because compositing is trivial without subpixel AA.
         NSRect rect = [iTermCharacterSource boundingRectForCharactersInRange:NSMakeRange(32, 127-32)
                                                                         font:_textview.font
@@ -9873,6 +9922,8 @@ ITERM_WEAKLY_REFERENCEABLE
         NSSize idealSize = [self idealScrollViewSizeWithStyle:_view.scrollview.scrollerStyle];
         NSSize maximumSize = NSMakeSize(idealSize.width + _textview.charWidth - 1,
                                         idealSize.height + _textview.lineHeight - 1);
+        DLog(@"is a tmux client, so tweaking the proposed size. idealSize=%@ maximumSize=%@",
+             NSStringFromSize(idealSize), NSStringFromSize(maximumSize));
         return NSMakeSize(MIN(proposedSize.width, maximumSize.width),
                           MIN(proposedSize.height, maximumSize.height));
     } else {
@@ -9922,16 +9973,6 @@ ITERM_WEAKLY_REFERENCEABLE
     [self.delegate sessionUpdateMetalAllowed];
 }
 
-- (void)sessionViewHideMetalViewUntilNextFrame {
-    if (@available(macOS 10.11, *)) {
-        if (!_useMetal) {
-            return;
-        }
-        id token = [self temporarilyDisableMetal];
-        [self drawFrameAndRemoveTemporarilyDisablementOfMetalForToken:token];
-    }
-}
-
 - (id)temporarilyDisableMetal NS_AVAILABLE_MAC(10_11) {
     assert(_useMetal);
     _wrapper.useMetal = NO;
@@ -9939,23 +9980,25 @@ ITERM_WEAKLY_REFERENCEABLE
     _view.metalView.alphaValue = 0;
     id token = @(_nextMetalDisabledToken++);
     [_metalDisabledTokens addObject:token];
+    DLog(@"temporarilyDisableMetal return new token=%@ %@", token, self);
     return token;
 }
 
 - (void)drawFrameAndRemoveTemporarilyDisablementOfMetalForToken:(id)token NS_AVAILABLE_MAC(10_11) {
+    DLog(@"drawFrameAndRemoveTemporarilyDisablementOfMetal %@", token);
     if (!_useMetal) {
         DLog(@"drawFrameAndRemoveTemporarilyDisablementOfMetal returning earily because useMetal is off");
         return;
     }
     if ([_metalDisabledTokens containsObject:token]) {
-        DLog(@"Found token %@", token);
+        DLog(@"drawFrameAndRemoveTemporarilyDisablementOfMetal: Found token %@", token);
         if (_metalDisabledTokens.count > 1) {
             [_metalDisabledTokens removeObject:token];
-            DLog(@"There are still other tokens remaining: %@", _metalDisabledTokens);
+            DLog(@"drawFrameAndRemoveTemporarilyDisablementOfMetal: There are still other tokens remaining: %@", _metalDisabledTokens);
             return;
         }
     } else {
-        DLog(@"Bogus token %@", token);
+        DLog(@"drawFrameAndRemoveTemporarilyDisablementOfMetal: Bogus token %@", token);
         return;
     }
 
@@ -9963,22 +10006,26 @@ ITERM_WEAKLY_REFERENCEABLE
     [_view.driver drawAsynchronouslyInView:_view.metalView completion:^(BOOL ok) {
         DLog(@"drawFrameAndRemoveTemporarilyDisablementOfMetal drawAsynchronouslyInView finished wtih ok=%@", @(ok));
         if (![_metalDisabledTokens containsObject:token]) {
-            DLog(@"Token %@ is gone, not proceeding.", token);
+            DLog(@"drawFrameAndRemoveTemporarilyDisablementOfMetal: Token %@ is gone, not proceeding.", token);
+            return;
+        }
+        if (_exited) {
+            DLog(@"drawFrameAndRemoveTemporarilyDisablementOfMetal: Returning because the session is dead");
             return;
         }
         if (!_useMetal) {
-            DLog(@"Returning because useMetal is off");
+            DLog(@"drawFrameAndRemoveTemporarilyDisablementOfMetal: Returning because useMetal is off");
             return;
         }
         if (!ok) {
-            DLog(@"Schedule drawFrameAndRemoveTemporarilyDisablementOfMetal to run after a spin of the mainloop");
+            DLog(@"drawFrameAndRemoveTemporarilyDisablementOfMetal: Schedule drawFrameAndRemoveTemporarilyDisablementOfMetal to run after a spin of the mainloop");
             if (!_delegate) {
                 [self setUseMetal:NO];
                 return;
             }
             dispatch_async(dispatch_get_main_queue(), ^{
                 if (![_metalDisabledTokens containsObject:token]) {
-                    DLog(@"[after a spin of the runloop] Token %@ is gone, not proceeding.", token);
+                    DLog(@"drawFrameAndRemoveTemporarilyDisablementOfMetal: [after a spin of the runloop] Token %@ is gone, not proceeding.", token);
                     return;
                 }
                 [self drawFrameAndRemoveTemporarilyDisablementOfMetalForToken:token];
@@ -9988,18 +10035,19 @@ ITERM_WEAKLY_REFERENCEABLE
 
         assert([_metalDisabledTokens containsObject:token]);
         [_metalDisabledTokens removeObject:token];
-        DLog(@"Remove temporarily disablement. Tokens are now %@", _metalDisabledTokens);
+        DLog(@"drawFrameAndRemoveTemporarilyDisablementOfMetal: Remove temporarily disablement. Tokens are now %@", _metalDisabledTokens);
         if (_metalDisabledTokens.count == 0 && _useMetal) {
-            _wrapper.useMetal = YES;
-            _textview.suppressDrawing = YES;
-            _view.metalView.alphaValue = 1;
+            [self reallyShowMetalViewImmediately];
         }
     }];
 }
 
+
 - (void)sessionViewNeedsMetalFrameUpdate {
+    DLog(@"sessionViewNeedsMetalFrameUpdate %@", self);
     if (@available(macOS 10.11, *)) {
         if (_metalFrameChangePending) {
+            DLog(@"sessionViewNeedsMetalFrameUpdate frame change pending, return");
             return;
         }
 
@@ -10007,8 +10055,10 @@ ITERM_WEAKLY_REFERENCEABLE
         id token = [self temporarilyDisableMetal];
         [self.textview setNeedsDisplay:YES];
         dispatch_async(dispatch_get_main_queue(), ^{
+            DLog(@"sessionViewNeedsMetalFrameUpdate %@ in dispatch_async", self);
             _metalFrameChangePending = NO;
             [_view reallyUpdateMetalViewFrame];
+            DLog(@"sessionViewNeedsMetalFrameUpdate will draw farme and remove disablement");
             [self drawFrameAndRemoveTemporarilyDisablementOfMetalForToken:token];
         });
     }
@@ -10019,11 +10069,13 @@ ITERM_WEAKLY_REFERENCEABLE
         if (_metalDeviceChanging) {
             return;
         }
+        DLog(@"sessionViewRecreateMetalView metalDeviceChanging<-YES");
         _metalDeviceChanging = YES;
         [self.textview setNeedsDisplay:YES];
         [_delegate sessionUpdateMetalAllowed];
         dispatch_async(dispatch_get_main_queue(), ^{
             _metalDeviceChanging = NO;
+            DLog(@"sessionViewRecreateMetalView metalDeviceChanging<-NO");
             [_delegate sessionUpdateMetalAllowed];
         });
     }
@@ -10142,7 +10194,15 @@ ITERM_WEAKLY_REFERENCEABLE
     return string;
 }
 
-- (NSRange)rangeFromLineRange:(ITMLineRange *)lineRange {
+- (VT100GridAbsWindowedRange)absoluteWindowedCoordRangeFromLineRange:(ITMLineRange *)lineRange {
+    if (lineRange.hasWindowedCoordRange) {
+        return VT100GridAbsWindowedRangeMake(VT100GridAbsCoordRangeMake(lineRange.windowedCoordRange.coordRange.start.x,
+                                                                        lineRange.windowedCoordRange.coordRange.start.y,
+                                                                        lineRange.windowedCoordRange.coordRange.end.x,
+                                                                        lineRange.windowedCoordRange.coordRange.end.y),
+                                             lineRange.windowedCoordRange.columns.location,
+                                             lineRange.windowedCoordRange.columns.length);
+    }
     int n = 0;
     if (lineRange.hasScreenContentsOnly) {
         n++;
@@ -10151,7 +10211,7 @@ ITERM_WEAKLY_REFERENCEABLE
         n++;
     }
     if (n != 1) {
-        return NSMakeRange(NSNotFound, 0);
+        return VT100GridAbsWindowedRangeMake(VT100GridAbsCoordRangeMake(-1, -1, -1, -1), -1, -1);
     }
 
     NSRange range;
@@ -10166,33 +10226,29 @@ ITERM_WEAKLY_REFERENCEABLE
     } else {
         range = NSMakeRange(NSNotFound, 0);
     }
-    return range;
+    return VT100GridAbsWindowedRangeMake(VT100GridAbsCoordRangeMake(0, range.location, 0, range.length + 1), 0, 0);
 }
 
 - (ITMGetBufferResponse *)handleGetBufferRequest:(ITMGetBufferRequest *)request {
     ITMGetBufferResponse *response = [[[ITMGetBufferResponse alloc] init] autorelease];
 
-    NSRange lineRange = [self rangeFromLineRange:request.lineRange];
-    if (lineRange.location == NSNotFound) {
+    const VT100GridAbsWindowedRange windowedRange = [self absoluteWindowedCoordRangeFromLineRange:request.lineRange];
+    if (windowedRange.coordRange.start.x < 0) {
         response.status = ITMGetBufferResponse_Status_InvalidLineRange;
         return nil;
     }
 
-    response.range = [[[ITMRange alloc] init] autorelease];
-    response.range.location = lineRange.location;
-    response.range.length = lineRange.length;
-
-    int width = _screen.width;
-    for (int64_t i = 0; i < lineRange.length; i++) {
-        int64_t y = lineRange.location + i;
+    const VT100GridWindowedRange range = VT100GridWindowedRangeFromVT100GridAbsWindowedRange(windowedRange, _screen.totalScrollbackOverflow);
+    iTermTextExtractor *extractor = [iTermTextExtractor textExtractorWithDataSource:_screen];
+    __block int firstIndex = -1;
+    __block int lastIndex = -1;
+    __block screen_char_t *line = nil;
+    BOOL (^handleEol)(unichar, int, int) = ^BOOL(unichar code, int numPreceedingNulls, int linenumber) {
         ITMLineContents *lineContents = [[[ITMLineContents alloc] init] autorelease];
-        screen_char_t *line = [_screen getLineAtIndex:y - _screen.totalScrollbackOverflow];
-        int lineLength = width;
-        while (lineLength > 0 && line[lineLength - 1].code == 0 && !line[lineLength - 1].complexChar) {
-            --lineLength;
-        }
-        lineContents.text = [self stringForLine:line length:lineLength cppsArray:lineContents.codePointsPerCellArray];
-        switch (line[_screen.width].code) {
+        lineContents.text = [self stringForLine:line + firstIndex
+                                         length:lastIndex - firstIndex
+                                      cppsArray:lineContents.codePointsPerCellArray];
+        switch (code) {
             case EOL_HARD:
                 lineContents.continuation = ITMLineContents_Continuation_ContinuationHardEol;
                 break;
@@ -10203,14 +10259,38 @@ ITERM_WEAKLY_REFERENCEABLE
                 break;
         }
         [response.contentsArray addObject:lineContents];
+        firstIndex = lastIndex = -1;
+        line = nil;
+        return NO;
+    };
+    [extractor enumerateCharsInRange:range
+                           charBlock:^BOOL(screen_char_t *currentLine, screen_char_t theChar, VT100GridCoord coord) {
+                               line = currentLine;
+                               if (firstIndex < 0) {
+                                   firstIndex = coord.x;
+                               }
+                               lastIndex = coord.x + 1;
+                               line = currentLine;
+                               return NO;
+                           }
+                            eolBlock:^BOOL(unichar code, int numPreceedingNulls, int line) {
+                                return handleEol(code, numPreceedingNulls, line);
+                            }];
+    if (line) {
+        handleEol(EOL_SOFT, 0, 0);
     }
-    response.numLinesAboveScreen = _screen.numberOfScrollbackLines + _screen.totalScrollbackOverflow;
-
     response.cursor = [[[ITMCoord alloc] init] autorelease];
     response.cursor.x = _screen.currentGrid.cursor.x;
-    response.cursor.y = _screen.currentGrid.cursor.y + response.numLinesAboveScreen;
+    response.cursor.y = _screen.currentGrid.cursor.y + _screen.numberOfScrollbackLines + _screen.totalScrollbackOverflow;
 
     response.status = ITMGetBufferResponse_Status_Ok;
+    response.windowedCoordRange.coordRange.start.x = windowedRange.coordRange.start.x;
+    response.windowedCoordRange.coordRange.start.y = windowedRange.coordRange.start.y;
+    response.windowedCoordRange.coordRange.end.x = windowedRange.coordRange.end.x;
+    response.windowedCoordRange.coordRange.end.y = windowedRange.coordRange.end.y;
+    response.windowedCoordRange.columns.location = windowedRange.columnWindow.location;
+    response.windowedCoordRange.columns.length = windowedRange.columnWindow.length;
+
     return response;
 }
 
@@ -10244,7 +10324,7 @@ ITERM_WEAKLY_REFERENCEABLE
         response.outputRange.end.y = _screen.currentGrid.cursor.y + _screen.numberOfScrollbackLines + _screen.totalScrollbackOverflow;
     }
 
-    response.workingDirectory = [_screen workingDirectoryOnLine:[_screen coordRangeForInterval:mark.entry.interval].end.y];
+    response.workingDirectory = self.currentLocalWorkingDirectory;
     response.command = mark.command ?: self.currentCommand;
     response.status = ITMGetPromptResponse_Status_Ok;
     return response;
@@ -10399,7 +10479,7 @@ ITERM_WEAKLY_REFERENCEABLE
 - (void)jobPidDidChange {
     [[iTermProcessCache sharedInstance] setNeedsUpdate:YES];
     if ([_graphicSource updateImageForProcessID:self.shell.pid enabled:[self shouldShowTabGraphic]]) {
-        [self.delegate sessionDidChangeGraphic:self];
+        [self.delegate sessionDidChangeGraphic:self shouldShow:self.shouldShowTabGraphic image:self.tabGraphic];
     }
 }
 

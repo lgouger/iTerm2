@@ -7,6 +7,8 @@ import iterm2.connection
 import iterm2.notifications
 import iterm2.profile
 import iterm2.rpc
+import iterm2.screen
+import iterm2.selection
 import iterm2.util
 
 import json
@@ -239,11 +241,12 @@ class Session:
 
           async with session.get_screen_streamer() as streamer:
             while condition():
-              handle_screen_update(streamer.async_get())
+              contents = await streamer.async_get()
+              do_something(contents)
 
-        :returns: A :class:`Session.ScreenStreamer`.
+        :returns: A :class:`ScreenStreamer`.
         """
-        return self.ScreenStreamer(self.connection, self.__session_id, want_contents=want_contents)
+        return iterm2.screen.ScreenStreamer(self.connection, self.__session_id, want_contents=want_contents)
 
     async def async_send_text(self, text, suppress_broadcast=False):
         """
@@ -305,7 +308,7 @@ class Session:
             self.connection,
             async_on_keystroke,
             self.__session_id)
-        await self.connection.async_dispatch_until_future(future)
+        await future
         await iterm2.notifications.async_unsubscribe(self.connection, token)
         return future.result()
 
@@ -325,7 +328,7 @@ class Session:
             self.connection,
             async_on_update,
             self.__session_id)
-        await self.connection.async_dispatch_until_future(future)
+        await future
         await iterm2.notifications.async_unsubscribe(self.connection, token)
         return future.result
 
@@ -344,23 +347,23 @@ class Session:
         else:
             raise iterm2.rpc.RPCException(iterm2.api_pb2.GetBufferResponse.Status.Name(status))
 
-    async def async_get_buffer_lines(self, trailing_lines):
+    async def async_get_screen_contents(self, windowedCoordRange):
         """
         Fetches the last lines of the session, reaching into history if needed.
 
-        :param trailing_lines: The number of lines to fetch.
+        :param windowedCooordRange: A :class:`iterm2.util.WindowedCoordRange` describing the range to fetch.
 
-        :returns: The buffer contents, an iterm2.api_pb2.GetBufferResponse
+        :returns: The buffer contents, a :class:`iterm2.screen.ScreenContents`.
 
         :throws: :class:`RPCException` if something goes wrong.
         """
-        response = await iterm2.rpc.async_get_buffer_lines(
+        response = await iterm2.rpc.async_get_screen_contents(
             self.connection,
-            trailing_lines,
-            self.__session_id)
+            self.__session_id,
+            windowedCoordRange)
         status = response.get_buffer_response.status
         if status == iterm2.api_pb2.GetBufferResponse.Status.Value("OK"):
-            return response.get_buffer_response
+            return iterm2.screen.ScreenContents(response.get_buffer_response)
         else:
             raise iterm2.rpc.RPCException(iterm2.api_pb2.GetBufferResponse.Status.Name(status))
 
@@ -533,6 +536,73 @@ class Session:
             raise iterm2.rpc.RPCException(iterm2.api_pb2.SetPropertyResponse.Status.Name(status))
         return response
 
+    async def async_get_selection(self):
+        """
+        :returns: The :class:`iterm2.selection.Selection` of this session, giving the areas that are selected.
+
+        :throws: :class:`RPCException` if something goes wrong.
+        """
+        response = await iterm2.rpc.async_get_selection(self.connection, self.session_id)
+        status = response.selection_response.status
+        if status != iterm2.api_pb2.SelectionResponse.Status.Value("OK"):
+            raise iterm2.rpc.RPCException(iterm2.api_pb2.SelectionResponse.Status.Name(status))
+        subs = []
+        for subProto in response.selection_response.get_selection_response.selection.sub_selections:
+            start = iterm2.util.Point(
+                    subProto.windowed_coord_range.coord_range.start.x,
+                    subProto.windowed_coord_range.coord_range.start.y)
+            end = iterm2.util.Point(
+                    subProto.windowed_coord_range.coord_range.end.x,
+                    subProto.windowed_coord_range.coord_range.end.y)
+            coordRange = iterm2.util.CoordRange(start, end)
+            columnRange = iterm2.util.Range(
+                    subProto.windowed_coord_range.columns.location,
+                    subProto.windowed_coord_range.columns.length)
+            windowedCoordRange = iterm2.util.WindowedCoordRange(coordRange, columnRange)
+
+            sub = iterm2.SubSelection(
+                    windowedCoordRange,
+                    iterm2.selection.SelectionMode.fromProtoValue(
+                        subProto.selection_mode),
+                    subProto.connected)
+            subs.append(sub)
+        return iterm2.Selection(subs)
+
+    async def async_get_selection_text(self, selection):
+        """Fetches the text within a selection region.
+
+        :param selection: A :class:`iterm2.selection.Selection` defining a region in the session.
+
+        :returns: A string with the selection's contents. Discontiguous selections are combined with newlines."""
+        return await selection.async_get_string(
+                self.connection,
+                self.session_id,
+                self.grid_size.width)
+
+    async def async_set_selection(self, selection):
+        """
+        :param selection: The :class:`iterm2.selection.Selection` to set on this session.
+
+        :throws: :class:`RPCException` if something goes wrong.
+        """
+        response = await iterm2.rpc.async_set_selection(self.connection, self.session_id, selection)
+        status = response.selection_response.status
+        if status != iterm2.api_pb2.SelectionResponse.Status.Value("OK"):
+            raise iterm2.rpc.RPCException(iterm2.api_pb2.SelectionResponse.Status.Name(status))
+
+    async def async_get_line_info(self):
+        """
+        Fetches the number of lines that are visible, in history, and that have been removed after history became full.
+
+        :returns: A 4-tuple of numbers: (`height of visible area`, `number of lines in scrollback buffer`, `number of lines lost to overflow`, `first visible line number`)
+        """
+        response = await iterm2.rpc.async_get_property(self.connection, "number_of_lines", session_id=self.session_id)
+        status = response.get_property_response.status
+        if status != iterm2.api_pb2.GetPropertyResponse.Status.Value("OK"):
+            raise iterm2.rpc.RPCException(iterm2.api_pb2.GetPropertyResponse.Status.Name(status))
+        dict = json.loads(response.get_property_response.json_value)
+        return (dict["grid"], dict["history"], dict["overflow"], dict["first_visible"] )
+
     class KeystrokeReader:
         """An asyncio context manager for reading keystrokes.
 
@@ -569,7 +639,7 @@ class Session:
             :returns: A list of iterm2.api_pb2.KeystrokeNotification objects.
             """
             self.future = asyncio.Future()
-            await self.connection.async_dispatch_until_future(self.future)
+            await self.future
             result = self.future.result()
             self.future = None
             return result
@@ -578,55 +648,6 @@ class Session:
             await iterm2.notifications.async_unsubscribe(self.connection, self.token)
             return self.buffer
 
-    class ScreenStreamer:
-        """An asyncio context manager for monitoring the screen contents.
-
-        Don't create this yourself. Use Session.get_screen_streamer() instead. See
-        its docstring for more info."""
-        def __init__(self, connection, session_id, want_contents=True):
-            self.connection = connection
-            self.session_id = session_id
-            self.want_contents = want_contents
-            self.future = None
-            self.token = None
-
-        async def __aenter__(self):
-            async def async_on_update(_connection, message):
-                """Called on screen update. Saves the update message."""
-                future = self.future
-                if future is None:
-                    # Ignore reentrant calls
-                    return
-
-                self.future = None
-                if future is not None and not future.done():
-                    future.set_result(message)
-
-            self.token = await iterm2.notifications.async_subscribe_to_screen_update_notification(
-                self.connection,
-                async_on_update,
-                self.session_id)
-            return self
-
-        async def __aexit__(self, exc_type, exc, _tb):
-            await iterm2.notifications.async_unsubscribe(self.connection, self.token)
-
-        async def async_get(self):
-            """
-            Gets the screen contents, waiting until they change if needed.
-
-            :returns: An iterm2.api_pb2.GetBufferResponse.
-            """
-            future = asyncio.Future()
-            self.future = future
-            await self.connection.async_dispatch_until_future(self.future)
-            self.future = None
-
-            if self.want_contents:
-                result = await iterm2.rpc.async_get_buffer_with_screen_contents(
-                    self.connection,
-                    self.session_id)
-                return result
 
 class InvalidSessionId(Exception):
     """The specified session ID is not allowed in this method."""
@@ -656,10 +677,10 @@ class ProxySession(Session):
             raise InvalidSessionId()
         return await super(ProxySession, self).async_get_screen_contents()
 
-    async def async_get_buffer_lines(self, trailing_lines):
+    async def async_get_screen_contents(self):
         if self.__session_id == "all":
             raise InvalidSessionId()
-        return await super(ProxySession, self).async_get_buffer_lines(trailing_lines)
+        return await super(ProxySession, self).async_get_screen_contents(trailing_lines)
 
     async def async_get_prompt(self):
         if self.__session_id == "all":

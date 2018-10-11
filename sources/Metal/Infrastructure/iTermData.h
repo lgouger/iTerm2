@@ -18,17 +18,30 @@
 
 @interface iTermScreenCharData : iTermData
 + (instancetype)dataOfLength:(NSUInteger)length;
+- (void)checkForOverrun;
 @end
 
 @interface iTermGlyphKeyData : iTermData
 + (instancetype)dataOfLength:(NSUInteger)length;
+- (void)checkForOverrun;
+- (void)checkForOverrun1;
+- (void)checkForOverrun2;
 @end
 
 @interface iTermAttributesData : iTermData
 + (instancetype)dataOfLength:(NSUInteger)length;
+- (void)checkForOverrun;
+- (void)checkForOverrun1;
+- (void)checkForOverrun2;
 @end
 
 @interface iTermBackgroundColorRLEsData : iTermData
 + (instancetype)dataOfLength:(NSUInteger)length;
+- (void)checkForOverrun;
+@end
+
+@interface iTermBitmapData : iTermData
++ (instancetype)dataOfLength:(NSUInteger)length;
+- (void)checkForOverrun;
 @end
 

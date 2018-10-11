@@ -21,10 +21,6 @@ class CreateWindowException(Exception):
     """A problem was encountered while creating a window."""
     pass
 
-class MenuItemException(Exception):
-    """A problem was encountered while selecting a menu item."""
-    pass
-
 class BroadcastDomain:
     """Broadcast domains describe how keyboard input is broadcast.
 
@@ -179,6 +175,7 @@ class App:
 
         :returns: A :class:`Session` or None.
         """
+        assert session_id
         return self._search_for_session_id(session_id)
 
     def get_tab_by_id(self, tab_id):
@@ -420,6 +417,19 @@ class App:
         status = result.variable_response.status
         if status != iterm2.api_pb2.VariableResponse.Status.Value("OK"):
             raise iterm2.rpc.RPCException(iterm2.api_pb2.VariableResponse.Status.Name(status))
+
+    async def async_get_theme(self):
+        """
+        Gets attributes the current theme.
+
+        The automatic and minimal themes will always include "dark" or "light".
+
+        On macOS 10.14, the light or dark attribute may be inferred from the system setting.
+
+        :returns: An array of one or more strings from the set: light, dark, automatic, minimal, highContrast.
+        """
+        s = await self.async_get_variable("effectiveTheme")
+        return s.split(" ")
 
     async def async_get_variable(self, name):
         """

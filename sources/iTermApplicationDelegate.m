@@ -88,6 +88,7 @@
 #import "NSFileManager+iTerm.h"
 #import "NSObject+iTerm.h"
 #import "NSStringITerm.h"
+#import "NSUserDefaults+iTerm.h"
 #import "NSWindow+iTerm.h"
 #import "NSView+RecursiveDescription.h"
 #import "PFMoveApplication.h"
@@ -259,6 +260,14 @@ static BOOL hasBecomeActive = NO;
         [[NSNotificationCenter defaultCenter] addObserver:self
                                                  selector:@selector(currentSessionDidChange)
                                                      name:kCurrentSessionDidChange
+                                                   object:nil];
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(windowDidChangeKeyStatus:)
+                                                     name:NSWindowDidBecomeKeyNotification
+                                                   object:nil];
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(windowDidChangeKeyStatus:)
+                                                     name:NSWindowDidResignKeyNotification
                                                    object:nil];
 
         [[NSAppleEventManager sharedAppleEventManager] setEventHandler:self
@@ -612,12 +621,17 @@ static BOOL hasBecomeActive = NO;
         }
 
         PseudoTerminal *term = [self terminalToOpenFileIn];
-        [controller launchBookmark:bookmark inTerminal:term];
+        DLog(@"application:openFile: launching new session in window %@", term);
+        PTYSession *session = [controller launchBookmark:bookmark inTerminal:term];
+        term = (id)session.delegate.realParentWindow;
 
-        // If term is a hotkey window, reveal it.
-        iTermProfileHotKey *profileHotkey = [[iTermHotKeyController sharedInstance] profileHotKeyForWindowController:term];
-        if (profileHotkey) {
-            [[iTermHotKeyController sharedInstance] showWindowForProfileHotKey:profileHotkey url:nil];
+        if (term) {
+            // If term is a hotkey window, reveal it.
+            iTermProfileHotKey *profileHotkey = [[iTermHotKeyController sharedInstance] profileHotKeyForWindowController:term];
+            if (profileHotkey) {
+                DLog(@"application:openFile: revealing hotkey window");
+                [[iTermHotKeyController sharedInstance] showWindowForProfileHotKey:profileHotkey url:nil];
+            }
         }
     }
     return YES;
@@ -677,7 +691,6 @@ static BOOL hasBecomeActive = NO;
 
     // Display prompt if we need to
     if (!quittingBecauseLastWindowClosed_ &&  // cmd-q
-        [terminals count] > 0 &&  // there are terminal windows
         [iTermPreferences boolForKey:kPreferenceKeyPromptOnQuit]) {  // preference is to prompt on quit cmd
         [reason addReason:[iTermPromptOnCloseReason alwaysConfirmQuitPreferenceEnabled]];
     }
@@ -872,7 +885,7 @@ static BOOL hasBecomeActive = NO;
 }
 
 - (void)application:(NSApplication *)app didDecodeRestorableState:(NSCoder *)coder {
-    DLog(@"application:didDecodeRestorableState:");
+    DLog(@"application:didDecodeRestorableState: starting");
     if (self.isApplescriptTestApp) {
         DLog(@"Is applescript test app");
         return;
@@ -916,6 +929,7 @@ static BOOL hasBecomeActive = NO;
         NSString *log = [dict sizeInfo];
         [log writeToFile:[NSString stringWithFormat:@"/tmp/statesize.app-%p.txt", self] atomically:NO encoding:NSUTF8StringEncoding error:nil];
     }
+    DLog(@"application:didDecodeRestorableState: finished");
 }
 
 - (void)applicationDidResignActive:(NSNotification *)aNotification {
@@ -1005,6 +1019,60 @@ static BOOL hasBecomeActive = NO;
     }
 }
 
+- (NSString *)effectiveTheme {
+    BOOL dark = NO;
+    BOOL light = NO;
+    BOOL highContrast = NO;
+    BOOL minimal = NO;
+
+    switch ([iTermPreferences intForKey:kPreferenceKeyTabStyle]) {
+        case TAB_STYLE_DARK:
+            dark = YES;
+            break;
+
+        case TAB_STYLE_LIGHT:
+            light = YES;
+            break;
+            
+        case TAB_STYLE_DARK_HIGH_CONTRAST:
+            dark = YES;
+            highContrast = YES;
+            break;
+
+        case TAB_STYLE_LIGHT_HIGH_CONTRAST:
+            light = YES;
+            highContrast = YES;
+            break;
+
+        case TAB_STYLE_MINIMAL:
+            minimal = YES;
+            // fall through
+
+        case TAB_STYLE_AUTOMATIC: {
+            NSString *systemMode = [[NSUserDefaults standardUserDefaults] stringForKey:@"AppleInterfaceStyle"];
+            if ([systemMode isEqual:@"Dark"]) {
+                dark = YES;
+            } else {
+                light = YES;
+            }
+            break;
+        }
+    }
+    NSMutableArray *array = [NSMutableArray array];
+    if (dark) {
+        [array addObject:@"dark"];
+    } else if (light) {
+        [array addObject:@"light"];
+    }
+    if (highContrast) {
+        [array addObject:@"highContrast"];
+    }
+    if (minimal) {
+        [array addObject:@"minimal"];
+    }
+    return [array componentsJoinedByString:@" "];
+}
+
 - (void)applicationWillFinishLaunching:(NSNotification *)aNotification {
     [iTermMenuBarObserver sharedInstance];
     // Cleanly crash on uncaught exceptions, such as during actions.
@@ -1020,6 +1088,19 @@ static BOOL hasBecomeActive = NO;
     }
 
     [[iTermVariableScope globalsScope] setValue:@(getpid()) forVariableNamed:iTermVariableKeyApplicationPID];
+    [[iTermVariableScope globalsScope] setValue:[self effectiveTheme]
+                               forVariableNamed:iTermVariableKeyApplicationEffectiveTheme];
+    void (^themeDidChange)(id _Nonnull) = ^(id _Nonnull newValue) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [[iTermVariableScope globalsScope] setValue:[self effectiveTheme]
+                                       forVariableNamed:iTermVariableKeyApplicationEffectiveTheme];
+        });
+    };
+    [[NSUserDefaults standardUserDefaults] it_addObserverForKey:@"AppleInterfaceStyle"
+                                                          block:themeDidChange];
+    [[NSUserDefaults standardUserDefaults] it_addObserverForKey:kPreferenceKeyTabStyle
+                                                          block:themeDidChange];
+
     [[iTermLocalHostNameGuesser sharedInstance] callBlockWhenReady:^(NSString *name) {
         [[iTermVariableScope globalsScope] setValue:name forVariableNamed:iTermVariableKeyApplicationLocalhostName];
     }];
@@ -2104,13 +2185,64 @@ static BOOL hasBecomeActive = NO;
     [[TmuxDashboardController sharedInstance] showWindow:nil];
 }
 
+- (NSString *)gpuUnavailableStringForReason:(iTermMetalUnavailableReason)reason {
+    switch (reason) {
+        case iTermMetalUnavailableReasonNone:
+            return nil;
+        case iTermMetalUnavailableReasonNoGPU:
+            return @"no usable GPU found on this machine.";
+        case iTermMetalUnavailableReasonDisabled:
+            return @"GPU Renderer is disabled in Preferences > General.";
+        case iTermMetalUnavailableReasonLigatures:
+            return @"ligatures are enabled. You can disable them in Prefs>Profiles>Text>Use ligatures.";
+        case iTermMetalUnavailableReasonInitializing:
+            return @"the GPU renderer is initializing. It should be ready soon.";
+        case iTermMetalUnavailableReasonInvalidSize:
+            return @"the session is too large or too small.";
+        case iTermMetalUnavailableReasonSessionInitializing:
+            return @"the session is initializing.";
+        case iTermMetalUnavailableReasonTransparency:
+            return @"transparent windows not supported. You can change window transparency in Prefs>Profiles>Window>Transparency";
+        case iTermMetalUnavailableReasonVerticalSpacing:
+            return @"the font's vertical spacing set to less than 100%. You can change it in Prefs>Profiles>Text>Change Font.";
+        case iTermMetalUnavailableReasonMarginSize:
+            return @"terminal window margins are too small. You can edit them in Prefs>Advanced.";
+        case iTermMetalUnavailableReasonAnnotations:
+            return @"annotations are open. Find the session with visible annotations and close them with View>Show Annotations.";
+        case iTermMetalUnavailableReasonFindPanel:
+            return @"the find panel is open.";
+        case iTermMetalUnavailableReasonPasteIndicator:
+            return @"the paste progress indicator is open.";
+        case iTermMetalUnavailableReasonAnnouncement:
+            return @"an announcement (yellow bar) is visible.";
+        case iTermMetalUnavailableReasonURLPreview:
+            return @"a URL preview is visible.";
+        case iTermMetalUnavailableReasonWindowResizing:
+            return @"the window is being resized.";
+        case iTermMetalUnavailableReasonDisconnectedFromPower:
+            return @"the computer is not connected to power. You can enable GPU rendering while disconnected from power in Prefs>General>Advanced GPU Settings.";
+        case iTermMetalUnavailableReasonIdle:
+            return @"the session is idle. You can enable Metal while idle in Prefs>Advanced.";
+        case iTermMetalUnavailableReasonTooManyPanesReason:
+            return @"This tab has too many split panes";
+        case iTermMetalUnavailableReasonNoFocus:
+            return @"the window does not have keyboard focus.";
+        case iTermMetalUnavailableReasonTabInactive:
+            return @"this tab is not active.";
+        case iTermMetalUnavailableReasonTabBarTemporarilyVisible:
+            return @"the tab bar is temporarily visible.";
+    }
+
+    return @"of an internal error. Please file a bug report!";
+}
+
 - (IBAction)gpuRendererAvailability:(id)sender {
     NSAlert *alert = [[[NSAlert alloc] init] autorelease];
     alert.messageText = @"GPU Renderer Availability";
     PseudoTerminal *term = [[iTermController sharedInstance] currentTerminal];
     PTYSession *session = [term currentSession];
     PTYTab *tab = [term tabForSession:session];
-    NSString *reason = tab.metalUnavailableReason;
+    NSString *reason = [self gpuUnavailableStringForReason:tab.metalUnavailableReason];
     if (reason) {
         alert.informativeText = [NSString stringWithFormat:@"GPU rendering is off in the current session because %@", reason];
     } else {
@@ -2322,6 +2454,10 @@ static BOOL hasBecomeActive = NO;
             [quickLookController takeControl];
         }
     }
+}
+
+- (void)windowDidChangeKeyStatus:(NSNotification *)notification {
+    DLog(@"%@:\n%@", notification.name, [NSThread callStackSymbols]);
 }
 
 @end

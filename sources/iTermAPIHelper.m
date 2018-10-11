@@ -13,16 +13,21 @@
 #import "iTermAPIAuthorizationController.h"
 #import "iTermBuriedSessions.h"
 #import "iTermBuiltInFunctions.h"
+#import "iTermColorPresets.h"
 #import "iTermController.h"
 #import "iTermDisclosableView.h"
 #import "iTermLSOF.h"
 #import "iTermProfilePreferences.h"
 #import "iTermPythonArgumentParser.h"
+#import "iTermSelection.h"
+#import "iTermStatusBarComponent.h"
+#import "iTermStatusBarViewController.h"
 #import "iTermVariableReference.h"
 #import "iTermVariables.h"
 #import "iTermWarning.h"
 #import "MovePaneController.h"
 #import "NSArray+iTerm.h"
+#import "NSColor+iTerm.h"
 #import "NSDictionary+iTerm.h"
 #import "NSFileManager+iTerm.h"
 #import "NSJSONSerialization+iTerm.h"
@@ -726,11 +731,9 @@ static id sAPIHelperInstance;
                 return result;
             }
         } else if (item.identifier && [identifier isEqualToString:item.identifier]) {
-            NSLog(@"Found it");
             return item;
         }
     }
-    NSLog(@"Didn't find it");
     return nil;
 }
 
@@ -1787,10 +1790,18 @@ static id sAPIHelperInstance;
         BOOL isBuried = [[[iTermBuriedSessions sharedInstance] buriedSessions] containsObject:session];
         return [NSJSONSerialization it_jsonStringForObject:@(isBuried)];
     };
-
+    GetSessionPropertyBlock getNumberOfLines = ^NSString * {
+        NSDictionary *dict =
+            @{ @"overflow": @(session.screen.totalScrollbackOverflow),
+               @"grid": @(session.screen.currentGrid.size.height),
+               @"history": @(session.screen.numberOfScrollbackLines),
+               @"first_visible": @(session.textview.firstVisibleAbsoluteLineNumber) };
+        return [NSJSONSerialization it_jsonStringForObject:dict];
+    };
     NSDictionary<NSString *, GetSessionPropertyBlock> *handlers =
         @{ @"grid_size": getGridSize,
            @"buried": getBuried,
+           @"number_of_lines": getNumberOfLines,
          };
 
     GetSessionPropertyBlock block = handlers[name];
@@ -1881,6 +1892,7 @@ static id sAPIHelperInstance;
         [tab setActiveSession:session];
         response.status = ITMActivateResponse_Status_Ok;
         handler(response);
+        return;
     }
 
     if (request.selectTab) {
@@ -2286,6 +2298,7 @@ static id sAPIHelperInstance;
         handler(response);
         return;
     }
+    [menuItem.menu update];
     if (!menuItem.enabled && !request.queryOnly) {
         response.status = ITMMenuItemResponse_Status_Disabled;
         handler(response);
@@ -2619,6 +2632,254 @@ static BOOL iTermCheckSplitTreesIsomorphic(ITMSplitTreeNode *node1, ITMSplitTree
     [[ProfileModel sharedInstance] setDefaultByGuid:guid];
     result.status = ITMPreferencesResponse_Result_SetDefaultProfileResult_Status_Ok;
     return result;
+}
+
+- (void)apiServerColorPresetRequest:(ITMColorPresetRequest *)request handler:(void (^)(ITMColorPresetResponse *))response {
+    switch (request.requestOneOfCase) {
+        case ITMColorPresetRequest_Request_OneOfCase_GetPreset:
+            [self handleGetPreset:request.getPreset completion:response];
+            return;
+
+        case ITMColorPresetRequest_Request_OneOfCase_ListPresets:
+            [self handleListPresets:request.listPresets completion:response];
+            return;
+
+        case ITMColorPresetRequest_Request_OneOfCase_GPBUnsetOneOfCase:
+            break;
+    }
+    ITMColorPresetResponse *message = [[ITMColorPresetResponse alloc] init];
+    message.status = ITMColorPresetResponse_Status_RequestMalformed;
+    response(message);
+}
+
+- (void)handleGetPreset:(ITMColorPresetRequest_GetPreset *)request completion:(void (^)(ITMColorPresetResponse *))completion {
+    ITMColorPresetResponse *message = [[ITMColorPresetResponse alloc] init];
+    iTermColorPreset *preset = [iTermColorPresets presetWithName:request.name];
+    if (!preset) {
+        message.status = ITMColorPresetResponse_Status_PresetNotFound;
+        completion(message);
+        return;
+    }
+
+    for (NSString *key in preset) {
+        ITMColorPresetResponse_GetPreset_ColorSetting *colorSetting = [self colorSettingForDictionary:preset[key] key:key];
+        [message.getPreset.colorSettingsArray addObject:colorSetting];
+    }
+    message.status = ITMColorPresetResponse_Status_Ok;
+    completion(message);
+}
+
+- (ITMColorPresetResponse_GetPreset_ColorSetting *)colorSettingForDictionary:(iTermColorDictionary *)dict key:(NSString *)key {
+    ITMColorPresetResponse_GetPreset_ColorSetting *setting = [[ITMColorPresetResponse_GetPreset_ColorSetting alloc] init];
+    setting.key = key;
+    NSNumber *obj;
+    obj = dict[kEncodedColorDictionaryRedComponent];
+    if (obj) {
+        setting.red = [obj doubleValue];
+    }
+    obj = dict[kEncodedColorDictionaryGreenComponent];
+    if (obj) {
+        setting.green = [obj doubleValue];
+    }
+    obj = dict[kEncodedColorDictionaryBlueComponent];
+    if (obj) {
+        setting.blue = [obj doubleValue];
+    }
+    obj = dict[kEncodedColorDictionaryAlphaComponent] ?: @([NSDictionary defaultAlphaForColorPresetKey:key]);
+    setting.alpha = [obj doubleValue];
+
+    NSString *colorSpace = dict[kEncodedColorDictionaryColorSpace] ?: kEncodedColorDictionaryCalibratedColorSpace;
+    setting.colorSpace = colorSpace;
+    
+    return setting;
+}
+
+- (void)handleListPresets:(ITMColorPresetRequest_ListPresets *)request completion:(void (^)(ITMColorPresetResponse *))completion {
+    ITMColorPresetResponse *message = [[ITMColorPresetResponse alloc] init];
+    for (NSString *name in [iTermColorPresets allColorPresets]) {
+        [message.listPresets.nameArray addObject:name];
+    }
+    message.status = ITMColorPresetResponse_Status_Ok;
+    completion(message);
+}
+
+- (void)apiServerSelectionRequest:(ITMSelectionRequest *)request handler:(void (^)(ITMSelectionResponse *))completion {
+    switch (request.requestOneOfCase) {
+        case ITMSelectionRequest_Request_OneOfCase_GetSelectionRequest:
+            [self handleGetSelectionRequest:request.getSelectionRequest completion:completion];
+            return;
+
+        case ITMSelectionRequest_Request_OneOfCase_SetSelectionRequest:
+            [self handleSetSelectionRequest:request.setSelectionRequest completion:completion];
+            return;
+
+        case ITMSelectionRequest_Request_OneOfCase_GPBUnsetOneOfCase:
+            break;
+    }
+
+    ITMSelectionResponse *response = [[ITMSelectionResponse alloc] init];
+    response.status = ITMSelectionResponse_Status_RequestMalformed;
+    completion(response);
+}
+
+- (void)handleGetSelectionRequest:(ITMSelectionRequest_GetSelectionRequest *)request
+                       completion:(void (^)(ITMSelectionResponse *))completion {
+    PTYSession *session = [self sessionForAPIIdentifier:request.sessionId includeBuriedSessions:YES];
+    ITMSelectionResponse *response = [[ITMSelectionResponse alloc] init];
+    if (!session) {
+        response.status = ITMSelectionResponse_Status_RequestMalformed;
+        completion(response);
+        return;
+    }
+
+    iTermSelection *selection = session.textview.selection;
+    const NSInteger absoluteOffset = session.screen.totalScrollbackOverflow;
+    for (iTermSubSelection *sub in selection.allSubSelections) {
+        ITMSubSelection *subProto = [[ITMSubSelection alloc] init];
+        subProto.windowedCoordRange.coordRange.start.x = sub.range.coordRange.start.x;
+        subProto.windowedCoordRange.coordRange.start.y = absoluteOffset + sub.range.coordRange.start.y;
+        subProto.windowedCoordRange.coordRange.end.x = sub.range.coordRange.end.x;
+        subProto.windowedCoordRange.coordRange.end.y = absoluteOffset + sub.range.coordRange.end.y;
+        subProto.connected = sub.connected;
+        if (sub.range.columnWindow.length > 0) {
+            subProto.windowedCoordRange.columns.location = sub.range.columnWindow.location;
+            subProto.windowedCoordRange.columns.length = sub.range.columnWindow.length;
+        }
+        switch (sub.selectionMode) {
+            case kiTermSelectionModeWholeLine:
+                subProto.selectionMode = ITMSelectionMode_WholeLine;
+                break;
+            case kiTermSelectionModeCharacter:
+                subProto.selectionMode = ITMSelectionMode_Character;
+                break;
+            case kiTermSelectionModeSmart:
+                subProto.selectionMode = ITMSelectionMode_Smart;
+                break;
+            case kiTermSelectionModeWord:
+                subProto.selectionMode = ITMSelectionMode_Word;
+                break;
+            case kiTermSelectionModeLine:
+                subProto.selectionMode = ITMSelectionMode_Line;
+                break;
+            case kiTermSelectionModeBox:
+                subProto.selectionMode = ITMSelectionMode_Box;
+                break;
+        }
+        [response.getSelectionResponse.selection.subSelectionsArray addObject:subProto];
+    }
+    response.status = ITMSelectionResponse_Status_Ok;
+    completion(response);
+}
+
+- (void)handleSetSelectionRequest:(ITMSelectionRequest_SetSelectionRequest *)request
+                       completion:(void (^)(ITMSelectionResponse *))completion {
+    PTYSession *session = [self sessionForAPIIdentifier:request.sessionId includeBuriedSessions:YES];
+    ITMSelectionResponse *response = [[ITMSelectionResponse alloc] init];
+    if (!session) {
+        response.status = ITMSelectionResponse_Status_RequestMalformed;
+        completion(response);
+        return;
+    }
+
+    const NSInteger absoluteOffset = session.screen.totalScrollbackOverflow;
+    const NSInteger width = session.screen.width;
+    NSArray<iTermSubSelection *> *subSelections = [request.selection.subSelectionsArray mapWithBlock:^id(ITMSubSelection *subProto) {
+        if (subProto.windowedCoordRange.coordRange.end.x > width ||
+            subProto.windowedCoordRange.columns.length < 0 ||
+            subProto.windowedCoordRange.columns.location + subProto.windowedCoordRange.columns.length > width ||
+            subProto.windowedCoordRange.coordRange.start.x < 0 ||
+            subProto.windowedCoordRange.columns.location < 0 ||
+            subProto.windowedCoordRange.coordRange.start.y < 0 ||
+            subProto.windowedCoordRange.coordRange.end.y < 0) {
+            return nil;
+        }
+        VT100GridCoordRange coordRange = VT100GridCoordRangeMake(subProto.windowedCoordRange.coordRange.start.x,
+                                                                 MAX(0, subProto.windowedCoordRange.coordRange.start.y - absoluteOffset),
+                                                                 subProto.windowedCoordRange.coordRange.end.x,
+                                                                 MAX(0, subProto.windowedCoordRange.coordRange.end.y - absoluteOffset));
+        VT100GridWindowedRange range = VT100GridWindowedRangeMake(coordRange,
+                                                                  subProto.windowedCoordRange.columns.location,
+                                                                  subProto.windowedCoordRange.columns.length);
+        iTermSelectionMode mode = NSNotFound;
+        switch (subProto.selectionMode) {
+            case ITMSelectionMode_Box:
+                mode = kiTermSelectionModeBox;
+                break;
+            case ITMSelectionMode_Line:
+                mode = kiTermSelectionModeLine;
+                break;
+            case ITMSelectionMode_Word:
+                mode = kiTermSelectionModeWord;
+                break;
+            case ITMSelectionMode_Smart:
+                mode = kiTermSelectionModeSmart;
+                break;
+            case ITMSelectionMode_Character:
+                mode = kiTermSelectionModeCharacter;
+                break;
+            case ITMSelectionMode_WholeLine:
+                mode = kiTermSelectionModeWholeLine;
+                break;
+        }
+        if (mode == NSNotFound) {
+            return nil;
+        }
+        iTermSubSelection *sub = [iTermSubSelection subSelectionWithRange:range mode:mode];
+        return sub;
+    }];
+
+    if (subSelections.count < request.selection.subSelectionsArray.count) {
+        response.status = ITMSelectionResponse_Status_RequestMalformed;
+        completion(response);
+        return;
+    }
+
+    [session.textview.selection endLiveSelection];
+    [session.textview.selection clearSelection];
+    [session.textview.selection addSubSelections:subSelections];
+
+    response.status = ITMSelectionResponse_Status_Ok;
+    completion(response);
+}
+
+- (void)apiServerStatusBarComponentRequest:(ITMStatusBarComponentRequest *)request
+                                   handler:(void (^)(ITMStatusBarComponentResponse *))completion {
+    switch (request.requestOneOfCase) {
+        case ITMStatusBarComponentRequest_Request_OneOfCase_OpenPopover:
+            [self handleOpenStatusBarPopoverRequest:request.openPopover
+                                         identifier:request.identifier
+                                         completion:completion];
+            return;
+        case ITMStatusBarComponentRequest_Request_OneOfCase_GPBUnsetOneOfCase:
+            break;
+    }
+    ITMStatusBarComponentResponse *response = [[ITMStatusBarComponentResponse alloc] init];
+    response.status = ITMStatusBarComponentResponse_Status_RequestMalformed;
+    completion(response);
+}
+
+- (void)handleOpenStatusBarPopoverRequest:(ITMStatusBarComponentRequest_OpenPopover *)request
+                               identifier:(NSString *)identifier
+                               completion:(void (^)(ITMStatusBarComponentResponse *))completion {
+    ITMStatusBarComponentResponse *response = [[ITMStatusBarComponentResponse alloc] init];
+    PTYSession *session = [self sessionForAPIIdentifier:request.sessionId includeBuriedSessions:YES];
+    if (!session) {
+        response.status = ITMStatusBarComponentResponse_Status_SessionNotFound;
+        completion(response);
+        return;
+    }
+
+    id<iTermStatusBarComponent> component = [session.statusBarViewController componentWithIdentifier:identifier];
+    if (!component) {
+        response.status = ITMStatusBarComponentResponse_Status_InvalidIdentifier;
+        completion(response);
+        return;
+    }
+    [component statusBarComponentOpenPopoverWithHTML:request.html ofSize:NSMakeSize(request.size.width, request.size.height)];
+
+    response.status = ITMStatusBarComponentResponse_Status_Ok;
+    completion(response);
+    return;
 }
 
 @end
