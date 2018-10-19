@@ -346,7 +346,8 @@ DEFINE_FLOAT(timeoutForStringEvaluation, 10, SECTION_GENERAL @"Timeout (seconds)
 DEFINE_STRING(pathToFTP, @"ftp", SECTION_GENERAL @"Path to ftp for opening ftp: URLs.\nYou may want to set this to /usr/local/bin/ftp to use the Homebrew install.");
 DEFINE_STRING(pathToTelnet, @"telnet", SECTION_GENERAL @"Path to telnet for opening telnet: URLs.\nYou may want to set this to /usr/local/bin/telnet to use the Homebrew install.");
 DEFINE_STRING(fallbackLCCType, @"", SECTION_GENERAL @"Value to set LC_CTYPE to if the machine‘s combination of country and language are not supported.\nIf unset, the encoding (e.g., UTF-8) will be used.");
-DEFINE_BOOL(useVirtualKeyCodesForDetectingDigits, NO, SECTION_GENERAL @"On keyboards that require a modifier to press a digit, do not require that modifier for switching between windows, tabs, and panes by number.\nFor example, AZERTY requires you to hold down Shift to enter a number. To switch tabs with ⌘+Number on an AZERTY keyboard, you must enable this setting. Then, for example, ⌘-& switches to tab 1. When this setting is enabled, some user-defined shortcuts may become unavailable because the tab/window/pane switching behavior takes precedence.");
+// See issue 6994
+DEFINE_BOOL(useVirtualKeyCodesForDetectingDigits, NO, SECTION_GENERAL @"Treat the top row of keys like number keys on an English keyboard for the purposes of switching panes, tabs, and windows with modifier+number.\nFor example, AZERTY requires you to hold down Shift to enter a number. To switch tabs with ⌘+Number on an AZERTY keyboard, you must enable this setting. Then, for example, ⌘-& switches to tab 1. When this setting is enabled, some user-defined shortcuts may become unavailable because the tab/window/pane switching behavior takes precedence.");
 DEFINE_BOOL(hotkeyWindowsExcludedFromCycling, YES, SECTION_GENERAL @"Hotkey windows are excluded from Cycle Through Windows.");
 
 #pragma mark - Drawing
@@ -422,7 +423,8 @@ DEFINE_BOOL(darkThemeHasBlackTitlebar, YES, SECTION_WINDOWS @"Dark themes give t
 DEFINE_BOOL(fontChangeAffectsBroadcastingSessions, NO, SECTION_WINDOWS @"Should growing or shrinking the font in a session that's broadcasting input affect all session that broadcast input?\nThis only applies to changing the font size with Make Text Bigger, Make Text Normal Size, and Make Text Smaller");
 DEFINE_BOOL(serializeOpeningMultipleFullScreenWindows, YES, SECTION_WINDOWS @"When opening multiple fullscreen windows, enter fullscreen one window at a time.");
 DEFINE_BOOL(trackingRunloopForLiveResize, YES, SECTION_WINDOWS @"Use a tracking runloop for live resizing.\nThis allows the terminal to redraw during a resizing drag.");
-DEFINE_BOOL(invalidateShadowAfterEachDraw, YES, SECTION_WINDOWS @"Invalidate shadow after each draw to prevent ghosting.");
+DEFINE_FLOAT(invalidateShadowTimesPerSecond, 15, SECTION_WINDOWS @"How many times per second to update the shadow of transparent windows to prevent ghosting.\nThis works around a macOS Mojave bug that leaves a ghost of past window contents behind in transparent windows. It hurts performance to do it frequently, especially in large windows. Set to 0 to disable.");
+DEFINE_BOOL(disableWindowShadowWhenTransparencyOnMojave, YES, SECTION_WINDOWS @"Disable the window shadow on Mojave when the window has a transparent session to improve performance.");
 
 #pragma mark tmux
 

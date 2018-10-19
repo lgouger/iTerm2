@@ -15,6 +15,7 @@
 #import "iTerm.h"
 #import "iTermAPIHelper.h"
 #import "iTermAboutWindow.h"
+#import "iTermAdjustFontSizeHelper.h"
 #import "iTermAdvancedSettingsModel.h"
 #import "iTermAnnouncementView.h"
 #import "iTermApplication.h"
@@ -56,6 +57,7 @@
 #import "iTermWarning.h"
 #import "iTermWindowShortcutLabelTitlebarAccessoryViewController.h"
 #import "MovePaneController.h"
+#import "NSAlert+iTerm.h"
 #import "NSAppearance+iTerm.h"
 #import "NSArray+iTerm.h"
 #import "NSColor+iTerm.h"
@@ -926,6 +928,9 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (BOOL)rootTerminalViewShouldDrawWindowTitleInPlaceOfTabBar {
+    if (togglingLionFullScreen_) {
+        return NO;
+    }
     if (self.anyFullScreen) {
         return NO;
     }
@@ -1337,6 +1342,10 @@ ITERM_WEAKLY_REFERENCEABLE
     return self.shouldUseMinimalStyle;
 }
 
+- (BOOL)ptyWindowFullScreen {
+    return self.lionFullScreen || togglingLionFullScreen_;
+}
+
 - (void)closeSession:(PTYSession *)aSession {
     [self closeSession:aSession soft:NO];
 }
@@ -1396,7 +1405,7 @@ ITERM_WEAKLY_REFERENCEABLE
     alert.informativeText = message;
     [alert addButtonWithTitle:@"OK"];
     [alert addButtonWithTitle:@"Cancel"];
-    return ([alert runModal] == NSAlertFirstButtonReturn);
+    return [alert runSheetModalForWindow:self.window] == NSAlertFirstButtonReturn;
 }
 
 - (BOOL)confirmCloseTab:(PTYTab *)aTab suppressConfirmation:(BOOL)suppressConfirmation {
@@ -2580,6 +2589,7 @@ ITERM_WEAKLY_REFERENCEABLE
             return NO;
         }
     }
+    [self updateUseTransparency];
     return YES;
 }
 
@@ -3066,6 +3076,10 @@ ITERM_WEAKLY_REFERENCEABLE
 
 - (NSRect)screenFrameForEdgeSpanningWindows:(NSScreen *)screen {
     if ([[[iTermHotKeyController sharedInstance] profileHotKeyForWindowController:self] floats]) {
+        const BOOL menuBarIsHidden = ![[iTermMenuBarObserver sharedInstance] menuBarVisibleOnScreen:screen];
+        if (menuBarIsHidden) {
+            return screen.frame;
+        }
         return screen.frameExceptMenuBar;
     } else {
         return [screen visibleFrameIgnoringHiddenDock];
@@ -3756,6 +3770,14 @@ ITERM_WEAKLY_REFERENCEABLE
         [[aSession textview] setNeedsDisplay:YES];
     }
     [[self currentTab] recheckBlur];
+    [self updateTabColors];  // Updates the window's background color as a side-effect
+    [self updateWindowShadow];
+}
+
+- (BOOL)anySessionInCurrentTabHasTransparency {
+    return [self.currentTab.sessions anyWithBlock:^BOOL(PTYSession *session) {
+        return session.textview.transparencyAlpha < 1;
+    }];
 }
 
 - (IBAction)toggleUseTransparency:(id)sender
@@ -4150,6 +4172,17 @@ ITERM_WEAKLY_REFERENCEABLE
     [self didChangeCompactness];
     [self updateTouchBarIfNeeded:NO];
     [self updateUseMetalInAllTabs];
+    [self updateWindowShadow];
+}
+
+- (void)updateWindowShadow {
+    if (@available(macOS 10.14, *)) {
+        if ([iTermAdvancedSettingsModel disableWindowShadowWhenTransparencyOnMojave]) {
+            const BOOL haveTransparency = [self anySessionInCurrentTabHasTransparency];
+            DLog(@"%@: have transparency = %@ for sessions %@ in tab %@", self, @(haveTransparency), self.currentTab.sessions, self.currentTab);
+            self.window.hasShadow = !haveTransparency;
+        }
+    }
 }
 
 - (void)didChangeCompactness {
@@ -4274,6 +4307,7 @@ ITERM_WEAKLY_REFERENCEABLE
     togglingLionFullScreen_ = YES;
     [self didChangeAnyFullScreen];
     [self updateUseMetalInAllTabs];
+    [self updateWindowShadow];
     [self repositionWidgets];
     [_contentView didChangeCompactness];
 }
@@ -4306,6 +4340,7 @@ ITERM_WEAKLY_REFERENCEABLE
     }
     [self updateTouchBarIfNeeded:NO];
     [self updateUseMetalInAllTabs];
+    [self updateWindowShadow];
 }
 
 - (void)windowDidFailToEnterFullScreen:(NSWindow *)window {
@@ -4340,6 +4375,7 @@ ITERM_WEAKLY_REFERENCEABLE
     [self repositionWidgets];
     self.window.hasShadow = YES;
     [self updateUseMetalInAllTabs];
+    [self updateWindowShadow];
 }
 
 - (void)windowDidExitFullScreen:(NSNotification *)notification
@@ -4372,6 +4408,7 @@ ITERM_WEAKLY_REFERENCEABLE
     [self updateUseMetalInAllTabs];
     [_contentView didChangeCompactness];
     [_contentView layoutSubviews];
+    [self updateWindowShadow];
 }
 
 - (NSRect)windowWillUseStandardFrame:(NSWindow *)sender defaultFrame:(NSRect)defaultFrame {
@@ -4694,6 +4731,7 @@ ITERM_WEAKLY_REFERENCEABLE
     [self updateCurrentLocation];
     [self updateUseMetalInAllTabs];
     [self.scope setValue:self.currentTab.variables forVariableNamed:iTermVariableKeyWindowCurrentTab];
+    [self updateWindowShadow];
     [[NSNotificationCenter defaultCenter] postNotificationName:iTermSelectedTabDidChange object:tab];
 }
 
@@ -5421,6 +5459,12 @@ ITERM_WEAKLY_REFERENCEABLE
     [[NSNotificationCenter defaultCenter] postNotificationName:iTermWindowAppearanceDidChange object:self.window];
 }
 
+- (BOOL)anyPaneIsTransparent {
+    return [self.currentTab.sessions anyWithBlock:^BOOL(PTYSession *session) {
+        return session.textview.transparencyAlpha < 1;
+    }];
+}
+
 - (void)setMojaveBackgroundColor:(nullable NSColor *)backgroundColor NS_AVAILABLE_MAC(10_14) {
     switch ([iTermPreferences intForKey:kPreferenceKeyTabStyle]) {
         case TAB_STYLE_AUTOMATIC:
@@ -5437,13 +5481,8 @@ ITERM_WEAKLY_REFERENCEABLE
             self.window.appearance = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
             break;
     }
-    // Sigh.
-    // In Mojave, the window background is visible when the contentView is transparent.
-    // This is generally a good thing because it means layers really work!
-    // But there's a bug that the window title shows a broken vibrancy effect (issue 6964).
-    // There's an opportunity for improvement here if there's a tab color and we know the
-    // window isn't opaque we could set the titlebar's color, since that works again in 10.14.
-    self.window.backgroundColor = [NSColor clearColor];
+    self.window.backgroundColor = self.anyPaneIsTransparent ? [NSColor clearColor] : [NSColor windowBackgroundColor];
+    self.window.titlebarAppearsTransparent = NO;  // Keep it from showing content from other windows behind it. Issue 7108.
 }
 
 - (void)setLegacyBackgroundColor:(nullable NSColor *)backgroundColor {
@@ -6831,8 +6870,37 @@ ITERM_WEAKLY_REFERENCEABLE
     }
 }
 
-- (void)setBroadcastMode:(BroadcastMode)mode
-{
+- (void)setBroadcastingSessions:(NSArray<PTYSession *> *)sessions {
+    if (sessions.count == 0 && broadcastMode_ == BROADCAST_OFF && broadcastViewIds_.count == 0) {
+        return;
+    }
+    [broadcastViewIds_ removeAllObjects];
+    for (PTYTab *tab in self.tabs) {
+        tab.broadcasting = NO;
+    }
+    if (sessions.count > 0) {
+        broadcastMode_ = BROADCAST_CUSTOM;
+        [broadcastViewIds_ addObjectsFromArray:[sessions mapWithBlock:^id(PTYSession *session) {
+            if (![self.allSessions containsObject:session]) {
+                return nil;
+            }
+            return @(session.view.viewId);
+        }]];
+    } else {
+        broadcastMode_ = BROADCAST_OFF;
+    }
+    [self setDimmingForSessions];
+    iTermApplicationDelegate *itad = [iTermApplication.sharedApplication delegate];
+    [itad updateBroadcastMenuState];
+    // Post a notification to reload menus
+    [[NSNotificationCenter defaultCenter] postNotificationName:@"iTermWindowBecameKey"
+                                                        object:self
+                                                      userInfo:nil];
+    [self setWindowTitle];
+    [[NSNotificationCenter defaultCenter] postNotificationName:iTermBroadcastDomainsDidChangeNotification object:nil];
+}
+
+- (void)setBroadcastMode:(BroadcastMode)mode {
     if (mode != BROADCAST_CUSTOM && mode == [self broadcastMode]) {
         mode = BROADCAST_OFF;
     }
@@ -6857,8 +6925,7 @@ ITERM_WEAKLY_REFERENCEABLE
     [itad updateBroadcastMenuState];
 }
 
-- (void)toggleBroadcastingInputToSession:(PTYSession *)session
-{
+- (void)toggleBroadcastingInputToSession:(PTYSession *)session {
     NSNumber *n = [NSNumber numberWithInt:[[session view] viewId]];
     switch ([self broadcastMode]) {
         case BROADCAST_TO_ALL_PANES:
@@ -7149,6 +7216,9 @@ ITERM_WEAKLY_REFERENCEABLE
 
 - (BOOL)rootTerminalViewWindowNumberLabelShouldBeVisible {
     if (@available(macOS 10.14, *)) { } else {
+        return NO;
+    }
+    if (self.lionFullScreen || togglingLionFullScreen_) {
         return NO;
     }
     if ([iTermPreferences intForKey:kPreferenceKeyTabPosition] == PSMTab_LeftTab) {
@@ -8018,9 +8088,38 @@ ITERM_WEAKLY_REFERENCEABLE
         return self.currentSession.canProduceMetalFramecap;
     } else if (item.action == @selector(exportRecording:)) {
         return !self.currentSession.screen.dvr.empty;
+    } else if (item.action == @selector(toggleSizeChangesAffectProfile:)) {
+        item.state = [iTermPreferences boolForKey:kPreferenceKeySizeChangesAffectProfile] ? NSOnState : NSOffState;
+        return YES;
     }
 
     return result;
+}
+
+- (IBAction)mergeAllWindows:(id)sender {
+    for (PseudoTerminal *term in [[[[iTermController sharedInstance] terminals] copy] autorelease]) {
+        if (term == self) {
+            continue;
+        }
+
+        while (term.tabs.count) {
+            [MovePaneController moveTab:term.tabs.firstObject toWindow:self atIndex:self.tabs.count];
+        }
+    }
+}
+
+- (IBAction)toggleSizeChangesAffectProfile:(id)sender {
+    [iTermAdjustFontSizeHelper toggleSizeChangesAffectProfile];
+}
+- (IBAction)biggerFont:(id)sender {
+    [iTermAdjustFontSizeHelper biggerFont:self.currentSession];
+}
+- (IBAction)smallerFont:(id)sender {
+    [iTermAdjustFontSizeHelper smallerFont:self.currentSession];
+}
+- (IBAction)returnToDefaultSize:(id)sender {
+    [iTermAdjustFontSizeHelper returnToDefaultSize:self.currentSession
+                                     resetRowsCols:[sender isAlternate]];
 }
 
 - (IBAction)toggleAutoCommandHistory:(id)sender
@@ -8674,6 +8773,7 @@ ITERM_WEAKLY_REFERENCEABLE
     if (preferredStyle == TAB_STYLE_MINIMAL) {
         [self.contentView setNeedsDisplay:YES];
     }
+    [self updateWindowShadow];
 }
 
 - (void)tab:(PTYTab *)tab didChangeToState:(PTYTabState)newState {
@@ -8713,6 +8813,12 @@ ITERM_WEAKLY_REFERENCEABLE
     [_touchBarRateLimitedUpdate performRateLimitedBlock:^{
         [self updateTouchBarWithWordAtCursor:word];
     }];
+}
+
+- (void)numberOfSessionsDidChangeInTab:(PTYTab *)tab {
+    if (tab == self.currentTab) {
+        [self updateUseTransparency];
+    }
 }
 
 #pragma mark - Toolbelt

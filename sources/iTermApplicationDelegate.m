@@ -86,6 +86,7 @@
 #import "NSBundle+iTerm.h"
 #import "NSData+GZIP.h"
 #import "NSFileManager+iTerm.h"
+#import "NSFont+iTerm.h"
 #import "NSObject+iTerm.h"
 #import "NSStringITerm.h"
 #import "NSUserDefaults+iTerm.h"
@@ -1450,7 +1451,7 @@ static BOOL hasBecomeActive = NO;
 
     if ([iTermPreferences boolForKey:kPreferenceKeyOpenBookmark]) {
         // Open bookmarks window at startup.
-        [self showBookmarkWindow:nil];
+        [[iTermProfilesWindowController sharedInstance] showWindow:nil];
     }
 
     if ([iTermPreferences boolForKey:kPreferenceKeyOpenArrangementAtStartup]) {
@@ -1865,39 +1866,9 @@ static BOOL hasBecomeActive = NO;
     [[[PreferencePanel sharedInstance] window] orderFrontRegardless];
 }
 
-- (IBAction)showBookmarkWindow:(id)sender
-{
+- (IBAction)showBookmarkWindow:(id)sender {
+    [NSApp activateIgnoringOtherApps:YES];
     [[iTermProfilesWindowController sharedInstance] showWindow:sender];
-}
-
-- (IBAction)biggerFont:(id)sender {
-    for (PTYSession *session in [self sessionsToAdjustFontSize]) {
-        [session changeFontSizeDirection:1];
-    }
-}
-
-- (IBAction)smallerFont:(id)sender {
-    for (PTYSession *session in [self sessionsToAdjustFontSize]) {
-        [session changeFontSizeDirection:-1];
-    }
-}
-
-- (IBAction)returnToDefaultSize:(id)sender {
-    PseudoTerminal *frontTerminal = [[iTermController sharedInstance] currentTerminal];
-    PTYSession *session = [frontTerminal currentSession];
-    if (![sender isAlternate]) {
-        for (PTYSession *session in [self sessionsToAdjustFontSize]) {
-            [session changeFontSizeDirection:0];
-        }
-    } else {
-        [session changeFontSizeDirection:0];
-    }
-    if ([sender isAlternate]) {
-        NSDictionary *abEntry = [session originalProfile];
-        [frontTerminal sessionInitiatedResize:session
-                                        width:[[abEntry objectForKey:KEY_COLUMNS] intValue]
-                                       height:[[abEntry objectForKey:KEY_ROWS] intValue]];
-    }
 }
 
 - (IBAction)pasteFaster:(id)sender
@@ -2194,7 +2165,7 @@ static BOOL hasBecomeActive = NO;
         case iTermMetalUnavailableReasonDisabled:
             return @"GPU Renderer is disabled in Preferences > General.";
         case iTermMetalUnavailableReasonLigatures:
-            return @"ligatures are enabled. You can disable them in Prefs>Profiles>Text>Use ligatures.";
+            return @"ligatures are enabled. You can disable them in Preferences > Profiles > Text > Use ligatures.";
         case iTermMetalUnavailableReasonInitializing:
             return @"the GPU renderer is initializing. It should be ready soon.";
         case iTermMetalUnavailableReasonInvalidSize:
@@ -2202,13 +2173,13 @@ static BOOL hasBecomeActive = NO;
         case iTermMetalUnavailableReasonSessionInitializing:
             return @"the session is initializing.";
         case iTermMetalUnavailableReasonTransparency:
-            return @"transparent windows not supported. You can change window transparency in Prefs>Profiles>Window>Transparency";
+            return @"transparent windows are not supported. They can be disabled in Preferences > Profiles > Window > Transparency.";
         case iTermMetalUnavailableReasonVerticalSpacing:
-            return @"the font's vertical spacing set to less than 100%. You can change it in Prefs>Profiles>Text>Change Font.";
+            return @"the font's vertical spacing set to less than 100%. You can change it in Preferences > Profiles > Text > Change Font.";
         case iTermMetalUnavailableReasonMarginSize:
-            return @"terminal window margins are too small. You can edit them in Prefs>Advanced.";
+            return @"terminal window margins are too small. You can edit them in Preferences > Advanced.";
         case iTermMetalUnavailableReasonAnnotations:
-            return @"annotations are open. Find the session with visible annotations and close them with View>Show Annotations.";
+            return @"annotations are open. Find the session with visible annotations and close them with View > Show Annotations.";
         case iTermMetalUnavailableReasonFindPanel:
             return @"the find panel is open.";
         case iTermMetalUnavailableReasonPasteIndicator:
@@ -2220,9 +2191,10 @@ static BOOL hasBecomeActive = NO;
         case iTermMetalUnavailableReasonWindowResizing:
             return @"the window is being resized.";
         case iTermMetalUnavailableReasonDisconnectedFromPower:
-            return @"the computer is not connected to power. You can enable GPU rendering while disconnected from power in Prefs>General>Advanced GPU Settings.";
+            return @"the computer is not connected to power. You can enable GPU rendering while disconnected from "
+                   @"power in Preferences > General > Advanced GPU Settings.";
         case iTermMetalUnavailableReasonIdle:
-            return @"the session is idle. You can enable Metal while idle in Prefs>Advanced.";
+            return @"the session is idle. You can enable Metal while idle in Preferences > Advanced.";
         case iTermMetalUnavailableReasonTooManyPanesReason:
             return @"This tab has too many split panes";
         case iTermMetalUnavailableReasonNoFocus:
@@ -2317,20 +2289,6 @@ static BOOL hasBecomeActive = NO;
     for (NSView *subview in [aView subviews]) {
         [self hideToolTipsInView:subview];
     }
-}
-
-- (NSArray<PTYSession *> *)sessionsToAdjustFontSize {
-    PTYSession *session = [[[iTermController sharedInstance] currentTerminal] currentSession];
-    if (!session) {
-        return nil;
-    }
-    if ([iTermAdvancedSettingsModel fontChangeAffectsBroadcastingSessions]) {
-        NSArray<PTYSession *> *broadcastSessions = [[[iTermController sharedInstance] currentTerminal] broadcastSessions];
-        if ([broadcastSessions containsObject:session]) {
-            return broadcastSessions;
-        }
-    }
-    return @[ session ];
 }
 
 - (void)changePasteSpeedBy:(double)factor

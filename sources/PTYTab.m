@@ -490,6 +490,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     if (self.isBroadcasting) {
         [[NSNotificationCenter defaultCenter] postNotificationName:iTermBroadcastDomainsDidChangeNotification object:nil];
     }
+    [_delegate numberOfSessionsDidChangeInTab:self];
 }
 
 + (void)_recursiveSetDelegateIn:(NSSplitView *)node to:(id)delegate {
@@ -522,8 +523,10 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 }
 
 - (void)_refreshLabels:(id)sender {
-    [tabViewItem_ setLabel:[[self activeSession] name]];
-    [parentWindow_ setWindowTitle];
+    if ([self activeSession]) {
+        [tabViewItem_ setLabel:[[self activeSession] name]];
+        [parentWindow_ setWindowTitle];
+    }
 }
 
 - (void)setBell:(BOOL)flag {

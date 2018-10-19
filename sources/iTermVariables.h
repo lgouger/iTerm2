@@ -50,7 +50,7 @@ extern NSString *const iTermVariableKeySessionChildPid;  // NSNumber. Process id
 extern NSString *const iTermVariableKeySessionTmuxStatusLeft;  // String. Only set when in tmux integration mode.
 extern NSString *const iTermVariableKeySessionTmuxStatusRight;  // String. Only set when in tmux integration mode.
 extern NSString *const iTermVariableKeySessionMouseReportingMode;  // NSNumber (MouseMode)
-
+extern NSString *const iTermVariableKeySessionBadge;  // NSString. Evaluated badge swifty string.
 extern NSString *const iTermVariableKeyWindowTitleOverride;
 extern NSString *const iTermVariableKeyWindowCurrentTab;
 
@@ -119,6 +119,7 @@ typedef NS_OPTIONS(NSUInteger, iTermVariablesSuggestionContext) {
 - (void)setValue:(nullable id)value forKey:(NSString *)key NS_UNAVAILABLE;
 - (void)setValuesForKeysWithDictionary:(NSDictionary<NSString *, id> *)keyedValues NS_UNAVAILABLE;
 - (void)addLinksToReference:(iTermVariableReference *)reference;
+- (BOOL)variableNamed:(NSString *)name isReferencedBy:(iTermVariableReference *)reference;
 
 @end
 

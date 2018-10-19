@@ -122,6 +122,7 @@ extern NSString *const kPreferenceKeyRightCommandRemapping;
 extern NSString *const kPreferenceKeySwitchPaneModifier;
 extern NSString *const kPreferenceKeySwitchTabModifier;
 extern NSString *const kPreferenceKeySwitchWindowModifier;
+extern NSString *const kPreferenceKeyEmulateUSKeyboard;  // See issue 6994
 
 extern NSString *const kPreferenceKeyHotkeyEnabled;
 extern NSString *const kPreferenceKeyHotKeyCode;
@@ -167,6 +168,7 @@ extern NSString *const kPreferenceKeyPasteWarningNumberOfSpacesPerTab;
 
 extern NSString *const kPreferenceKeyShowFullscreenTabBar;
 extern NSString *const kPreferenceKeyDefaultToolbeltWidth;
+extern NSString *const kPreferenceKeySizeChangesAffectProfile;
 
 // Set to YES on the first launch of a version that supports multiple hotkey windows.
 extern NSString *const kPreferenceKeyHotkeyMigratedFromSingleToMulti;

@@ -2015,7 +2015,7 @@ ITERM_WEAKLY_REFERENCEABLE
     if (!_profile[KEY_SET_LOCALE_VARS] ||
         [_profile[KEY_SET_LOCALE_VARS] boolValue]) {
         DLog(@"Setting locale vars...");
-        NSString *lang = [self _lang];
+        NSString *lang = [self valueForLanguageEnvironmentVariable];
         if (lang) {
             DLog(@"set LANG=%@", lang);
             env[@"LANG"] = lang;
@@ -3872,11 +3872,25 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (void)updateBadgeLabel {
+    NSMutableArray *badRefs = [NSMutableArray array];
+    for (iTermVariableReference *ref in _badgeSwiftyString.refs) {
+        if ([self.variablesScope variableNamed:iTermVariableKeySessionBadge isReferencedBy:ref]) {
+            [badRefs addObject:ref];
+        }
+    }
+    if (badRefs.count) {
+        for (iTermVariableReference *ref in badRefs) {
+            [ref removeAllLinks];
+        }
+        [self setSessionSpecificProfileValues:@{ KEY_BADGE_FORMAT: @"[CYCLE DETECTED]" }];
+        return;
+    }
     [self updateBadgeLabel:[self badgeLabel]];
 }
 
 - (void)updateBadgeLabel:(NSString *)newValue {
     _textview.badgeLabel = newValue;
+    [self.variablesScope setValue:newValue forVariableNamed:iTermVariableKeySessionBadge];
 }
 
 - (NSString *)badgeLabel {
@@ -4555,16 +4569,8 @@ ITERM_WEAKLY_REFERENCEABLE
     return [_screen width];
 }
 
-- (NSFont*)fontWithRelativeSize:(int)dir from:(NSFont*)font
-{
-    int newSize = [font pointSize] + dir;
-    if (newSize < 2) {
-        newSize = 2;
-    }
-    if (newSize > 200) {
-        newSize = 200;
-    }
-    return [NSFont fontWithName:[font fontName] size:newSize];
+- (NSFont *)fontWithRelativeSize:(int)dir from:(NSFont*)font {
+    return [font it_fontByAddingToPointSize:dir];
 }
 
 - (void)setFont:(NSFont*)font
@@ -5269,6 +5275,9 @@ ITERM_WEAKLY_REFERENCEABLE
     DLog(@"showMetalAndStopDrawingTextView");
     _wrapper.useMetal = YES;
     _textview.suppressDrawing = YES;
+    if (@available(macOS 10.14, *)) {
+        _view.scrollview.alphaValue = 0;
+    }
     _view.metalView.alphaValue = 1;
 }
 
@@ -5276,6 +5285,9 @@ ITERM_WEAKLY_REFERENCEABLE
     [_view setUseMetal:useMetal dataSource:dataSource];
     if (!useMetal) {
         _textview.suppressDrawing = NO;
+        if (@available(macOS 10.14, *)) {
+            _view.scrollview.alphaValue = 1;
+        }
     }
 }
 
@@ -7484,7 +7496,7 @@ ITERM_WEAKLY_REFERENCEABLE
     iTermVariableScope *scope = [[iTermVariableScope alloc] init];
     [scope addVariables:self.variables toScopeNamed:nil];
     [scope addVariables:[iTermVariables globalInstance] toScopeNamed:iTermVariableKeyGlobalScopeName];
-    return scope;
+    return [scope autorelease];
 }
 
 - (BOOL)textViewSuppressingAllOutput {
@@ -7800,42 +7812,60 @@ ITERM_WEAKLY_REFERENCEABLE
     [file download];
 }
 
-- (NSString*)_getLocale
-{
-    NSString* theLocale = nil;
-    NSString* languageCode = [[NSLocale currentLocale] objectForKey:NSLocaleLanguageCode];
-    NSString* countryCode = [[NSLocale currentLocale] objectForKey:NSLocaleCountryCode];
-    DLog(@"getLocale: languageCode=%@, countryCode=%@", languageCode, countryCode);
+- (NSString *)localeForLanguage:(NSString *)languageCode
+                        country:(NSString *)countryCode {
+    DLog(@"localeForLanguage:country: languageCode=%@, countryCode=%@", languageCode, countryCode);
     if (languageCode && countryCode) {
-        theLocale = [NSString stringWithFormat:@"%@_%@", languageCode, countryCode];
-        DLog(@"Return combined language/country locale %@", theLocale);
+        return [NSString stringWithFormat:@"%@_%@", languageCode, countryCode];
+    } else if (languageCode) {
+        return languageCode;
     } else {
-        NSString *localeId = [[NSLocale currentLocale] localeIdentifier];
-        DLog(@"Return local identifier of %@", localeId);
-        return localeId;
+        return [[NSLocale currentLocale] localeIdentifier];
     }
-    return theLocale;
 }
 
-- (NSString*)_lang
-{
-    NSString* theLocale = [self _getLocale];
-    NSString* encoding = [self encodingName];
-    DLog(@"locale=%@, encoding=%@", theLocale, encoding);
-    if (encoding && theLocale) {
-        NSString* result = [NSString stringWithFormat:@"%@.%@", theLocale, encoding];
-        DLog(@"Tentative locale is %@", result);
-        if ([self _localeIsSupported:result]) {
-            DLog(@"Locale is supported");
-            return result;
+- (NSString *)valueForLanguageEnvironmentVariable {
+    DLog(@"Looking for a locale...");
+    NSArray<NSString *> *languageCodes = [[NSLocale preferredLanguages] mapWithBlock:^id(NSString *language) {
+        DLog(@"Found preferred language: %@", language);
+        NSUInteger index = [language rangeOfString:@"-" options:0].location;
+        if (index == NSNotFound) {
+            return language;
         } else {
-            DLog(@"Locale is NOT supported");
-            return nil;
+            return [language substringToIndex:index];
         }
-    } else {
-        DLog(@"No locale or encoding, returning nil language");
-        return nil;
+    }];
+    DLog(@"Preferred languages are: %@", languageCodes);
+
+    NSString *const countryCode = [[NSLocale currentLocale] objectForKey:NSLocaleCountryCode];
+    NSArray<NSString *> *languagePlusCountryCodes = @[];
+    if (countryCode) {
+        languagePlusCountryCodes = [languageCodes mapWithBlock:^id(NSString *language) {
+            return [self localeForLanguage:language country:countryCode];
+        }];
     }
+    DLog(@"Country code is %@. Combos are %@", countryCode, languagePlusCountryCodes);
+
+    NSString *encoding = [self encodingName];
+    NSArray<NSString *> *languageCountryEncoding = @[];
+    if (encoding) {
+        languageCountryEncoding = [languagePlusCountryCodes mapWithBlock:^id(NSString *languageCountry) {
+            return [NSString stringWithFormat:@"%@.%@", languageCountry, encoding];
+        }];
+    }
+    DLog(@"Encoding is %@. Combos are %@", encoding, languageCountryEncoding);
+
+    NSArray<NSString *> *candidates = [@[ languageCountryEncoding, languagePlusCountryCodes, languageCodes ] flattenedArray];
+    DLog(@"Candidates are: %@", candidates);
+    for (NSString *candidate in candidates) {
+        DLog(@"Check if %@ is supported", candidate);
+        if ([self _localeIsSupported:candidate]) {
+            DLog(@"YES. Using %@", candidate);
+            return candidate;
+        }
+        DLog(@"No");
+    }
+    return nil;
 }
 
 - (void)setDvrFrame {
@@ -9977,6 +10007,9 @@ ITERM_WEAKLY_REFERENCEABLE
     assert(_useMetal);
     _wrapper.useMetal = NO;
     _textview.suppressDrawing = NO;
+    if (@available(macOS 10.14, *)) {
+        _view.scrollview.alphaValue = 1;
+    }
     _view.metalView.alphaValue = 0;
     id token = @(_nextMetalDisabledToken++);
     [_metalDisabledTokens addObject:token];
@@ -10099,6 +10132,7 @@ ITERM_WEAKLY_REFERENCEABLE
     if ([Coprocess shouldIgnoreErrorsFromCommand:coprocess.command]) {
         return;
     }
+    NSString *command = [[coprocess.command copy] autorelease];
     iTermAnnouncementViewController *announcement =
     [iTermAnnouncementViewController announcementWithTitle:[NSString stringWithFormat:@"Coprocess “%@” terminated with output on stderr.", coprocess.command]
                                                      style:kiTermAnnouncementViewStyleWarning
@@ -10109,7 +10143,7 @@ ITERM_WEAKLY_REFERENCEABLE
                                                         [errors writeToFile:filename atomically:NO encoding:NSUTF8StringEncoding error:nil];
                                                         [[NSWorkspace sharedWorkspace] openFile:filename];
                                                     } else if (selection == 1) {
-                                                        [Coprocess setSilentlyIgnoreErrors:YES fromCommand:coprocess.command];
+                                                        [Coprocess setSilentlyIgnoreErrors:YES fromCommand:command];
                                                     }
                                                 }];
     [self queueAnnouncement:announcement identifier:[[NSUUID UUID] UUIDString]];
@@ -10363,6 +10397,7 @@ ITERM_WEAKLY_REFERENCEABLE
         case ITMNotificationType_NotifyOnFocusChange:
         case ITMNotificationType_NotifyOnServerOriginatedRpc:
         case ITMNotificationType_NotifyOnBroadcastChange:
+        case ITMNotificationType_NotifyOnProfileChange:
             // We won't get called for this
             assert(NO);
             break;

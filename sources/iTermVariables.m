@@ -58,6 +58,7 @@ NSString *const iTermVariableKeySessionChildPid = @"session.pid";
 NSString *const iTermVariableKeySessionTmuxStatusLeft = @"session.tmuxStatusLeft";
 NSString *const iTermVariableKeySessionTmuxStatusRight = @"session.tmuxStatusRight";
 NSString *const iTermVariableKeySessionMouseReportingMode = @"session.mouseReportingMode";
+NSString *const iTermVariableKeySessionBadge = @"session.badge";
 
 NSString *const iTermVariableKeyWindowTitleOverride = @"titleOverride";
 NSString *const iTermVariableKeyWindowCurrentTab = @"currentTab";
@@ -112,6 +113,7 @@ NSString *const iTermVariableKeyWindowCurrentTab = @"currentTab";
                                     iTermVariableKeySessionJobPid,
                                     iTermVariableKeySessionChildPid,
                                     iTermVariableKeySessionMouseReportingMode,
+                                    iTermVariableKeySessionBadge,
                                     iTermVariableKeySessionTmuxStatusLeft,
                                     iTermVariableKeySessionTmuxStatusRight ];
     [names enumerateObjectsUsingBlock:^(NSString * _Nonnull obj, NSUInteger idx, BOOL * _Nonnull stop) {
@@ -320,6 +322,20 @@ NSString *const iTermVariableKeyWindowCurrentTab = @"currentTab";
     } else {
         [self addWeakReferenceToLinkTable:_unresolvedLinks toObject:reference forKey:parts.firstObject];
     }
+}
+
+- (BOOL)hasLinkToReference:(iTermVariableReference *)reference
+                      path:(NSString *)path {
+    NSArray<NSString *> *parts = [path componentsSeparatedByString:@"."];
+    id value = _values[parts.firstObject];
+    if (!value) {
+        return NO;
+    }
+    iTermVariables *sub = [iTermVariables castFrom:value];
+    if (sub && parts.count > 1) {
+        return [sub hasLinkToReference:reference path:[[parts subarrayFromIndex:1] componentsJoinedByString:@"."]];
+    }
+    return [_resolvedLinks[path].allObjects containsObject:reference];
 }
 
 - (void)removeLinkToReference:(iTermVariableReference *)reference
@@ -655,6 +671,15 @@ NSString *const iTermVariableKeyWindowCurrentTab = @"currentTab";
     }].secondObject;
     *stripped = strippedOut;
     return owner;
+}
+
+- (BOOL)variableNamed:(NSString *)name isReferencedBy:(iTermVariableReference *)reference {
+    NSString *tail;
+    iTermVariables *variables = [self ownerForKey:name stripped:&tail];
+    if (!variables) {
+        return NO;
+    }
+    return [variables hasLinkToReference:reference path:tail];
 }
 
 - (BOOL)setValuesFromDictionary:(NSDictionary<NSString *, id> *)dict {

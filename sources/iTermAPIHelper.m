@@ -183,6 +183,7 @@ static id sAPIHelperInstance;
     NSMutableDictionary<id, ITMNotificationRequest *> *_layoutChangeSubscriptions;
     NSMutableDictionary<id, ITMNotificationRequest *> *_focusChangeSubscriptions;
     NSMutableDictionary<id, ITMNotificationRequest *> *_broadcastDomainChangeSubscriptions;
+    NSMutableDictionary<id, ITMNotificationRequest *> *_profileChangeSubscriptions;
     NSMutableDictionary<id, NSMutableArray<iTermTuple<ITMNotificationRequest *, iTermVariableReference *> *> *> *_appVariableSubscriptions;
     NSMutableDictionary<id, NSMutableArray<iTermTuple<ITMNotificationRequest *, iTermVariableReference *> *> *> *_tabVariableSubscriptions;
     NSMutableDictionary<id, NSMutableArray<iTermTuple<ITMNotificationRequest *, iTermVariableReference *> *> *> *_windowVariableSubscriptions;
@@ -291,6 +292,10 @@ static id sAPIHelperInstance;
         [[NSNotificationCenter defaultCenter] addObserver:self
                                                  selector:@selector(broadcastDomainsDidChange:)
                                                      name:iTermBroadcastDomainsDidChangeNotification
+                                                   object:nil];
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(profileDidChange:)
+                                                     name:kReloadAddressBookNotification
                                                    object:nil];
     }
     return self;
@@ -430,6 +435,21 @@ static id sAPIHelperInstance;
 
 - (void)broadcastDomainsDidChange:(NSNotification *)notification {
     [self handleBroadcastChange];
+}
+
+- (void)profileDidChange:(NSNotification *)notification {
+    NSArray<BookmarkJournalEntry *> *entries = notification.userInfo[@"array"];
+    NSSet<NSString *> *guids = [NSSet setWithArray:[entries mapWithBlock:^id(BookmarkJournalEntry *entry) {
+        return entry->guid;
+    }]];
+    for (NSString *guid in guids) {
+        [_profileChangeSubscriptions enumerateKeysAndObjectsUsingBlock:^(id  _Nonnull key, ITMNotificationRequest * _Nonnull request, BOOL * _Nonnull stop) {
+            ITMNotification *notification = [[ITMNotification alloc] init];
+            notification.profileChangedNotification = [[ITMProfileChangedNotification alloc] init];
+            notification.profileChangedNotification.guid = guid;
+            [self postAPINotification:notification toConnectionKey:key];
+        }];
+    }
 }
 
 - (void)handleFocusChange:(ITMFocusChangedNotification *)notif {
@@ -921,10 +941,12 @@ static id sAPIHelperInstance;
         _tabVariableSubscriptions = [[NSMutableDictionary alloc] init];
         _windowVariableSubscriptions = [[NSMutableDictionary alloc] init];
         _sessionVariableSubscriptions = [[NSMutableDictionary alloc] init];
+        _profileChangeSubscriptions = [[NSMutableDictionary alloc] init];
     }
 }
 
 - (NSMutableDictionary<id, NSMutableArray<iTermTuple<ITMNotificationRequest *, iTermVariableReference *> *> *> *)subscriptionsForVariableChangeScope:(ITMVariableScope)scope {
+    [self createSubscriptionDictionariesIfNeeded];
     switch (scope) {
         case ITMVariableScope_App:
             return _appVariableSubscriptions;
@@ -1040,6 +1062,8 @@ static id sAPIHelperInstance;
         subscriptions = _focusChangeSubscriptions;
     } else if (request.notificationType == ITMNotificationType_NotifyOnBroadcastChange) {
         subscriptions = _broadcastDomainChangeSubscriptions;
+    } else if (request.notificationType == ITMNotificationType_NotifyOnProfileChange) {
+        subscriptions = _profileChangeSubscriptions;
     } else if (request.notificationType == ITMNotificationType_NotifyOnServerOriginatedRpc) {
         if (!request.rpcRegistrationRequest.it_valid) {
             XLog(@"RPC signature not valid: %@", request.rpcRegistrationRequest);
@@ -1205,6 +1229,7 @@ static id sAPIHelperInstance;
     NSMutableDictionary *empty = [NSMutableDictionary dictionary];
     NSArray<NSMutableDictionary<id, ITMNotificationRequest *> *> *dicts =
     @[ _newSessionSubscriptions ?: empty,
+       _profileChangeSubscriptions ?: empty,
        _terminateSessionSubscriptions  ?: empty,
        _layoutChangeSubscriptions ?: empty,
        _focusChangeSubscriptions ?: empty,
@@ -2880,6 +2905,60 @@ static BOOL iTermCheckSplitTreesIsomorphic(ITMSplitTreeNode *node1, ITMSplitTree
     response.status = ITMStatusBarComponentResponse_Status_Ok;
     completion(response);
     return;
+}
+
+- (void)apiServerSetBroadcastDomainsRequest:(ITMSetBroadcastDomainsRequest *)request handler:(void (^)(ITMSetBroadcastDomainsResponse *))completion {
+    ITMSetBroadcastDomainsResponse *response = [self handleSetBroadcastDomains:request];
+    completion(response);
+}
+
+- (ITMSetBroadcastDomainsResponse *)handleSetBroadcastDomains:(ITMSetBroadcastDomainsRequest *)request {
+    ITMSetBroadcastDomainsResponse *response = [[ITMSetBroadcastDomainsResponse alloc] init];
+
+    // Check validity
+    NSMutableSet<NSString *> *sessionIDs = [NSMutableSet set];
+    NSMutableArray<NSArray<PTYSession *> *> *sessionGroups = [NSMutableArray array];
+    NSMutableArray *windowControllers = [NSMutableArray array];
+    for (ITMBroadcastDomain *domain in request.broadcastDomainsArray) {
+        NSMutableArray<PTYSession *> *sessions = [NSMutableArray array];
+        id<iTermWindowController> windowController = nil;
+        for (NSString *sessionID in domain.sessionIdsArray) {
+            if ([sessionIDs containsObject:sessionID]) {
+                response.status = ITMSetBroadcastDomainsResponse_Status_BroadcastDomainsNotDisjoint;
+                return response;
+            }
+            PTYSession *session = [self sessionForAPIIdentifier:sessionID includeBuriedSessions:YES];
+            if (!session) {
+                response.status = ITMSetBroadcastDomainsResponse_Status_SessionNotFound;
+                return response;
+            }
+            id<iTermWindowController> thisWindowController = [session.delegate realParentWindow];
+            if (!windowController) {
+                windowController = thisWindowController;
+            } else if (windowController != thisWindowController) {
+                response.status = ITMSetBroadcastDomainsResponse_Status_SessionsNotInSameWindow;
+                return response;
+            }
+            [sessions addObject:session];
+        }
+        if (sessions.count) {
+            [sessionGroups addObject:sessions];
+            [windowControllers addObject:sessions.firstObject.delegate.realParentWindow];
+        }
+    }
+
+    for (PseudoTerminal *term in [[iTermController sharedInstance] terminals]) {
+        if (![windowControllers containsObject:term]) {
+            [term setBroadcastingSessions:@[]];
+            continue;
+        }
+        for (NSArray<PTYSession *> *sessions in sessionGroups) {
+            PseudoTerminal *windowController = [PseudoTerminal castFrom:[sessions.firstObject.delegate realParentWindow]];
+            [windowController setBroadcastingSessions:sessions];
+        }
+    }
+    response.status = ITMSetBroadcastDomainsResponse_Status_Ok;
+    return response;
 }
 
 @end

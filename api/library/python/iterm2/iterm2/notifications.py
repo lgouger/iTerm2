@@ -50,8 +50,26 @@ async def async_unsubscribe(connection, token):
         _get_handlers()[key] = coros
     else:
         del _get_handlers()[key]
-        session, notification_type = key
-        await _async_subscribe(connection, False, notification_type, None, session=session)
+        if len(key) == 2:
+            session, notification_type = key
+            await _async_subscribe(connection, False, notification_type, None, session=session)
+        else:
+            if key[-1] == iterm2.api_pb2.NOTIFY_ON_VARIABLE_CHANGE:
+                scope, identifier, name, notification_type = key
+                request = iterm2.api_pb2.VariableMonitorRequest()
+                request.name = name
+                request.scope = scope
+                request.identifier = identifier
+                await _async_subscribe(
+                        connection,
+                        False,
+                        notification_type,
+                        None,
+                        key=key,
+                        variable_monitor_request=request)
+            else:
+                # The key is custom and there should be code to handle unsubscribing as an elif clause here.
+                assert False
 
 async def async_subscribe_to_new_session_notification(connection, callback):
     """
@@ -304,7 +322,7 @@ async def async_subscribe_to_variable_change_notification(connection, callback, 
         request.identifier = identifier
     else:
         request.identifier = ""
-    key = (scope, request.identifier, name, iterm2.api_pb2.NOTIFY_ON_VARIABLE_CHANGE)
+    key = (request.scope, request.identifier, request.name, iterm2.api_pb2.NOTIFY_ON_VARIABLE_CHANGE)
     return await _async_subscribe(
         connection,
         True,
@@ -313,6 +331,27 @@ async def async_subscribe_to_variable_change_notification(connection, callback, 
         session=None,
         variable_monitor_request=request,
         key=key)
+
+async def async_subscribe_to_profile_change_notification(connection, callback, guid):
+    """
+    Register a callback to be invoked when a profile changes.
+
+    :param connection: A connected :class:`Connection`.
+    :param callback: A coroutine taking two arguments: a :class:`Connection` and iterm2.api_pb2.ProfileChangedNotification.
+    :parm guid: The guid to monitor. A string.
+    """
+    request = iterm2.api_pb2.ProfileChangeRequest()
+    request.guid = guid
+    key = (guid, iterm2.api_PB2.NOTIFY_ON_PROFILE_CHANGE)
+    return await _async_subscribe(
+        connection,
+        True,
+        iterm2.api_PB2.NOTIFY_ON_PROFILE_CHANGE,
+        callback,
+        session=None,
+        profile_change_request=request,
+        key=key)
+
 
 
 ## Private --------------------------------------------------------------------
@@ -324,7 +363,7 @@ def _string_rpc_registration_request(rpc):
     args = sorted(map(lambda x: x.name, rpc.arguments))
     return rpc.name + "(" + ",".join(args) + ")"
 
-async def _async_subscribe(connection, subscribe, notification_type, callback, session=None, rpc_registration_request=None, keystroke_monitor_request=None, variable_monitor_request=None, key=None):
+async def _async_subscribe(connection, subscribe, notification_type, callback, session=None, rpc_registration_request=None, keystroke_monitor_request=None, variable_monitor_request=None, key=None, profile_change_request=None):
     _register_helper_if_needed()
     transformed_session = session if session is not None else "all"
     response = await iterm2.rpc.async_notification_request(
@@ -334,7 +373,8 @@ async def _async_subscribe(connection, subscribe, notification_type, callback, s
         transformed_session,
         rpc_registration_request,
         keystroke_monitor_request,
-        variable_monitor_request)
+        variable_monitor_request,
+        profile_change_request)
     status = response.notification_response.status
     status_ok = (status == iterm2.api_pb2.NotificationResponse.Status.Value("OK"))
 
@@ -343,9 +383,10 @@ async def _async_subscribe(connection, subscribe, notification_type, callback, s
         if status_ok or already:
             if key:
                 _register_notification_handler_impl(key, callback)
+                return (key, callback)
             else:
                 _register_notification_handler(session, _string_rpc_registration_request(rpc_registration_request), notification_type, callback)
-            return ((session, notification_type), callback)
+                return ((session, notification_type), callback)
     else:
         # Unsubscribe
         if status_ok:
@@ -416,6 +457,9 @@ def _get_handler_key_from_notification(notification):
                notification.variable_changed_notification.name,
                iterm2.api_pb2.NOTIFY_ON_VARIABLE_CHANGE)
         notification = notification.variable_changed_notification
+    elif notification.HasField('profile_changed_notification'):
+        key = (notification.profile_changed_notification.guid,
+                iterm2.api_pb2.NOTIFY_ON_PROFILE_CHANGE)
     return key, notification
 
 def _get_notification_handlers(message):

@@ -54,9 +54,14 @@ async def split_pane(connection, args):
 async def get_buffer(connection, args):
   a = await iterm2.async_get_app(connection)
   s = a.get_session_by_id(args.session)
-  result = await s.async_get_buffer_lines(args.trailing_lines)
-  for contents in result.contents:
-    print(contents.text)
+  h, y, o, _f = await s.async_get_line_info()
+  start = iterm2.Point(0, y + o)
+  end = iterm2.Point(0, y + o + h)
+  coordRange = iterm2.CoordRange(start, end)
+  windowedRange = iterm2.WindowedCoordRange(coordRange)
+  result = await s.async_get_screen_contents(windowedRange)
+  for i in range(result.number_of_lines):
+    print(result.line(i).string)
 
 async def get_prompt(connection, args):
   a = await iterm2.async_get_app(connection)
@@ -470,6 +475,26 @@ async def set_color_preset(connection, args):
       profile = await partial.async_get_full_profile()
       await profile.async_set_color_preset(preset)
 
+async def monitor_variable(connection, args):
+  if args.session:
+    scope = iterm2.VariableScopes.SESSION
+    identifier = args.session
+  elif args.tab:
+    scope = iterm2.VariableScopes.TAB
+    identifier = args.tab
+  elif args.window:
+    scope = iterm2.VariableScopes.WINDOW
+    identifier = args.window
+  elif args.app:
+    scope = iterm2.VariableScopes.APP
+    identifier = ''
+  else:
+    assert False
+  async with iterm2.VariableMonitor(connection, scope, args.name, identifier) as monitor:
+    value = await monitor.async_get()
+    print(f"New value: {value}")
+
+
 def make_parser():
   parser = argparse.ArgumentParser(description='iTerm2 CLI')
   subparsers = parser.add_subparsers(help='Commands')
@@ -501,7 +526,6 @@ def make_parser():
 
   get_buffer_parser = subparsers.add_parser("get-buffer", help="Get screen contents")
   get_buffer_parser.add_argument("session", type=str, help="Session ID")
-  get_buffer_parser.add_argument("trailing_lines", type=int, help="Number of lines from the end of the buffer to fetch")
   get_buffer_parser.set_defaults(func=get_buffer)
 
   get_prompt_parser = subparsers.add_parser("get-prompt", help="Get info about prompt, if available. Gives either the current prompt or the last prompt if a command is being run. Requires shell integration for prompt detection.")
@@ -614,6 +638,14 @@ def make_parser():
   set_color_preset_parser.add_argument("profile", type=str, help="Profile name")
   set_color_preset_parser.add_argument("preset", type=str, help="Color preset name")
   set_color_preset_parser.set_defaults(func=set_color_preset)
+
+  monitor_variable_parser = subparsers.add_parser("monitor-variable", help="Monitor changes to a variable")
+  monitor_variable_parser.add_argument("name", type=str, help="variable name")
+  monitor_variable_parser.add_argument('--session', type=str, nargs='?', help='Session ID for the variable scope')
+  monitor_variable_parser.add_argument('--tab', type=str, nargs='?', help='Tab ID for the variable scope')
+  monitor_variable_parser.add_argument('--window', type=str, nargs='?', help='Window ID for the variable scope')
+  monitor_variable_parser.add_argument('--app', action='store_true', help='App scope', default=False)
+  monitor_variable_parser.set_defaults(func=monitor_variable)
 
   return parser
 
