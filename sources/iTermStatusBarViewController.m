@@ -217,8 +217,12 @@ const CGFloat iTermStatusBarHeight = 21;
 
     // Find views that can grow
     NSArray<iTermStatusBarContainerView *> *views = [_visibleContainerViews filteredArrayUsingBlock:^BOOL(iTermStatusBarContainerView *view) {
+        double preferredWidth = view.component.statusBarComponentPreferredWidth;
+        if (view.component.statusBarComponentIcon) {
+            preferredWidth += iTermStatusBarViewControllerIconWidth;
+        }
         return ([view.component statusBarComponentCanStretch] &&
-                floor(view.component.statusBarComponentPreferredWidth) > floor(view.desiredWidth));
+                floor(preferredWidth) > floor(view.desiredWidth));
     }];
 
 
@@ -256,7 +260,11 @@ const CGFloat iTermStatusBarHeight = 21;
         const NSInteger numberBefore = views.count;
         // Remove satisifed views.
         views = [views filteredArrayUsingBlock:^BOOL(iTermStatusBarContainerView *view) {
-            const BOOL unsatisfied = floor(view.component.statusBarComponentPreferredWidth) > ceil(view.desiredWidth);
+            double preferredWidth = view.component.statusBarComponentPreferredWidth;
+            if (view.component.statusBarComponentIcon) {
+                preferredWidth += iTermStatusBarViewControllerIconWidth;
+            }
+            const BOOL unsatisfied = floor(preferredWidth) > ceil(view.desiredWidth);
             if (unsatisfied) {
                 DLog(@"%@ unsatisfied prefers=%@ allocated=%@", view.component.class, @(view.component.statusBarComponentPreferredWidth), @(view.desiredWidth));
             }
@@ -285,7 +293,11 @@ const CGFloat iTermStatusBarHeight = 21;
         return @[];
     }
 
-    NSMutableArray<iTermStatusBarContainerView *> *prioritized = [_containerViews sortedArrayUsingComparator:^NSComparisonResult(iTermStatusBarContainerView * _Nonnull obj1, iTermStatusBarContainerView * _Nonnull obj2) {
+    NSArray<iTermStatusBarContainerView *> *eligibleContainerViews = [_containerViews filteredArrayUsingBlock:
+                                                                      ^BOOL(iTermStatusBarContainerView *view) {
+                                                                          return !view.componentHidden;
+                                                                      }];
+    NSMutableArray<iTermStatusBarContainerView *> *prioritized = [eligibleContainerViews sortedArrayUsingComparator:^NSComparisonResult(iTermStatusBarContainerView * _Nonnull obj1, iTermStatusBarContainerView * _Nonnull obj2) {
         NSComparisonResult result = [@(obj2.component.statusBarComponentPriority) compare:@(obj1.component.statusBarComponentPriority)];
         if (result != NSOrderedSame) {
             return result;
@@ -349,10 +361,13 @@ const CGFloat iTermStatusBarHeight = 21;
         } else {
             view = [[iTermStatusBarContainerView alloc] initWithComponent:component];
         }
-        component.delegate = self;
         [updatedContainerViews addObject:view];
     }
     _containerViews = updatedContainerViews;
+    // setDelegate: may have side effects that expect _containerViews to be populated.
+    for (id<iTermStatusBarComponent> component in components) {
+        component.delegate = self;
+    }
     [self updateColors];
     [self.view setNeedsLayout:YES];
 }
@@ -400,6 +415,12 @@ const CGFloat iTermStatusBarHeight = 21;
 
 - (NSColor *)statusBarComponentDefaultTextColor {
     return [self.delegate statusBarDefaultTextColor];
+}
+
+- (void)statusBarComponent:(id<iTermStatusBarComponent>)component setHidden:(BOOL)hidden {
+    iTermStatusBarContainerView *view = [self containerViewForComponent:component];
+    view.componentHidden = hidden;
+    [self.view setNeedsLayout:YES];
 }
 
 @end

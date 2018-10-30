@@ -61,6 +61,7 @@ static const CGFloat kMaximumToolbeltSizeAsFractionOfWindow = 0.5;
     NSNumber *_windowNumber;
     NSTextField *_windowNumberLabel;
     NSTextField *_windowTitleLabel;
+    NSVisualEffectView *_tabBarBacking NS_AVAILABLE_MAC(10_14);
 }
 
 - (instancetype)initWithFrame:(NSRect)frameRect
@@ -92,6 +93,15 @@ static const CGFloat kMaximumToolbeltSizeAsFractionOfWindow = 0.5;
         // Create the tab bar.
         NSRect tabBarFrame = self.bounds;
         tabBarFrame.size.height = _tabBarControl.height;
+
+        if (@available(macOS 10.14, *)) {
+            _tabBarBacking = [[NSVisualEffectView alloc] init];
+            _tabBarBacking.autoresizesSubviews = YES;
+            _tabBarBacking.blendingMode = NSVisualEffectBlendingModeWithinWindow;
+            _tabBarBacking.material = NSVisualEffectMaterialTitlebar;
+            _tabBarBacking.state = NSVisualEffectStateActive;
+        }
+
         self.tabBarControl = [[iTermTabBarControlView alloc] initWithFrame:tabBarFrame];
         self.tabBarControl.height = [delegate rootTerminalViewHeightOfTabBar:self];
 
@@ -113,20 +123,25 @@ static const CGFloat kMaximumToolbeltSizeAsFractionOfWindow = 0.5;
         switch ([iTermPreferences intForKey:kPreferenceKeyTabPosition]) {
             case PSMTab_BottomTab:
                 _tabBarControl.orientation = PSMTabBarHorizontalOrientation;
-                [_tabBarControl setAutoresizingMask:(NSViewWidthSizable | NSViewMinYMargin)];
+                [self setTabBarControlAutoresizingMask:(NSViewWidthSizable | NSViewMinYMargin)];
                 break;
 
             case PSMTab_TopTab:
                 _tabBarControl.orientation = PSMTabBarHorizontalOrientation;
-                [_tabBarControl setAutoresizingMask:(NSViewWidthSizable | NSViewMaxYMargin)];
+                [self setTabBarControlAutoresizingMask:(NSViewWidthSizable | NSViewMaxYMargin)];
                 break;
 
             case PSMTab_LeftTab:
                 _tabBarControl.orientation = PSMTabBarVerticalOrientation;
-                _tabBarControl.autoresizingMask = (NSViewHeightSizable | NSViewMaxXMargin);
+                [self setTabBarControlAutoresizingMask:(NSViewHeightSizable | NSViewMaxXMargin)];
                 break;
         }
-        [self addSubview:_tabBarControl];
+        if (@available(macOS 10.14, *)) {
+            [self addSubview:_tabBarBacking];
+            [_tabBarBacking addSubview:_tabBarControl];
+        } else {
+            [self addSubview:_tabBarControl];
+        }
         _tabBarControl.tabView = _tabView;
         [_tabView setDelegate:_tabBarControl];
         _tabBarControl.delegate = tabBarDelegate;
@@ -163,7 +178,7 @@ static const CGFloat kMaximumToolbeltSizeAsFractionOfWindow = 0.5;
 
 - (NSView *)hitTest:(NSPoint)point {
     NSView *view = [super hitTest:point];
-    if (!_windowNumberLabel.hidden && view == _windowNumberLabel) {
+    if (!_tabBarControlOnLoan && !_windowNumberLabel.hidden && view == _windowNumberLabel) {
         return _tabBarControl;
     } else if (!_windowTitleLabel.hidden && view == _windowTitleLabel) {
         return self;
@@ -213,6 +228,9 @@ static const CGFloat kMaximumToolbeltSizeAsFractionOfWindow = 0.5;
 }
 
 - (NSRect)frameForWindowNumberLabel {
+    if (_tabBarControlOnLoan) {
+        return NSZeroRect;
+    }
     [_windowNumberLabel sizeToFit];
     const NSRect standardButtonsFrame = [self frameForStandardWindowButtons];
     const CGFloat tabBarHeight = _tabBarControl.height;
@@ -229,6 +247,9 @@ static const CGFloat kMaximumToolbeltSizeAsFractionOfWindow = 0.5;
 }
 
 - (NSRect)frameForWindowTitleLabel {
+    if (_tabBarControlOnLoan) {
+        return NSZeroRect;
+    }
     const CGFloat tabBarHeight = _tabBarControl.height;
     const CGFloat baselineOffset = -_windowTitleLabel.font.descender;
     const CGFloat capHeight = _windowTitleLabel.font.capHeight;
@@ -408,6 +429,32 @@ static const CGFloat kMaximumToolbeltSizeAsFractionOfWindow = 0.5;
     [self setWindowTitleLabelToString:_windowTitle icon:icon];
 }
 
+- (iTermTabBarControlView *)borrowTabBarControl {
+    assert(!_tabBarControlOnLoan);
+    iTermTabBarControlView *view = _tabBarControl;
+    _tabBarControlOnLoan = YES;
+    if (@available(macOS 10.14, *)) {
+        _tabBarBacking.hidden = YES;
+    }
+    return view;
+}
+
+- (void)returnTabBarControlView:(iTermTabBarControlView *)tabBarControl {
+    assert(_tabBarControlOnLoan);
+    _tabBarControlOnLoan = NO;
+    if (@available(macOS 10.14, *)) {
+        [_tabBarBacking addSubview:tabBarControl];
+    } else {
+        [self addSubview:tabBarControl];
+    }
+    _tabBarControl.frame = _tabBarBacking.bounds;
+    _tabBarControl = tabBarControl;
+    [self.tabBarControl updateFlashing];
+    if (@available(macOS 10.14, *)) {
+        _tabBarBacking.hidden = NO;
+    }
+}
+
 - (void)windowNumberDidChangeTo:(NSNumber *)number {
     _windowNumber = number;
     BOOL deemphasized;
@@ -523,6 +570,9 @@ static const CGFloat kMaximumToolbeltSizeAsFractionOfWindow = 0.5;
 }
 
 - (BOOL)tabBarShouldBeVisible {
+    if (_tabBarControlOnLoan) {
+        return NO;
+    }
     if (self.tabBarControl.flashing) {
         return YES;
     } else {
@@ -606,8 +656,10 @@ static const CGFloat kMaximumToolbeltSizeAsFractionOfWindow = 0.5;
     [self removeLeftTabBarDragHandle];
     CGFloat yOrigin = _delegate.haveBottomBorder ? 1 : 0;
     CGFloat heightAdjustment = 0;
-    if (!self.tabBarControl.flashing) {
-        heightAdjustment += _tabBarControl.height;
+    if (!_tabBarControlOnLoan) {
+        if (!self.tabBarControl.flashing) {
+            heightAdjustment += _tabBarControl.height;
+        }
     }
     if (_delegate.haveTopBorder) {
         heightAdjustment += 1;
@@ -624,19 +676,36 @@ static const CGFloat kMaximumToolbeltSizeAsFractionOfWindow = 0.5;
     DLog(@"repositionWidgets - Set tab view frame to %@", NSStringFromRect(tabViewFrame));
     [self.tabView setFrame:tabViewFrame];
 
-    heightAdjustment = self.tabBarControl.flashing ? _tabBarControl.height : 0;
+    if (_tabBarControlOnLoan) {
+        heightAdjustment = 0;
+    } else {
+        heightAdjustment = self.tabBarControl.flashing ? _tabBarControl.height : 0;
+    }
     NSRect tabBarFrame = NSMakeRect(tabViewFrame.origin.x,
                                     NSMaxY(tabViewFrame) - heightAdjustment,
                                     tabViewFrame.size.width,
                                     _tabBarControl.height);
 
     [self updateDivisionViewAndWindowNumberLabel];
-    self.tabBarControl.insets = [self.delegate tabBarInsets];
-    self.tabBarControl.frame = tabBarFrame;
-    self.tabBarControl.autoresizingMask = (NSViewWidthSizable | NSViewMinYMargin);
+    if (!_tabBarControlOnLoan) {
+        self.tabBarControl.insets = [self.delegate tabBarInsets];
+        [self setTabBarFrame:tabBarFrame];
+        [self setTabBarControlAutoresizingMask:(NSViewWidthSizable | NSViewMinYMargin)];
+    }
+}
+
+- (void)setTabBarFrame:(NSRect)frame {
+    if (@available(macOS 10.14, *)) {
+        assert(!_tabBarControlOnLoan);
+        _tabBarBacking.frame = frame;
+        self.tabBarControl.frame = _tabBarBacking.bounds;
+    } else {
+        self.tabBarControl.frame = frame;
+    }
 }
 
 - (void)layoutSubviewsWithVisibleBottomTabBarForWindow:(NSWindow *)thisWindow {
+    assert(!_tabBarControlOnLoan);
     DLog(@"repositionWidgets - putting tabs at bottom");
     [self removeLeftTabBarDragHandle];
     // setup aRect to make room for the tabs at the bottom.
@@ -645,8 +714,8 @@ static const CGFloat kMaximumToolbeltSizeAsFractionOfWindow = 0.5;
                                     [self tabviewWidth],
                                     _tabBarControl.height);
     self.tabBarControl.insets = [self.delegate tabBarInsets];
-    self.tabBarControl.frame = tabBarFrame;
-    self.tabBarControl.autoresizingMask = (NSViewWidthSizable | NSViewMaxYMargin);
+    [self setTabBarFrame:tabBarFrame];
+    [self setTabBarControlAutoresizingMask:(NSViewWidthSizable | NSViewMaxYMargin)];
 
     CGFloat heightAdjustment = self.tabBarControl.flashing ? 0 : tabBarFrame.origin.y + _tabBarControl.height;
     if (_delegate.haveTopBorder) {
@@ -668,7 +737,20 @@ static const CGFloat kMaximumToolbeltSizeAsFractionOfWindow = 0.5;
     [self updateDivisionViewAndWindowNumberLabel];
 }
 
+- (void)setTabBarControlAutoresizingMask:(NSAutoresizingMaskOptions)mask {
+    if (@available(macOS 10.14, *)) {
+        if (_tabBarBacking) {
+            _tabBarBacking.autoresizingMask = mask;
+            _tabBarControl.autoresizingMask = (NSViewWidthSizable | NSViewHeightSizable);
+            return;
+        }
+    }
+
+    _tabBarControl.autoresizingMask = mask;
+}
+
 - (void)layoutSubviewsWithVisibleLeftTabBarAndInlineToolbelt:(BOOL)showToolbeltInline forWindow:(NSWindow *)thisWindow {
+    assert(!_tabBarControlOnLoan);
     [self setLeftTabBarWidthFromPreferredWidth];
     CGFloat heightAdjustment = 0;
     if (_delegate.haveBottomBorder) {
@@ -685,8 +767,8 @@ static const CGFloat kMaximumToolbeltSizeAsFractionOfWindow = 0.5;
                                     [self tabviewWidth],
                                     [thisWindow.contentView frame].size.height - heightAdjustment);
     self.tabBarControl.insets = [self.delegate tabBarInsets];
-    self.tabBarControl.frame = tabBarFrame;
-    self.tabBarControl.autoresizingMask = (NSViewHeightSizable | NSViewMaxXMargin);
+    [self setTabBarFrame:tabBarFrame];
+    [self setTabBarControlAutoresizingMask:(NSViewHeightSizable | NSViewMaxXMargin)];
 
     CGFloat widthAdjustment = 0;
     if (_delegate.haveLeftBorder) {
@@ -729,7 +811,9 @@ static const CGFloat kMaximumToolbeltSizeAsFractionOfWindow = 0.5;
 
     BOOL showToolbeltInline = self.shouldShowToolbelt;
     NSWindow *thisWindow = _delegate.window;
-    self.tabBarControl.height = [_delegate rootTerminalViewHeightOfTabBar:self];
+    if (!_tabBarControlOnLoan) {
+        self.tabBarControl.height = [_delegate rootTerminalViewHeightOfTabBar:self];
+    }
 
     _windowNumberLabel.textColor = [_delegate rootTerminalViewTabBarTextColorForWindowNumber];
     _windowTitleLabel.textColor = [self.delegate rootTerminalViewTabBarTextColorForTitle];
@@ -770,9 +854,12 @@ static const CGFloat kMaximumToolbeltSizeAsFractionOfWindow = 0.5;
     _tabViewFrameReduced = NO;
     if (![self tabBarShouldBeVisible]) {
         // The tabBarControl should not be visible.
-        self.tabBarControl.hidden = YES;
+        if (!_tabBarControlOnLoan) {
+            self.tabBarControl.hidden = YES;
+        }
         [self layoutSubviewsWithHiddenTabBarForWindow:thisWindow];
     } else {
+        assert(!_tabBarControlOnLoan);
         // The tabBar control is visible.
         DLog(@"repositionWidgets - tabs are visible. Adjusting window size...");
         self.tabBarControl.hidden = NO;
@@ -819,7 +906,9 @@ static const CGFloat kMaximumToolbeltSizeAsFractionOfWindow = 0.5;
     [self setNeedsDisplay:YES];
 
     DLog(@"repositionWidgets - update tab bar");
-    [self.tabBarControl updateFlashing];
+    if (!_tabBarControlOnLoan) {
+        [self.tabBarControl updateFlashing];
+    }
     DLog(@"repositionWidgets - return.");
 }
 
@@ -853,6 +942,9 @@ static const CGFloat kMaximumToolbeltSizeAsFractionOfWindow = 0.5;
 #pragma mark - iTermTabBarControlViewDelegate
 
 - (BOOL)iTermTabBarShouldFlashAutomatically {
+    if (_tabBarControlOnLoan) {
+        return NO;
+    }
     return [_delegate iTermTabBarShouldFlashAutomatically];
 }
 

@@ -121,12 +121,19 @@
                                tabBarControl:(PSMTabBarControl *)bar {
     if (self.anyTabHasColor) {
         const CGFloat brightness = [self tabColorBrightness:cell];
-        NSRect rect = NSInsetRect(cell.frame, 0, 0.5);
+        NSRect containingFrame = cell.frame;
+        if (bar.cells.lastObject == cell && bar.orientation == PSMTabBarHorizontalOrientation) {
+            containingFrame = NSMakeRect(NSMinX(cell.frame),
+                                         0,
+                                         bar.frame.size.width - NSMinX(cell.frame),
+                                         bar.height);
+        }
+        NSRect rect = NSInsetRect(containingFrame, 0, 0.5);
         NSBezierPath *path;
         
         NSColor *outerColor;
         NSColor *innerColor;
-        const CGFloat alpha = [self.tabBar.window isKeyWindow] ? 0.5 : 0.3;
+        const CGFloat alpha = [self.tabBar.window isKeyWindow] ? 0.75 : 0.5;
         if (brightness > 0.5) {
             outerColor = [NSColor colorWithWhite:1 alpha:alpha];
             innerColor = [NSColor colorWithWhite:0 alpha:alpha];
@@ -134,20 +141,21 @@
             outerColor = [NSColor colorWithWhite:0 alpha:alpha];
             innerColor = [NSColor colorWithWhite:1 alpha:alpha];
         }
-        
+
         [innerColor set];
-        path = [NSBezierPath bezierPath];
-        [path moveToPoint:NSMakePoint(NSMinX(rect), NSMaxY(rect))];
-        [path lineToPoint:NSMakePoint(NSMaxX(rect), NSMaxY(rect))];
-        [path setLineWidth:1];
-        [path stroke];
-        
-        [outerColor set];
         rect = NSInsetRect(rect, 0, 1);
         path = [NSBezierPath bezierPath];
         [path moveToPoint:NSMakePoint(NSMinX(rect), NSMaxY(rect))];
         [path lineToPoint:NSMakePoint(NSMaxX(rect), NSMaxY(rect))];
-        [path setLineWidth:1];
+        [path setLineWidth:2];
+        [path stroke];
+
+        [outerColor set];
+        rect = NSInsetRect(rect, 0, 2);
+        path = [NSBezierPath bezierPath];
+        [path moveToPoint:NSMakePoint(NSMinX(rect), NSMaxY(rect))];
+        [path lineToPoint:NSMakePoint(NSMaxX(rect), NSMaxY(rect))];
+        [path setLineWidth:2];
         [path stroke];
     }
 }
@@ -155,21 +163,58 @@
 - (NSColor *)outlineColor {
     CGFloat backgroundBrightness = self.tabBarColor.it_hspBrightness;
     
-    const CGFloat delta = [[self.tabBar.delegate tabView:self.tabBar
+    const CGFloat alpha = [[self.tabBar.delegate tabView:self.tabBar
                                            valueOfOption:PSMTabBarControlOptionColoredMinimalOutlineStrength] doubleValue];
     CGFloat value;
     if (backgroundBrightness < 0.5) {
-        value = MIN(1, backgroundBrightness + delta);
+        value = 1;
     } else {
-        value = MAX(0, backgroundBrightness - delta);
+        value = 0;
     }
-    return [NSColor colorWithWhite:value alpha:1];
+    return [NSColor colorWithWhite:value alpha:alpha];
 }
 
 - (void)drawVerticalLineInFrame:(NSRect)rect x:(CGFloat)x {
 }
 
 - (void)drawHorizontalLineInFrame:(NSRect)rect y:(CGFloat)y {
+}
+
+- (void)drawCellBackgroundSelected:(BOOL)selected
+                            inRect:(NSRect)cellFrame
+                      withTabColor:(NSColor *)tabColor
+                   highlightAmount:(CGFloat)highlightAmount {
+    const BOOL horizontalOrientation = self.tabBar.orientation == PSMTabBarHorizontalOrientation;
+    NSEdgeInsets insets = NSEdgeInsetsZero;
+    BOOL drawFrame = NO;
+    if (!horizontalOrientation) {
+        insets.right = 1;
+        insets.left = 1;
+    }
+    if (highlightAmount > 0 && !selected) {
+        if (horizontalOrientation) {
+            drawFrame = YES;
+            insets.left = 0.5;
+            insets.bottom = 1.0;
+            insets.top = 1.0;
+        }
+    } else if (selected) {
+        if (horizontalOrientation) {
+            drawFrame = YES;
+            insets.left = 0.5;
+            insets.top = 1.0;
+        }
+    }
+    if (drawFrame) {
+        [[self backgroundColorSelected:NO highlightAmount:0] set];
+        NSFrameRect(cellFrame);
+    }
+    NSRect insetCellFrame = cellFrame;
+    insetCellFrame.origin.x += insets.left;
+    insetCellFrame.origin.y += insets.top;
+    insetCellFrame.size.width -= (insets.left + insets.right);
+    insetCellFrame.size.height -= (insets.top + insets.bottom);
+    [super drawCellBackgroundSelected:selected inRect:insetCellFrame withTabColor:tabColor highlightAmount:highlightAmount];
 }
 
 - (void)drawBackgroundInRect:(NSRect)rect
@@ -211,9 +256,9 @@
 - (void)drawEndInset {
     NSColor *color;
     PSMTabBarControl *bar = self.tabBar;
-    const BOOL oneTab = (self.lastTabIsSelected && !self.firstTabIsSelected);
+    const BOOL lastOfManyIsSelected = (self.lastTabIsSelected && !self.firstTabIsSelected);
     const BOOL horizontal = (bar.orientation == PSMTabBarHorizontalOrientation);
-    if ((horizontal && self.lastTabIsSelected) || (!horizontal && oneTab)) {
+    if ((horizontal && self.lastTabIsSelected) || (!horizontal && lastOfManyIsSelected)) {
         color = [self selectedTabColor];
     } else {
         color = [self nonSelectedTabColor];
@@ -253,7 +298,7 @@
             return NSZeroRect;
         }
         PSMTabBarCell *cell = self.tabBar.cells.firstObject;
-        return NSMakeRect(0, 0, cell.frame.size.width, cell.frame.size.height);
+        return NSMakeRect(0, 0, NSMinX(cell.frame), cell.frame.size.height);
     } else {
         return NSMakeRect(0, 0, NSWidth(self.tabBar.frame), self.tabBar.insets.top);
     }
@@ -298,11 +343,16 @@
         horizontal:(BOOL)horizontal {
     [super drawTabBar:bar inRect:rect horizontal:horizontal];
     
+    const BOOL horizontalOrientation = bar.orientation == PSMTabBarHorizontalOrientation;
+    
     NSRect (^inset)(NSRect) = ^NSRect(NSRect rect) {
-        rect.origin.x += 0.5;
-        rect.origin.y += 0.5;
-        rect.size.width -= 0.5;
-        rect.size.height -= 1;
+        const CGFloat leftInset = horizontalOrientation ? 0.5 : 1.0;
+        const CGFloat rightInset = horizontalOrientation ? 0.0 : 0.5;
+        const CGFloat topInset = horizontalOrientation ? 1.0 : 0.5;
+        rect.origin.x += leftInset;
+        rect.origin.y += topInset;
+        rect.size.width -= leftInset + rightInset;
+        rect.size.height -= topInset + 0.5;
         return rect;
     };
     NSRect beforeRect;
@@ -310,23 +360,23 @@
     NSRect afterRect;
     NSInteger selectedIndex = -1;
     if (bar.orientation == PSMTabBarHorizontalOrientation) {
-        beforeRect = inset(NSMakeRect(0,
+        beforeRect = inset(NSMakeRect(0.5,
                                       0,
-                                      [self leftMarginForTabBarControl],
+                                      [self leftMarginForTabBarControl] - 0.5,
                                       bar.height));
         afterRect = inset(NSMakeRect(bar.frame.size.width - self.rightMarginForTabBarControl,
                                      0,
-                                     self.rightMarginForTabBarControl,
+                                     self.rightMarginForTabBarControl - 1,
                                      bar.height));
     } else {
         beforeRect = inset(NSMakeRect(0,
-                                      0,
+                                      0.5,
                                       bar.frame.size.width,
-                                      self.topMarginForTabBarControl));
+                                      self.topMarginForTabBarControl - 0.5));
         PSMTabBarCell *lastCell = [self lastVisibleCell];
         afterRect = inset(NSMakeRect(0,
                                      NSMaxY(lastCell.frame),
-                                     NSWidth(lastCell.frame),
+                                     NSWidth(lastCell.frame) - 1,
                                      NSHeight(bar.frame) - NSMaxY(lastCell.frame)));
     }
     NSRect *current = &beforeRect;

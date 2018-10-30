@@ -10,11 +10,13 @@
 #import "DebugLogging.h"
 #import "iTermGitPollWorker.h"
 #import "iTermGitState.h"
+#import "iTermRateLimitedUpdate.h"
 #import "NSTimer+iTerm.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
 @implementation iTermGitPoller {
+    iTermRateLimitedUpdate *_rateLimit;
     NSTimer *_timer;
     BOOL _polling;
     void (^_update)(void);
@@ -23,6 +25,8 @@ NS_ASSUME_NONNULL_BEGIN
 - (instancetype)initWithCadence:(NSTimeInterval)cadence update:(void (^)(void))update {
     self = [super init];
     if (self) {
+        _rateLimit = [[iTermRateLimitedUpdate alloc] init];
+        _rateLimit.minimumInterval = 0.5;
         _cadence = cadence;
         _update = [update copy];
         [self startTimer];
@@ -72,6 +76,18 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)setState:(iTermGitState *)state {
     _state = state;
     _update();
+}
+
+- (void)setCurrentDirectory:(NSString *)currentDirectory {
+    if (currentDirectory == _currentDirectory ||
+        [currentDirectory isEqualToString:_currentDirectory]) {
+        return;
+    }
+    [_rateLimit performRateLimitedBlock:^{
+        [[iTermGitPollWorker sharedInstance] invalidateCacheForPath:currentDirectory];
+    }];
+    _currentDirectory = [currentDirectory copy];
+    [self poll];
 }
 
 @end
