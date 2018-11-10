@@ -69,7 +69,7 @@ typedef enum {
     TMUX_CLIENT  // Session mirrors a tmux virtual window
 } PTYSessionTmuxMode;
 
-// This is implemented by a view that coontains a collection of sessions, nominally a tab.
+// This is implemented by a view that contains a collection of sessions, nominally a tab.
 @protocol PTYSessionDelegate<NSObject>
 
 // Return the window controller for this session. This is the "real" one, not a
@@ -106,7 +106,7 @@ typedef enum {
 - (void)updateLabelAttributes;
 
 // End the session (calling terminate normally or killing/hiding a tmux
-// session), and closes the tab if neeed.
+// session), and closes the tab if needed.
 - (void)closeSession:(PTYSession *)session;
 
 // Sets whether the bell indicator should show.
@@ -165,7 +165,7 @@ typedef enum {
 // The tmux window title changed.
 - (void)sessionDidChangeTmuxWindowNameTo:(NSString *)newName;
 
-// Returns the objectSpecifier of the tab (used to identify a tab for Applescript).
+// Returns the objectSpecifier of the tab (used to identify a tab for AppleScript).
 - (NSScriptObjectSpecifier *)objectSpecifier;
 
 // Returns the tmux window ID of the containing tab. -1 if not tmux.
@@ -216,6 +216,8 @@ typedef enum {
 - (NSView *)sessionContainerView:(PTYSession *)session;
 
 
+- (void)sessionDraggingEntered:(PTYSession *)session;
+- (void)sessionDraggingExited:(PTYSession *)session;
 @end
 
 @class SessionView;
@@ -363,11 +365,11 @@ typedef enum {
 @property(nonatomic) BOOL useMetal;
 
 // Has this session's bookmark been divorced from the profile in the ProfileModel? Changes
-// in this bookmark may happen indepentendly of the persistent bookmark.
+// in this bookmark may happen independently of the persistent bookmark.
 // You should usually not assign to this; instead use divorceAddressBookEntryFromPreferences.
 @property(nonatomic, assign) BOOL isDivorced;
 
-// Ignore resize notifications. This would be set because the session's size musn't be changed
+// Ignore resize notifications. This would be set because the session's size mustn't be changed
 // due to temporary changes in the window size, as code later on may need to know the session's
 // size to set the window size properly.
 @property(nonatomic, assign) BOOL ignoreResizeNotifications;
@@ -403,7 +405,7 @@ typedef enum {
 
 @property(nonatomic, assign) BOOL highlightCursorLine;
 
-// Used to help remember total ordering on views while one is maximzied
+// Used to help remember total ordering on views while one is maximized
 @property(nonatomic, assign) NSPoint savedRootRelativeOrigin;
 
 // The computed label
@@ -593,7 +595,7 @@ typedef enum {
 - (void)setMinimumContrast:(float)value;
 
 // Returns the frame size for a scrollview that perfectly contains the contents
-// of this session based on rows/cols, and taking into acount the presence of
+// of this session based on rows/cols, and taking into account the presence of
 // a scrollbar.
 - (NSSize)idealScrollViewSizeWithStyle:(NSScrollerStyle)scrollerStyle;
 
@@ -747,6 +749,7 @@ typedef enum {
 - (id)temporarilyDisableMetal NS_AVAILABLE_MAC(10_11);
 - (void)drawFrameAndRemoveTemporarilyDisablementOfMetalForToken:(id)token NS_AVAILABLE_MAC(10_11);
 
+- (BOOL)willEnableMetal;
 - (BOOL)metalAllowed:(out iTermMetalUnavailableReason *)reason;
 - (void)executeTokens:(const CVector *)vector bytesHandled:(int)length;
 - (void)injectData:(NSData *)data;

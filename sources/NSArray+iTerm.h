@@ -39,7 +39,7 @@
 - (ObjectType)maxWithComparator:(NSComparisonResult (^)(ObjectType a, ObjectType b))comparator;
 
 // All objects equal to the minimum value.
-- (NSArray *)mininumsWithComparator:(NSComparisonResult (^)(id, id))comparator;
+- (NSArray *)minimumsWithComparator:(NSComparisonResult (^)(id, id))comparator;
 
 // Does the array contain at least one object not equal to @c anObject?
 - (BOOL)containsObjectBesides:(ObjectType)anObject;
@@ -87,6 +87,7 @@
 - (NSURL *)lowestCommonAncestorOfURLs;
 
 - (NSArray<ObjectType> *)subarrayFromIndex:(NSUInteger)index;
+- (NSArray<ObjectType> *)subarrayToIndex:(NSUInteger)index;
 
 - (void)enumerateCoalescedObjectsWithComparator:(BOOL (^)(ObjectType obj1, ObjectType obj2))comparator
                                           block:(void (^)(ObjectType object, NSUInteger count))block;

@@ -70,6 +70,7 @@
 
 // Drag entered this view.
 - (NSDragOperation)sessionViewDraggingEntered:(id<NSDraggingInfo>)sender;
+- (void)sessionViewDraggingExited:(id<NSDraggingInfo>)sender;
 
 // Would the current drop target split this view?
 - (BOOL)sessionViewShouldSplitSelectionAfterDragUpdate:(id<NSDraggingInfo>)sender;
@@ -217,5 +218,6 @@
 
 // This keeps you from adding views over the find view.
 - (void)addSubview:(NSView *)view NS_UNAVAILABLE;
+- (void)removeMetalView;
 
 @end

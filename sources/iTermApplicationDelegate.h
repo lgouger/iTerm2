@@ -43,11 +43,12 @@ extern NSString *const kMarkAlertActionModalAlert;
 extern NSString *const kMarkAlertActionPostNotification;
 extern NSString *const kShowFullscreenTabsSettingDidChange;
 extern NSString *const iTermApplicationWillTerminate;
+extern NSString *const iTermDidToggleSecureInputNotification;
 
 @interface iTermApplicationDelegate : NSObject<iTermApplicationDelegate>
 
 @property(nonatomic, readonly) BOOL workspaceSessionActive;
-@property(nonatomic, readonly) BOOL isApplescriptTestApp;
+@property(nonatomic, readonly) BOOL isAppleScriptTestApp;
 @property(nonatomic, readonly) BOOL isRunningOnTravis;
 
 // Returns one of the kMarkAlertAction strings defined above.

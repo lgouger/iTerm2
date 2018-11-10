@@ -93,7 +93,7 @@ typedef NS_ENUM(NSUInteger, iTermHotkeyWindowType) {
 - (int)allocateWindowNumber;
 
 - (void)saveWindowArrangement:(BOOL)allWindows;
-- (void)saveWindowArrangmentForAllWindows:(BOOL)allWindows name:(NSString *)name;
+- (void)saveWindowArrangementForAllWindows:(BOOL)allWindows name:(NSString *)name;
 - (void)saveWindowArrangementForWindow:(PseudoTerminal *)currentTerminal name:(NSString *)name;
 
 - (void)loadWindowArrangementWithName:(NSString *)theName;
@@ -149,6 +149,7 @@ typedef NS_ENUM(NSUInteger, iTermHotkeyWindowType) {
 // If the window is completely covered by another app's window, it's obscured.
 // If other iTerm windows cover more than ~40% of |terminal| then it's obscured.
 - (BOOL)terminalIsObscured:(id<iTermWindowController>)terminal;
+- (BOOL)terminalIsObscured:(id<iTermWindowController>)terminal threshold:(double)threshold;
 
 // Set Software Update (Sparkle) user defaults keys to reflect settings in
 // iTerm2's user defaults.

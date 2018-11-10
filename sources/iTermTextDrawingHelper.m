@@ -505,7 +505,7 @@ typedef struct iTermTextColorContext {
                                         run->bgColorMode == ColorModeAlternate);
         // When set in preferences, applies alpha only to the defaultBackground
         // color, useful for keeping Powerline segments opacity(background)
-        // consistent with their seperator glyphs opacity(foreground).
+        // consistent with their separator glyphs opacity(foreground).
         if (_transparencyAffectsOnlyDefaultBackgroundColor && !defaultBackground) {
             alpha = 1;
         }
@@ -847,7 +847,7 @@ typedef struct iTermTextColorContext {
 }
 
 - (NSSize)drawBadgeInRect:(NSRect)rect {
-    NSRect source;
+    NSRect source = NSZeroRect;
     NSRect intersection = [iTermTextDrawingHelper rectForBadgeImageOfSize:_badgeImage.size
                                                           destinationRect:rect
                                                      destinationFrameSize:_frame.size
@@ -1147,6 +1147,7 @@ typedef struct iTermTextColorContext {
     for (NSBezierPath *path in [iTermBoxDrawingBezierCurveFactory bezierPathsForBoxDrawingCode:theCharacter
                                                                                       cellSize:_cellSize
                                                                                          scale:1
+                                                                                        offset:CGPointZero
                                                                                          solid:&solid]) {
         NSColor *color = [NSColor colorWithCGColor:(CGColorRef)attributes[(NSString *)kCTForegroundColorAttributeName]];
         [color set];
@@ -1712,7 +1713,7 @@ static BOOL iTermTextDrawingHelperShouldAntiAlias(screen_char_t *c,
     }
 
     if (likely(!imageAttributes && !previousImageAttributes)) {
-        // Not an image cell. Try to quicly check if the attributes are the same, which is the normal case.
+        // Not an image cell. Try to quickly check if the attributes are the same, which is the normal case.
         if (likely(!memcmp(previousAttributes, newAttributes, sizeof(*previousAttributes)))) {
             // Identical, byte-for-byte
             *combinedAttributesChanged = NO;

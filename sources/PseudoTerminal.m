@@ -56,6 +56,7 @@
 #import "iTermTouchBarButton.h"
 #import "iTermVariables.h"
 #import "iTermWarning.h"
+#import "iTermWindowOcclusionChangeMonitor.h"
 #import "iTermWindowShortcutLabelTitlebarAccessoryViewController.h"
 #import "MovePaneController.h"
 #import "NSAlert+iTerm.h"
@@ -303,7 +304,7 @@ static NSRect iTermRectCenteredVerticallyWithinRect(NSRect frameToCenter, NSRect
     BOOL exitingLionFullscreen_;
 
     // If positive, then any window resizing that happens is driven by tmux and
-    // shoudn't be reported back to tmux as a user-originated resize.
+    // shouldn't be reported back to tmux as a user-originated resize.
     int tmuxOriginatedResizeInProgress_;
 
     BOOL liveResize_;
@@ -369,7 +370,7 @@ static NSRect iTermRectCenteredVerticallyWithinRect(NSRect frameToCenter, NSRect
     // has not yet been called.
     BOOL _expectingDecodeOfRestorableState;
 
-    // Used to prevent infinite re-entrancy in windowDidChangeScreen:.
+    // Used to prevent infinite reentrancy in windowDidChangeScreen:.
     BOOL _inWindowDidChangeScreen;
 
     iTermPasswordManagerWindowController *_passwordManagerWindowController;
@@ -384,6 +385,12 @@ static NSRect iTermRectCenteredVerticallyWithinRect(NSRect frameToCenter, NSRect
     BOOL _openingPopupWindow;
 
     NSInteger _fullScreenRetryCount;
+
+    // This is true if the user is dragging the window by the titlebar. It should not be set for
+    // programmatic moves or moves because of disconnecting a display.
+    BOOL _windowIsMoving;
+    NSInteger _screenBeforeMoving;
+    BOOL _constrainFrameAfterDeminiaturization;
 }
 
 @synthesize scope = _scope;
@@ -756,6 +763,10 @@ static NSRect iTermRectCenteredVerticallyWithinRect(NSRect frameToCenter, NSRect
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(applicationDidBecomeActive:)
                                                  name:NSApplicationDidBecomeActiveNotification
+                                               object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(windowOcclusionDidChange:)
+                                                 name:iTermWindowOcclusionDidChange
                                                object:nil];
     [[[NSWorkspace sharedWorkspace] notificationCenter] addObserver:self
                                                            selector:@selector(activeSpaceDidChange:)
@@ -1261,8 +1272,38 @@ ITERM_WEAKLY_REFERENCEABLE
     [self updateTouchBarIfNeeded:NO];
 }
 
+- (BOOL)miniaturizedWindowShouldPreserveFrameUntilDeminiaturized {
+    if (self.window.isMiniaturized) {
+        switch (windowType_) {
+            case WINDOW_TYPE_NORMAL:
+            case WINDOW_TYPE_NO_TITLE_BAR:
+                DLog(@"Returning YES");
+                return YES;
+            case WINDOW_TYPE_TOP:
+            case WINDOW_TYPE_LEFT:
+            case WINDOW_TYPE_RIGHT:
+            case WINDOW_TYPE_BOTTOM:
+            case WINDOW_TYPE_TOP_PARTIAL:
+            case WINDOW_TYPE_LEFT_PARTIAL:
+            case WINDOW_TYPE_RIGHT_PARTIAL:
+            case WINDOW_TYPE_BOTTOM_PARTIAL:
+            case WINDOW_TYPE_LION_FULL_SCREEN:
+            case WINDOW_TYPE_TRADITIONAL_FULL_SCREEN:
+            case WINDOW_TYPE_COMPACT:
+                break;
+        }
+    }
+
+    DLog(@"Returning NO");
+    return NO;
+}
+
 // Allow frame to go off-screen while hotkey window is sliding in or out.
 - (BOOL)terminalWindowShouldConstrainFrameToScreen {
+    if ([self miniaturizedWindowShouldPreserveFrameUntilDeminiaturized]) {
+        _constrainFrameAfterDeminiaturization = YES;
+        return NO;
+    }
     iTermProfileHotKey *profileHotKey = [[iTermHotKeyController sharedInstance] profileHotKeyForWindowController:self];
     return !([profileHotKey rollingIn] || [profileHotKey rollingOut]);
 }
@@ -1301,7 +1342,8 @@ ITERM_WEAKLY_REFERENCEABLE
         NSColor *color = [self terminalWindowDecorationBackgroundColor];
         const CGFloat perceivedBrightness = [color perceivedBrightness];
         const CGFloat target = perceivedBrightness < 0.5 ? 1 : 0;
-        return [color colorDimmedBy:0.15 towardsGrayLevel:target];
+        return [color colorDimmedBy:[iTermAdvancedSettingsModel minimalSplitPaneDividerProminence]
+                   towardsGrayLevel:target];
     }
     switch ([self.window.effectiveAppearance it_tabStyle:preferredStyle]) {
         case TAB_STYLE_AUTOMATIC:
@@ -2396,7 +2438,7 @@ ITERM_WEAKLY_REFERENCEABLE
 - (IBAction)editWindowTitle:(id)sender {
     NSAlert *alert = [[[NSAlert alloc] init] autorelease];
     alert.messageText = @"Set Window Title";
-    alert.informativeText = @"If this is empty, the window takes the active session’s title. Variables and function calls enclosed in \\(…) will replaced with their evalution.";
+    alert.informativeText = @"If this is empty, the window takes the active session’s title. Variables and function calls enclosed in \\(…) will replaced with their evaluation.";
     NSTextField *titleTextField = [[[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 400, 24 * 3)] autorelease];
     iTermFunctionCallTextFieldDelegate *delegate;
     delegate = [[[iTermFunctionCallTextFieldDelegate alloc] initWithPaths:[iTermVariables recordedVariableNamesInContext:iTermVariablesSuggestionContextWindow]
@@ -2721,6 +2763,11 @@ ITERM_WEAKLY_REFERENCEABLE
     } else {
         [self disableBlur];
     }
+    if (_constrainFrameAfterDeminiaturization) {
+        _constrainFrameAfterDeminiaturization = NO;
+        NSRect frame = [self.window constrainFrameRect:self.window.frame toScreen:self.window.screen];
+        [self.window setFrame:frame display:YES animate:NO];
+    }
     [[NSNotificationCenter defaultCenter] postNotificationName:@"iTermWindowDidDeminiaturize"
                                                         object:self
                                                       userInfo:nil];
@@ -2758,7 +2805,7 @@ ITERM_WEAKLY_REFERENCEABLE
 
 - (BOOL)windowShouldClose:(NSNotification *)aNotification
 {
-    // This counts as an interaction beacuse it is only called when the user initiates the closing of the window (as opposed to a session dying on you).
+    // This counts as an interaction because it is only called when the user initiates the closing of the window (as opposed to a session dying on you).
     iTermApplicationDelegate *appDelegate = [iTermApplication.sharedApplication delegate];
     [appDelegate userDidInteractWithASession];
 
@@ -3314,6 +3361,10 @@ ITERM_WEAKLY_REFERENCEABLE
     [self canonicalizeWindowFrame];
 }
 
+- (void)windowOcclusionDidChange:(NSNotification *)notification {
+    [self updateUseMetalInAllTabs];
+}
+
 - (void)applicationDidBecomeActive:(NSNotification *)notification {
     _hasBeenKeySinceActivation = [self.window isKeyWindow];
 }
@@ -3519,6 +3570,7 @@ ITERM_WEAKLY_REFERENCEABLE
 - (NSSize)windowWillResize:(NSWindow *)sender toSize:(NSSize)proposedFrameSize {
     DLog(@"windowWillResize: self=%@, proposedFrameSize=%@ screen=%@",
            self, NSStringFromSize(proposedFrameSize), self.window.screen);
+    DLog(@"%@", [NSThread callStackSymbols]);
     if (self.togglingLionFullScreen || self.lionFullScreen || self.window.screen == nil) {
         DLog(@"Accepting proposal");
         return proposedFrameSize;
@@ -3714,13 +3766,14 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (void)windowDidChangeScreen:(NSNotification *)notification {
+    BOOL canonicalize = ![self miniaturizedWindowShouldPreserveFrameUntilDeminiaturized];
     // This gets called when any part of the window enters or exits the screen and
     // appears to be spuriously called for nonnative fullscreen windows.
     DLog(@"windowDidChangeScreen called. This is known to happen when the screen didn't really change! screen=%@",
          self.window.screen);
-    if (!_inWindowDidChangeScreen) {
+    if (canonicalize && !_inWindowDidChangeScreen) {
         // Nicolas reported a bug where canonicalizeWindowFrame moved the window causing this to
-        // be called re-entrantly, and eventually the stack overflowed. If we insist the window should
+        // be called reentrantly, and eventually the stack overflowed. If we insist the window should
         // be on screen A and the OS insists it should be on screen B, we'll never agree, so just
         // try once.
         _inWindowDidChangeScreen = YES;
@@ -3738,10 +3791,24 @@ ITERM_WEAKLY_REFERENCEABLE
     DLog(@"Returning from windowDidChangeScreen:.");
 }
 
-- (void)windowDidMove:(NSNotification *)notification
-{
+- (void)windowWillMove:(NSNotification *)notification {
+    // AFAICT this is only called when you move the window by dragging it.
+    DLog(@"Looks like the user started dragging the window.");
+    _windowIsMoving = YES;
+    _screenBeforeMoving = [[NSScreen screens] indexOfObject:self.window.screen];
+}
+
+- (void)windowDidMove:(NSNotification *)notification {
     DLog(@"%@: Window %@ moved. Called from %@", self, self.window, [NSThread callStackSymbols]);
     [self saveTmuxWindowOrigins];
+    if (_windowIsMoving && _isAnchoredToScreen) {
+        NSInteger screenIndex = [[NSScreen screens] indexOfObject:self.window.screen];
+        if (screenIndex != _screenBeforeMoving) {
+            DLog(@"User appears to have dragged the window from screen %@ to screen %@. Removing screen anchor.", @(_screenBeforeMoving), @(screenIndex));
+            _isAnchoredToScreen = NO;
+        }
+    }
+    _windowIsMoving = NO;
 }
 
 - (void)windowDidResize:(NSNotification *)aNotification {
@@ -3914,20 +3981,8 @@ ITERM_WEAKLY_REFERENCEABLE
     if ([self lionFullScreen] ||
         (windowType_ != WINDOW_TYPE_TRADITIONAL_FULL_SCREEN &&
          !self.isHotKeyWindow &&  // NSWindowCollectionBehaviorFullScreenAuxiliary window can't enter Lion fullscreen mode properly
-         [iTermPreferences boolForKey:kPreferenceKeyLionStyleFullscren])) {
-        // Native fullscreen path
-        [[self ptyWindow] performSelector:@selector(toggleFullScreen:) withObject:self];
-        if (lionFullScreen_) {
-            // will exit fullscreen
-            DLog(@"Set window type to lion fs");
-            self.windowType = WINDOW_TYPE_LION_FULL_SCREEN;
-        } else {
-            // Will enter fullscreen
-            DLog(@"Set saved window type to %d before setting window type to normal in preparation for going fullscreen", savedWindowType_);
-            savedWindowType_ = windowType_;
-            self.windowType = WINDOW_TYPE_NORMAL;
-        }
-        // TODO(georgen): toggle enabled status of use transparency menu item
+         [iTermPreferences boolForKey:kPreferenceKeyLionStyleFullscreen])) {
+        [[self ptyWindow] toggleFullScreen:self];
         return;
     }
 
@@ -3937,7 +3992,7 @@ ITERM_WEAKLY_REFERENCEABLE
 - (void)delayedEnterFullscreen
 {
     if (windowType_ == WINDOW_TYPE_LION_FULL_SCREEN &&
-        [iTermPreferences boolForKey:kPreferenceKeyLionStyleFullscren]) {
+        [iTermPreferences boolForKey:kPreferenceKeyLionStyleFullscreen]) {
         if (![[[iTermController sharedInstance] keyTerminalWindow] lionFullScreen]) {
             // call enter(Traditional)FullScreenMode instead of toggle... because
             // when doing a lion resume, the window may be toggled immediately
@@ -4416,6 +4471,10 @@ ITERM_WEAKLY_REFERENCEABLE
             [self updateTabBarControlIsTitlebarAccessoryAssumingFullScreen:YES];
         }
     }
+    if (windowType_ != WINDOW_TYPE_LION_FULL_SCREEN) {
+        savedWindowType_ = windowType_;
+        windowType_ = WINDOW_TYPE_LION_FULL_SCREEN;
+    }
 }
 
 - (void)windowDidEnterFullScreen:(NSNotification *)notification
@@ -4432,6 +4491,7 @@ ITERM_WEAKLY_REFERENCEABLE
     [self didChangeAnyFullScreen];
     [_contentView.tabBarControl setFlashing:YES];
     [_contentView updateToolbelt];
+    [self repositionWidgets];
     // Set scrollbars appropriately
     [self updateSessionScrollbars];
     [self fitTabsToWindow];
@@ -4490,6 +4550,7 @@ ITERM_WEAKLY_REFERENCEABLE
     self.window.hasShadow = YES;
     [self updateUseMetalInAllTabs];
     [self updateWindowShadow];
+    self.windowType = WINDOW_TYPE_LION_FULL_SCREEN;
 }
 
 - (void)windowDidExitFullScreen:(NSNotification *)notification
@@ -5046,7 +5107,7 @@ ITERM_WEAKLY_REFERENCEABLE
     NSBitmapImageRep *tabviewRep;
 
     PTYTab *tab = tabViewItem.identifier;
-    [tab temporarilyDisableMetal];
+    [tab bounceMetal];
 
     tabviewRep = [tabRootView bitmapImageRepForCachingDisplayInRect:viewRect];
     [tabRootView cacheDisplayInRect:viewRect toBitmapImageRep:tabviewRep];
@@ -5506,7 +5567,7 @@ ITERM_WEAKLY_REFERENCEABLE
     PTYTab *tab = tabViewItem.identifier;
     NSAlert *alert = [[[NSAlert alloc] init] autorelease];
     alert.messageText = @"Set Tab Title";
-    alert.informativeText = @"If this is empty, the tab takes the active session’s title. Variables and function calls enclosed in \\(…) will replaced with their evalution.";
+    alert.informativeText = @"If this is empty, the tab takes the active session’s title. Variables and function calls enclosed in \\(…) will replaced with their evaluation.";
     NSTextField *titleTextField = [[[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 400, 24 * 3)] autorelease];
     iTermFunctionCallTextFieldDelegate *delegate;
     delegate = [[[iTermFunctionCallTextFieldDelegate alloc] initWithPaths:[iTermVariables recordedVariableNamesInContext:iTermVariablesSuggestionContextTab]
@@ -5734,28 +5795,12 @@ ITERM_WEAKLY_REFERENCEABLE
     [_passwordManagerWindowController autorelease];
     _passwordManagerWindowController = [[iTermPasswordManagerWindowController alloc] init];
     _passwordManagerWindowController.delegate = self;
-    BOOL noAnimations = [iTermAdvancedSettingsModel disablePasswordManagerAnimations];
-    if (noAnimations) {
-        [CATransaction begin];
-        [CATransaction setValue:@YES
-                         forKey:kCATransactionDisableActions];
-    }
 
     [self.window beginSheet:[_passwordManagerWindowController window] completionHandler:^(NSModalResponse returnCode) {
-        if (noAnimations) {
-            [CATransaction begin];
-            [CATransaction setValue:@YES
-                             forKey:kCATransactionDisableActions];
-        }
         [[_passwordManagerWindowController window] close];
+        [_passwordManagerWindowController autorelease];
         _passwordManagerWindowController = nil;
-        if (noAnimations) {
-            [CATransaction commit];
-        }
     }];
-    if (noAnimations) {
-        [CATransaction commit];
-    }
 
     [_passwordManagerWindowController selectAccountName:name];
 }
@@ -6402,7 +6447,7 @@ ITERM_WEAKLY_REFERENCEABLE
     for (NSString *theKey in sessionMap) {
         PTYSession *session = sessionMap[theKey];
         DLog(@"Revive %@", session);
-        assert([session revive]);  // TODO: This isn't guarantted
+        assert([session revive]);  // TODO: This isn't guaranteed
     }
 
     [self insertTab:tab atIndex:[self indexForTabWithPredecessors:predecessors]];
@@ -7315,7 +7360,7 @@ ITERM_WEAKLY_REFERENCEABLE
     // If updatePaneTitles caused any session to change dimensions, then tell tmux
     // controllers that our capacity has changed.
     if (needResize) {
-        DLog(@"refrshTerminal needs resize");
+        DLog(@"refreshTerminal needs resize");
         NSArray *tmuxControllers = [self uniqueTmuxControllers];
         for (TmuxController *c in tmuxControllers) {
             [c windowDidResize:self];
@@ -8381,7 +8426,7 @@ ITERM_WEAKLY_REFERENCEABLE
     }
 }
 
-// These two methods are delecate because -closeTab: won't remove the tab from
+// These two methods are delicate because -closeTab: won't remove the tab from
 // the -tabs array immediately for tmux tabs.
 - (void)closeOtherTabs:(id)sender
 {
@@ -9007,7 +9052,7 @@ ITERM_WEAKLY_REFERENCEABLE
     [self.currentSession.quickLookController endPreviewPanelControl:panel];
 }
 
-#pragma mark - NSCombobBoxDelegate
+#pragma mark - NSComboBoxDelegate
 
 - (void)controlTextDidChange:(NSNotification *)aNotification {
     if ([aNotification object] == coprocessCommand_) {

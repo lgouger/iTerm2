@@ -20,7 +20,7 @@
 #import "iTermCharacterSource.h"
 #import "iTermColorMap.h"
 #import "iTermColorPresets.h"
-#import "iTermCommandHistoryCommandUseMO+Addtions.h"
+#import "iTermCommandHistoryCommandUseMO+Additions.h"
 #import "iTermController.h"
 #import "iTermCopyModeState.h"
 #import "iTermDisclosableView.h"
@@ -225,7 +225,7 @@ static NSMutableDictionary *gRegisteredSessionContents;
 static NSTimeInterval kMinimumPartialLineTriggerCheckInterval = 0.5;
 
 // Grace period to avoid failing to write anti-idle code when timer runs just before when the code
-// shuold be sent.
+// should be sent.
 static const NSTimeInterval kAntiIdleGracePeriod = 0.1;
 
 // Limit for number of entries in self.directories, self.commands, self.hosts.
@@ -375,7 +375,7 @@ static const NSUInteger kMaxHosts = 100;
     // In order to correctly draw a tiled background image, we must first draw
     // it into an image the size of the session view, and then blit from it
     // onto the background of whichever view needs a background. This ensures
-    // the tesselation is consistent.
+    // the tessellation is consistent.
     NSImage *_patternedImage;
 
     // Mouse reporting state
@@ -434,7 +434,7 @@ static const NSUInteger kMaxHosts = 100;
     NSString *_missingSavedArrangementProfileGUID;
 
     // The containing window is in the midst of a live resize. The update timer
-    // runs in the common modes runlooup in this case. That's not acceptable
+    // runs in the common modes runloop in this case. That's not acceptable
     // for normal use for reasons that Apple leaves up to your imagination (it
     // doesn't fire while you hold down a key, for example), but it does fire
     // during live resize (unlike the default runloops).
@@ -487,6 +487,8 @@ static const NSUInteger kMaxHosts = 100;
     iTermVariableReference *_jobPidRef;
     iTermVariableReference *_autoNameFormatRef;
     iTermCacheableImage *_customIcon;
+    CGContextRef _metalContext;
+    BOOL _errorCreatingMetalContext;
 }
 
 + (NSMapTable<NSString *, PTYSession *> *)sessionMap {
@@ -774,6 +776,9 @@ ITERM_WEAKLY_REFERENCEABLE
     [_metaFrustrationDetector release];
     [_tmuxStatusBarMonitor setActive:NO];
     [_tmuxStatusBarMonitor release];
+    if (_metalContext) {
+        CGContextRelease(_metalContext);
+    }
     [[NSNotificationCenter defaultCenter] removeObserver:self];
 
     if (_dvrDecoder) {
@@ -994,10 +999,10 @@ ITERM_WEAKLY_REFERENCEABLE
     if (![iTermAdvancedSettingsModel noSyncSuppressMissingProfileInArrangementWarning]) {
         NSString *notice;
         NSArray<NSString *> *actions = @[ @"Don't Warn Again" ];
-        NSString *savedArranagementName = [[iTermController sharedInstance] savedArrangementNameBeingRestored];
+        NSString *savedArrangementName = [[iTermController sharedInstance] savedArrangementNameBeingRestored];
         if ([[ProfileModel sharedInstance] bookmarkWithName:missingProfileName]) {
             notice = [NSString stringWithFormat:@"This session's profile, “%@”, no longer exists. A profile with that name happens to exist.", missingProfileName];
-            if (savedArranagementName) {
+            if (savedArrangementName) {
                 actions = [actions arrayByAddingObject:@"Repair Saved Arrangement"];
             }
         } else {
@@ -1016,7 +1021,7 @@ ITERM_WEAKLY_REFERENCEABLE
                                                             } else if (selection == 1) {
                                                                 // Repair
                                                                 Profile *similarlyNamedProfile = [[ProfileModel sharedInstance] bookmarkWithName:missingProfileName];
-                                                                [[iTermController sharedInstance] repairSavedArrangementNamed:savedArranagementName
+                                                                [[iTermController sharedInstance] repairSavedArrangementNamed:savedArrangementName
                                                                                                          replacingMissingGUID:thisProfile[KEY_GUID]
                                                                                                                      withGUID:similarlyNamedProfile[KEY_GUID]];
                                                                 [[NSNotificationCenter defaultCenter] postNotificationName:PTYSessionDidRepairSavedArrangement
@@ -1242,7 +1247,7 @@ ITERM_WEAKLY_REFERENCEABLE
         }
     }
     if (needDivorce) {
-        // Keep it from stepping on an existing sesion with the same guid. Assign a fresh GUID.
+        // Keep it from stepping on an existing session with the same guid. Assign a fresh GUID.
         // Set the ORIGINAL_GUID to an existing guid from which this profile originated if possible.
         NSString *originalGuid = nil;
         NSString *recordedGuid = arrangement[SESSION_ARRANGEMENT_BOOKMARK][KEY_GUID];
@@ -1709,7 +1714,7 @@ ITERM_WEAKLY_REFERENCEABLE
 
         case PROMPT_EX_JOBS: {
             if (self.isTmuxClient) {
-                return [iTermPromptOnCloseReason tmuxClientsAlwaysPromptBecaseJobsAreNotExposed];
+                return [iTermPromptOnCloseReason tmuxClientsAlwaysPromptBecauseJobsAreNotExposed];
             }
             NSMutableArray<NSString *> *blockingJobs = [NSMutableArray array];
             NSArray *jobsThatDontRequirePrompting = [_profile objectForKey:KEY_JOBS];
@@ -2013,7 +2018,7 @@ ITERM_WEAKLY_REFERENCEABLE
 
 - (void)_maybeWarnAboutShortLivedSessions
 {
-    if ([iTermApplication.sharedApplication delegate].isApplescriptTestApp) {
+    if ([iTermApplication.sharedApplication delegate].isAppleScriptTestApp) {
         // The applescript test driver doesn't care about short-lived sessions.
         return;
     }
@@ -2237,7 +2242,7 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 // This does not handle tmux properly. Any writing to tmux should happen in a
-// caller. It does handle braodcasting to other sessions.
+// caller. It does handle broadcasting to other sessions.
 - (void)writeTaskImpl:(NSString *)string
              encoding:(NSStringEncoding)optionalEncoding
         forceEncoding:(BOOL)forceEncoding
@@ -3505,11 +3510,14 @@ ITERM_WEAKLY_REFERENCEABLE
     NSDictionary *aDict = aePrefs;
 
     if (aDict == nil) {
+        DLog(@"nil dict, use default");
         aDict = [[ProfileModel sharedInstance] defaultBookmark];
     }
     if (aDict == nil) {
+        DLog(@"uh oh! no default dict!");
         return;
     }
+    DLog(@"%@: set prefs to address book entry:\n%@", self, aDict);
 
     if ([self isTmuxClient] && ![_profile[KEY_NAME] isEqualToString:aePrefs[KEY_NAME]]) {
         _tmuxTitleOutOfSync = YES;
@@ -3568,7 +3576,7 @@ ITERM_WEAKLY_REFERENCEABLE
                                                                       inProfile:aDict]];
 
     // Color scheme
-    // ansiColosMatchingForeground:andBackground:inBookmark does an equality comparison, so
+    // ansiColorsMatchingForeground:andBackground:inBookmark does an equality comparison, so
     // iTermProfilePreferences is not used here.
     [self setColorFgBgVariable:[self ansiColorsMatchingForeground:aDict[KEY_FOREGROUND_COLOR]
                                                     andBackground:aDict[KEY_BACKGROUND_COLOR]
@@ -4655,6 +4663,7 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (void)setSessionSpecificProfileValues:(NSDictionary *)newValues {
+    DLog(@"%@: setSessionSpecificProfilevalues:%@", self, newValues);
     if (!self.isDivorced) {
         [self divorceAddressBookEntryFromPreferences];
     }
@@ -4672,6 +4681,7 @@ ITERM_WEAKLY_REFERENCEABLE
         // commonly when setting tab color after a split.
         return;
     }
+    DLog(@"Set bookmark and reload profile");
     [[ProfileModel sessionsInstance] setBookmark:temp withGuid:temp[KEY_GUID]];
 
     // Update this session's copy of the bookmark
@@ -4877,12 +4887,73 @@ ITERM_WEAKLY_REFERENCEABLE
 
 #pragma mark - Metal Support
 
+#pragma mark iTermMetalGlueDelegate
+
 - (void)metalGlueDidDrawFrameAndNeedsRedraw:(BOOL)redrawAsap NS_AVAILABLE_MAC(10_11) {
     if (_view.useMetal) {
         if (redrawAsap) {
             [_textview setNeedsDisplay:YES];
         }
     }
+}
+
+- (CGContextRef)metalGlueContext {
+    return _metalContext;
+}
+
++ (CGColorSpaceRef)metalColorSpace {
+    static dispatch_once_t onceToken;
+    static CGColorSpaceRef colorSpace;
+    dispatch_once(&onceToken, ^{
+        colorSpace = CGColorSpaceCreateDeviceRGB();
+        ITAssertWithMessage(colorSpace, @"Colorspace is %@", colorSpace);
+    });
+    return colorSpace;
+}
+
++ (CGContextRef)onePixelContext {
+    static CGContextRef context;
+    if (context == NULL) {
+        context = CGBitmapContextCreate(NULL,
+                                        1,
+                                        1,
+                                        8,
+                                        1 * 4,
+                                        [self metalColorSpace],
+                                        kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Host);
+    }
+    return context;
+}
+
+- (void)setMetalContextSize:(CGSize)size {
+    DLog(@"%@", self);
+    if (!self.textview.window) {
+        DLog(@"No window");
+        CGContextRelease(_metalContext);
+        _metalContext = NULL;
+        return;
+    }
+
+    const CGFloat scale = self.textview.window.backingScaleFactor;
+    const int radius = (iTermTextureMapMaxCharacterParts / 2) * 2 + 1;
+    CGSize scaledSize = CGSizeMake(size.width * scale * radius, size.height * scale * radius);
+    if (_metalContext) {
+        if (CGSizeEqualToSize(scaledSize, CGSizeMake(CGBitmapContextGetWidth(_metalContext),
+                                                     CGBitmapContextGetHeight(_metalContext)))) {
+            DLog(@"No size change");
+            return;
+        }
+        CGContextRelease(_metalContext);
+        _metalContext = NULL;
+    }
+    DLog(@"allocate new metal context of size %@", NSStringFromSize(scaledSize));
+    _metalContext = CGBitmapContextCreate(NULL,
+                                          scaledSize.width,
+                                          scaledSize.height,
+                                          8,
+                                          scaledSize.width * 4,  // bytes per row
+                                          [PTYSession metalColorSpace],
+                                          kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Host);
 }
 
 - (BOOL)metalAllowed {
@@ -4906,6 +4977,12 @@ ITERM_WEAKLY_REFERENCEABLE
     if (![iTermPreferences boolForKey:kPreferenceKeyUseMetal]) {
         if (reason) {
             *reason = iTermMetalUnavailableReasonDisabled;
+        }
+        return NO;
+    }
+    if ([PTYSession onePixelContext] == nil) {
+        if (reason) {
+            *reason = iTermMetalUnavailableReasonContextAllocationFailure;
         }
         return NO;
     }
@@ -4933,6 +5010,13 @@ ITERM_WEAKLY_REFERENCEABLE
         }
         return NO;
     }
+    if ([[iTermController sharedInstance] terminalIsObscured:_delegate.realParentWindow threshold:0.5]) {
+        if (reason) {
+            *reason = iTermMetalUnavailableReasonWindowObscured;
+        }
+        return NO;
+    }
+
     if (_textview.transparencyAlpha < 1) {
         BOOL transparencyAllowed = NO;
 #if ENABLE_TRANSPARENT_METAL_WINDOWS
@@ -5053,6 +5137,12 @@ ITERM_WEAKLY_REFERENCEABLE
     return NO;
 }
 
+- (BOOL)willEnableMetal {
+    DLog(@"%@", self);
+    [self updateMetalDriver];
+    return _metalContext != nil;
+}
+
 - (void)setUseMetal:(BOOL)useMetal {
     if (@available(macOS 10.11, *)) {
         if (useMetal == _useMetal) {
@@ -5068,6 +5158,13 @@ ITERM_WEAKLY_REFERENCEABLE
         } else {
             _wrapper.useMetal = NO;
             [_metalDisabledTokens removeAllObjects];
+            if (_metalContext) {
+                // If metal is re-enabled later, it must not use the same context.
+                // It's possible that a metal driver thread has survived this point
+                // and will continue to use the context.
+                CGContextRelease(_metalContext);
+                _metalContext = NULL;
+            }
         }
         [_textview setNeedsDisplay:YES];
         [_cadenceController changeCadenceIfNeeded];
@@ -5171,6 +5268,7 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (void)updateMetalDriver NS_AVAILABLE_MAC(10_11) {
+    DLog(@"%@", self);
     const CGSize cellSize = CGSizeMake(_textview.charWidth, _textview.lineHeight);
     CGSize glyphSize;
     if (iTermTextIsMonochrome()) {
@@ -5178,17 +5276,52 @@ ITERM_WEAKLY_REFERENCEABLE
         NSRect rect = [iTermCharacterSource boundingRectForCharactersInRange:NSMakeRange(32, 127-32)
                                                                         font:_textview.font
                                                               baselineOffset:_textview.primaryFont.baselineOffset
-                                                                       scale:_view.window.backingScaleFactor ?: 1];
+                                                                       scale:_view.window.backingScaleFactor ?: 1
+                                                                     context:[PTYSession onePixelContext]];
         glyphSize.width = MAX(cellSize.width, NSMaxX(rect));
         glyphSize.height = MAX(cellSize.height, NSMaxY(rect));
     } else {
         glyphSize = cellSize;
     }
+    [self setMetalContextSize:glyphSize];
+    if (!_metalContext) {
+        DLog(@"%p Failed to allocate metal context. Disable metal and try again in 1 second.", self);
+        if (_errorCreatingMetalContext) {
+            DLog(@"Already have a retry queued.");
+            return;
+        }
+        _errorCreatingMetalContext = YES;
+        [self.delegate sessionUpdateMetalAllowed];
+        __weak __typeof(self) weakSelf = self;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+                           [weakSelf retryMetalAfterContextAllocationFailure];
+                       });
+        return;
+    }
     [_view.driver setCellSize:cellSize
        cellSizeWithoutSpacing:CGSizeMake(_textview.charWidthWithoutSpacing, _textview.charHeightWithoutSpacing)
                     glyphSize:glyphSize
                      gridSize:_screen.currentGrid.size
-                        scale:_view.window.screen.backingScaleFactor];
+                        scale:_view.window.screen.backingScaleFactor
+                      context:_metalContext];
+}
+
+- (void)retryMetalAfterContextAllocationFailure {
+    DLog(@"%p It's been one second since trying to allocate a metal context failed. Try again.", self);
+    if (!_errorCreatingMetalContext) {
+        DLog(@"Oddly, errorCreatingMetalContext is NO");
+        return;
+    }
+    DLog(@"%p reset error state", self);
+    _errorCreatingMetalContext = NO;
+    [self updateMetalDriver];
+    if (_metalContext) {
+        DLog(@"A metal context was allocated. Try to turn metal on for this tab.");
+        [self.delegate sessionUpdateMetalAllowed];
+    } else {
+        DLog(@"Failed to allocate context again. A retry should have been scheduled.");
+    }
 }
 
 #pragma mark - Captured Output
@@ -5242,7 +5375,7 @@ ITERM_WEAKLY_REFERENCEABLE
         [_pbtext release];
         _pbtext = nil;
 
-        // In case it was the find pasteboard that chagned
+        // In case it was the find pasteboard that changed
         [[NSNotificationCenter defaultCenter] postNotificationName:@"iTermLoadFindStringFromSharedPasteboard"
                                                             object:nil
                                                           userInfo:nil];
@@ -5913,7 +6046,7 @@ ITERM_WEAKLY_REFERENCEABLE
         }
     }
 
-    // All necessary conditions are statisifed. Now find one that is sufficient.
+    // All necessary conditions are satisifed. Now find one that is sufficient.
     for (NSInteger i = 0; i < pattern.keycodesArray_Count; i++) {
         if (event.keyCode == [pattern.keycodesArray valueAtIndex:i]) {
             return YES;
@@ -7202,7 +7335,7 @@ ITERM_WEAKLY_REFERENCEABLE
                     return YES;
 
                 case MOUSE_REPORTING_NONE:
-                case MOUSE_REPORTING_HILITE:
+                case MOUSE_REPORTING_HIGHLIGHT:
                     break;
             }
             break;
@@ -7226,7 +7359,7 @@ ITERM_WEAKLY_REFERENCEABLE
                         return YES;
 
                     case MOUSE_REPORTING_NONE:
-                    case MOUSE_REPORTING_HILITE:
+                    case MOUSE_REPORTING_HIGHLIGHT:
                         break;
                 }
             }
@@ -7266,7 +7399,7 @@ ITERM_WEAKLY_REFERENCEABLE
                         return YES;
 
                     case MOUSE_REPORTING_NONE:
-                    case MOUSE_REPORTING_HILITE:
+                    case MOUSE_REPORTING_HIGHLIGHT:
                         break;
                 }
             }
@@ -7306,7 +7439,7 @@ ITERM_WEAKLY_REFERENCEABLE
                     return YES;
 
                 case MOUSE_REPORTING_NONE:
-                case MOUSE_REPORTING_HILITE:
+                case MOUSE_REPORTING_HIGHLIGHT:
                     break;
             }
             break;
@@ -7548,7 +7681,7 @@ ITERM_WEAKLY_REFERENCEABLE
     }
 }
 
-- (void)textViewDidHighightMark {
+- (void)textViewDidHighlightMark {
     if (self.useMetal) {
         [_textview setNeedsDisplay:YES];
     }
@@ -7739,7 +7872,9 @@ ITERM_WEAKLY_REFERENCEABLE
 
 - (NSString *)valueForLanguageEnvironmentVariable {
     DLog(@"Looking for a locale...");
-    NSArray<NSString *> *languageCodes = [[NSLocale preferredLanguages] mapWithBlock:^id(NSString *language) {
+    const NSInteger numberOfLanguagesToConsider = 1;
+    DLog(@"Consider %@ of languages: %@", @(numberOfLanguagesToConsider), [NSLocale preferredLanguages]);
+    NSArray<NSString *> *languageCodes = [[[NSLocale preferredLanguages] subarrayToIndex:numberOfLanguagesToConsider] mapWithBlock:^id(NSString *language) {
         DLog(@"Found preferred language: %@", language);
         NSUInteger index = [language rangeOfString:@"-" options:0].location;
         if (index == NSNotFound) {
@@ -8410,7 +8545,7 @@ ITERM_WEAKLY_REFERENCEABLE
     [_textview.window makeFirstResponder:_textview];
 }
 
-// Stop pasting (despited the name)
+// Stop pasting (despite the name)
 - (void)screenCopyBufferToPasteboard {
     if ([iTermPreferences boolForKey:kPreferenceKeyAllowClipboardAccessFromTerminal]) {
         [self setPasteboard:nil];
@@ -8557,16 +8692,22 @@ ITERM_WEAKLY_REFERENCEABLE
             _requestAttentionId =
                 [NSApp requestUserAttention:NSCriticalRequest];
             break;
+        case VT100AttentionRequestTypeBounceOnceDockIcon:
+            [NSApp requestUserAttention:NSInformationalRequest];
+            break;
     }
 }
 
 - (void)screenSetBackgroundImageFile:(NSString *)filename {
-    filename = [filename stringByBase64DecodingStringWithEncoding:NSUTF8StringEncoding];
+    DLog(@"screenSetbackgroundImageFile:%@", filename);
+    filename = [[filename stringByBase64DecodingStringWithEncoding:NSUTF8StringEncoding] stringByTrimmingTrailingCharactersFromCharacterSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     if (!filename.length) {
+        DLog(@"Filename is empty. Reset the background image.");
         [self setSessionSpecificProfileValues:@{ KEY_BACKGROUND_IMAGE_LOCATION: [NSNull null] }];
         return;
     }
     if (!filename || ![[NSFileManager defaultManager] fileExistsAtPath:filename]) {
+        DLog(@"file %@ does not exist", filename);
         return;
     }
     NSUserDefaults *userDefaults = [NSUserDefaults standardUserDefaults];
@@ -9199,7 +9340,7 @@ ITERM_WEAKLY_REFERENCEABLE
                         _bellRate = nil;
                         switch (selection) {
                             case -2:  // Dismiss programmatically
-                                DLog(@"Dismiss programatically");
+                                DLog(@"Dismiss programmatically");
                                 break;
 
                             case -1: // No
@@ -9244,7 +9385,7 @@ ITERM_WEAKLY_REFERENCEABLE
                         _bellRate = nil;
                         switch (selection) {
                             case -2:  // Dismiss programmatically
-                                DLog(@"Dismiss programatically");
+                                DLog(@"Dismiss programmatically");
                                 break;
 
                             case -1: // No
@@ -9774,7 +9915,13 @@ ITERM_WEAKLY_REFERENCEABLE
 
 }
 
+- (void)sessionViewDraggingExited:(id<NSDraggingInfo>)sender {
+    [self.delegate sessionDraggingExited:self];
+}
+
 - (NSDragOperation)sessionViewDraggingEntered:(id<NSDraggingInfo>)sender {
+    [self.delegate sessionDraggingEntered:self];
+
     PTYSession *movingSession = [[MovePaneController sharedInstance] session];
     if (![_delegate session:self shouldAllowDrag:sender]) {
         return NSDragOperationNone;
@@ -9933,7 +10080,7 @@ ITERM_WEAKLY_REFERENCEABLE
 - (void)drawFrameAndRemoveTemporarilyDisablementOfMetalForToken:(id)token NS_AVAILABLE_MAC(10_11) {
     DLog(@"drawFrameAndRemoveTemporarilyDisablementOfMetal %@", token);
     if (!_useMetal) {
-        DLog(@"drawFrameAndRemoveTemporarilyDisablementOfMetal returning earily because useMetal is off");
+        DLog(@"drawFrameAndRemoveTemporarilyDisablementOfMetal returning early because useMetal is off");
         return;
     }
     if ([_metalDisabledTokens containsObject:token]) {

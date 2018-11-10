@@ -17,6 +17,7 @@ extern "C" {
 #import "iTermAdvancedSettingsModel.h"
 }
 #include <map>
+#include <vector>
 
 static BOOL gEnableDoubleWidthCharacterLineCache = NO;
 static BOOL gUseCachingNumberOfLines = NO;
@@ -70,6 +71,15 @@ void EnableDoubleWidthCharacterLineCache() {
 
     // Keys are (offset from raw_buffer, length to examine, width).
     std::map<std::tuple<int, int, int>, int> _numberOfFullLinesCache;
+
+    std::vector<void *> _observers;
+}
+
+NS_INLINE void iTermLineBlockDidChange(__unsafe_unretained LineBlock *lineBlock) {
+    for (auto &observer : lineBlock->_observers) {
+        __unsafe_unretained id<iTermLineBlockObserver> obj = static_cast<id<iTermLineBlockObserver> >(observer);
+        [obj lineBlockDidChange:lineBlock];
+    }
 }
 
 - (instancetype)init {
@@ -283,8 +293,12 @@ static char* formatsct(screen_char_t* src, int len, char* dest) {
     }
 }
 
-- (void)dump:(int)rawOffset
-{
+- (void)dump:(int)rawOffset toDebugLog:(BOOL)toDebugLog {
+    if (toDebugLog) {
+        DLog(@"numRawLines=%@", @([self numRawLines]));
+    } else {
+        NSLog(@"numRawLines=%@", @([self numRawLines]));
+    }
     char temp[1000];
     int i;
     int prev;
@@ -295,8 +309,13 @@ static char* formatsct(screen_char_t* src, int len, char* dest) {
     }
     for (i = first_entry; i < cll_entries; ++i) {
         BOOL iscont = (i == cll_entries-1) && is_partial;
-        NSLog(@"Line %d, length %d, offset from raw=%d, abs pos=%d, continued=%s: %s\n", i, cumulative_line_lengths[i] - prev, prev, prev + rawOffset, iscont?"yes":"no",
-              formatsct(buffer_start+prev-start_offset, cumulative_line_lengths[i]-prev, temp));
+        NSString *message = [NSString stringWithFormat:@"Line %d, length %d, offset from raw=%d, abs pos=%d, continued=%s: %s\n", i, cumulative_line_lengths[i] - prev, prev, prev + rawOffset, iscont?"yes":"no",
+                             formatsct(buffer_start+prev-start_offset, cumulative_line_lengths[i]-prev, temp)];
+        if (toDebugLog) {
+            DLog(@"%@", message);
+        } else {
+            NSLog(@"%@", message);
+        }
         prev = cumulative_line_lengths[i];
     }
 }
@@ -439,6 +458,8 @@ extern "C" int iTermLineBlockNumberOfFullLinesImpl(screen_char_t *buffer,
 #endif
     }
     is_partial = partial;
+
+    iTermLineBlockDidChange(self);
     return YES;
 }
 
@@ -635,7 +656,7 @@ int OffsetOfWrappedLine(screen_char_t* p, int n, int length, int width, BOOL may
             *lineNum -= consume;
             ITBetaAssert(*lineNum >= 0, @"Negative lines after consuming spans");
         } else {  // *lineNum <= spans
-            // We found the raw line that inclues the wrapped line we're searching for.
+            // We found the raw line that includes the wrapped line we're searching for.
             // eat up *lineNum many width-sized wrapped lines from this start of the current full line
             int offset;
             if (gEnableDoubleWidthCharacterLineCache) {
@@ -790,6 +811,7 @@ int OffsetOfWrappedLine(screen_char_t* p, int n, int length, int width, BOOL may
     }
     // refresh cache
     cached_numlines_width = -1;
+    iTermLineBlockDidChange(self);
     return YES;
 }
 
@@ -883,7 +905,7 @@ int OffsetOfWrappedLine(screen_char_t* p, int n, int length, int width, BOOL may
             int consume = spans + 1;
             n -= consume;
         } else {  // n <= spans
-            // We found the raw line that inclues the wrapped line we're searching for.
+            // We found the raw line that includes the wrapped line we're searching for.
             // Set offset to the offset into the raw line where the nth wrapped
             // line begins.
             int offset = OffsetOfWrappedLine(buffer_start + prev,
@@ -910,6 +932,7 @@ int OffsetOfWrappedLine(screen_char_t* p, int n, int length, int width, BOOL may
 #ifdef TEST_LINEBUFFER_SANITY
             [self checkAndResetCachedNumlines:"dropLines" width: width];
 #endif
+            iTermLineBlockDidChange(self);
             return orig_n;
         }
         prev = cll;
@@ -922,6 +945,7 @@ int OffsetOfWrappedLine(screen_char_t* p, int n, int length, int width, BOOL may
     start_offset = 0;
     first_entry = 0;
     *charsDropped = [self rawSpaceUsed];
+    iTermLineBlockDidChange(self);
     return orig_n - n;
 }
 
@@ -1182,7 +1206,7 @@ static int Search(NSString* needle,
         // accept is one whose leftmost position is at the leftmost position of
         // the previous result.
         //
-        // Example: Consider a previosu search of [jump]
+        // Example: Consider a previous search of [jump]
         //  The quick brown fox jumps over the lazy dog.
         //                      ^^^^
         // The search is then extended to [jumps]. We want to return:
@@ -1487,6 +1511,24 @@ static int Search(NSString* needle,
         }
     }
     return count;
+}
+
+- (void)addObserver:(id<iTermLineBlockObserver>)observer {
+    _observers.push_back((void *)observer);
+}
+
+- (void)removeObserver:(id<iTermLineBlockObserver>)observer {
+    void *voidptr = static_cast<void *>(observer);
+    auto it = std::find(_observers.begin(), _observers.end(), voidptr);
+    if (it != _observers.end()) {
+        _observers.erase(it);
+    }
+}
+
+- (BOOL)hasObserver:(id<iTermLineBlockObserver>)observer {
+    void *voidptr = static_cast<void *>(observer);
+    auto it = std::find(_observers.begin(), _observers.end(), voidptr);
+    return it != _observers.end();
 }
 
 @end

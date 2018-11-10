@@ -56,7 +56,7 @@ static NSString* TAB_ARRANGEMENT_VIEW_TYPE = @"View Type";
 static NSString* VIEW_TYPE_SPLITTER = @"Splitter";
 static NSString* VIEW_TYPE_SESSIONVIEW = @"SessionView";
 static NSString* SPLITTER_IS_VERTICAL = @"isVertical";
-static NSString* TAB_ARRANGEMENT_SPLIITER_FRAME = @"frame";
+static NSString* TAB_ARRANGEMENT_SPLITTER_FRAME = @"frame";
 static NSString* TAB_ARRANGEMENT_SESSIONVIEW_FRAME = @"frame";
 static NSString* TAB_WIDTH = @"width";
 static NSString* TAB_HEIGHT = @"height";
@@ -85,7 +85,7 @@ static void SwapPoint(NSPoint* point) {
     point->y = temp.x;
 }
 
-// The "grain" runs perpindicular to the splitters. An example with isVertical==YES:
+// The "grain" runs perpendicular to the splitters. An example with isVertical==YES:
 // +----------------+
 // |     |     |    |
 // |     |     |    |
@@ -197,6 +197,10 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     iTermSwiftyString *_tabTitleOverrideSwiftyString;
 
     NSInteger _numberOfSplitViewDragsInProgress;
+
+    // If YES then force metal off. Does a hard reset when changing screens.
+    BOOL _bounceMetal;
+    NSString *_temporarilyUnmaximizedSessionGUID;
 }
 
 @synthesize parentWindow = parentWindow_;
@@ -383,8 +387,12 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
                                                  name:iTermPowerManagerStateDidChange
                                                object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self
-                                             selector:@selector(bounceMetal:)
+                                             selector:@selector(metalSettingsDidChange:)
                                                  name:iTermMetalSettingsDidChangeNotification
+                                               object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(screenParametersDidChange:)
+                                                 name:NSApplicationDidChangeScreenParametersNotification
                                                object:nil];
 }
 
@@ -631,7 +639,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
         [tabViewItem_ setLabel:[[self activeSession] name]];
         if ([realParentWindow_ currentTab] == self) {
             // If you set a textview in a non-current tab to the first responder and
-            // then close that tab, it crashes with NSTextInput caling
+            // then close that tab, it crashes with NSTextInput calling
             // -[PTYTextView respondsToSelector:] on a deallocated instance of the
             // first responder. This kind of hacky workaround keeps us from making
             // a invisible textview the first responder.
@@ -812,11 +820,13 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
         NSColor *bgColor;
         bgColor = [ITAddressBookMgr decodeColor:self.tmuxController.profile[KEY_BACKGROUND_COLOR]];
         if ([self.delegate tabShouldUseTransparency:self]) {
-            CGFloat alpha = [iTermProfilePreferences floatForKey:KEY_TRANSPARENCY inProfile:self.tmuxController.profile];
+            CGFloat alpha = 1.0 - [iTermProfilePreferences floatForKey:KEY_TRANSPARENCY inProfile:self.tmuxController.profile];
             if (alpha < 1) {
                 bgColor = [bgColor colorWithAlphaComponent:alpha];
             }
         }
+
+
         [flexibleView_ setColor:bgColor];
     } else {
         // Fullscreen, overly large flexible view, or exact size flex view.
@@ -1075,7 +1085,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
         }];
     } else {
         sessions = [self sessionsInProjectionOfSession:session verticalDirection:verticalDir after:!after];
-        NSArray<PTYSession *> *wraparounds = [sessions mininumsWithComparator:^NSComparisonResult(PTYSession *a, PTYSession *b) {
+        NSArray<PTYSession *> *wraparounds = [sessions minimumsWithComparator:^NSComparisonResult(PTYSession *a, PTYSession *b) {
             NSRect aRect = [self->root_ convertRect:a.view.frame fromView:a.view.superview];
             NSRect bRect = [self->root_ convertRect:b.view.frame fromView:b.view.superview];
             if (verticalDir) {
@@ -1611,10 +1621,10 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 }
 
 - (void)arrangeSplitPanesEvenly {
-    [self arrangeSplitPanesEventlyInSplitView:root_];
+    [self arrangeSplitPanesEvenlyInSplitView:root_];
 }
 
-- (void)arrangeSplitPanesEventlyInSplitView:(NSSplitView *)splitView {
+- (void)arrangeSplitPanesEvenlyInSplitView:(NSSplitView *)splitView {
     if (self.isTmuxTab) {
         [self arrangeTmuxSplitPanesEvenly];
         return;
@@ -1639,7 +1649,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
         view.frame = frame;
         NSSplitView *child = [NSSplitView castFrom:view];
         if (child) {
-            [self arrangeSplitPanesEventlyInSplitView:child];
+            [self arrangeSplitPanesEvenlyInSplitView:child];
         }
         offset += size;
         offset += splitView.dividerThickness;
@@ -1842,7 +1852,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
                 // Take the cross-grain size of the first subview.
                 size.height = subviewSize.height;
             } else if ((int)size.height != (int)subviewSize.height) {
-                // There's a discripancy in cross-grain sizes among subviews.
+                // There's a discrepancy in cross-grain sizes among subviews.
                 if (subviewContainsLock) {
                     // Prefer the locked subview.
                     size.height = subviewSize.height;
@@ -1860,7 +1870,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
                 // Take the cross-grain size of the first subview.
                 size.width = subviewSize.width;
             } else if ((int)size.width != (int)subviewSize.width) {
-                // There's a discripancy in cross-grain sizes among subviews.
+                // There's a discrepancy in cross-grain sizes among subviews.
                 if (subviewContainsLock) {
                     // Prefer the locked subview.
                     size.width = subviewSize.width;
@@ -1930,7 +1940,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
                 // Take the cross-grain size of the first subview.
                 size.width = subviewSize.width;
             } else if ((int)size.width != (int)subviewSize.width) {
-                // There's a discripancy in cross-grain sizes among subviews.
+                // There's a discrepancy in cross-grain sizes among subviews.
                 size.width = MAX(size.width, subviewSize.width);
             }
         }
@@ -2317,7 +2327,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     if ([view isKindOfClass:[NSSplitView class]]) {
         NSSplitView* splitView = (NSSplitView*)view;
         [result setObject:VIEW_TYPE_SPLITTER forKey:TAB_ARRANGEMENT_VIEW_TYPE];
-        [result setObject:[PTYTab frameToDict:[view frame]] forKey:TAB_ARRANGEMENT_SPLIITER_FRAME];
+        [result setObject:[PTYTab frameToDict:[view frame]] forKey:TAB_ARRANGEMENT_SPLITTER_FRAME];
         [result setObject:[NSNumber numberWithBool:[splitView isVertical]] forKey:SPLITTER_IS_VERTICAL];
         NSMutableArray *subviews = [NSMutableArray arrayWithCapacity:[[splitView subviews] count]];
         for (NSView *subview in [splitView subviews]) {
@@ -2390,12 +2400,12 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     }
 }
 
-+ (__kindof NSView *)_recusiveRestoreSplitters:(NSDictionary<NSString *, id> *)arrangement
-                                     fromIdMap:(NSDictionary<NSNumber *, SessionView *> *)idMap
-                                    sessionMap:(NSDictionary<NSString *, PTYSession *> *)sessionMap
-                               revivedSessions:(NSMutableArray<PTYSession *> *)revivedSessions {
++ (__kindof NSView *)_recursiveRestoreSplitters:(NSDictionary<NSString *, id> *)arrangement
+                                      fromIdMap:(NSDictionary<NSNumber *, SessionView *> *)idMap
+                                     sessionMap:(NSDictionary<NSString *, PTYSession *> *)sessionMap
+                                revivedSessions:(NSMutableArray<PTYSession *> *)revivedSessions {
     if ([[arrangement objectForKey:TAB_ARRANGEMENT_VIEW_TYPE] isEqualToString:VIEW_TYPE_SPLITTER]) {
-        NSRect frame = [PTYTab dictToFrame:[arrangement objectForKey:TAB_ARRANGEMENT_SPLIITER_FRAME]];
+        NSRect frame = [PTYTab dictToFrame:[arrangement objectForKey:TAB_ARRANGEMENT_SPLITTER_FRAME]];
         NSSplitView *splitter = [[PTYSplitView alloc] initWithFrame:frame];
         if (USE_THIN_SPLITTERS) {
             [splitter setDividerStyle:NSSplitViewDividerStyleThin];
@@ -2404,10 +2414,10 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 
         NSArray<NSDictionary *> *subviews = [arrangement objectForKey:SUBVIEWS];
         for (NSDictionary *subArrangement in subviews) {
-            NSView* subView = [PTYTab _recusiveRestoreSplitters:subArrangement
-                                                      fromIdMap:idMap
-                                                     sessionMap:sessionMap
-                                                revivedSessions:revivedSessions];
+            NSView* subView = [PTYTab _recursiveRestoreSplitters:subArrangement
+                                                       fromIdMap:idMap
+                                                      sessionMap:sessionMap
+                                                 revivedSessions:revivedSessions];
             if (subView) {
                 [splitter addSubview:subView];
             }
@@ -2617,10 +2627,10 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     PTYTab *theTab;
     NSMutableArray<PTYSession *> *revivedSessions = [NSMutableArray array];
     // Build a tree with splitters and SessionViews but no PTYSessions.
-    NSSplitView *newRoot = (NSSplitView *)[PTYTab _recusiveRestoreSplitters:[arrangement objectForKey:TAB_ARRANGEMENT_ROOT]
-                                                                  fromIdMap:viewMap
-                                                                 sessionMap:sessionMap
-                                                            revivedSessions:revivedSessions];
+    NSSplitView *newRoot = (NSSplitView *)[PTYTab _recursiveRestoreSplitters:[arrangement objectForKey:TAB_ARRANGEMENT_ROOT]
+                                                                   fromIdMap:viewMap
+                                                                  sessionMap:sessionMap
+                                                             revivedSessions:revivedSessions];
 
     // Create a tab.
     theTab = [[PTYTab alloc] initWithRoot:newRoot sessions:nil];
@@ -2927,7 +2937,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
             frame.origin = origin;
             frame.size.width = [[parseTree objectForKey:kLayoutDictPixelWidthKey] intValue];
             frame.size.height = [[parseTree objectForKey:kLayoutDictPixelHeightKey] intValue];
-            [dict setObject:[PTYTab frameToDict:frame] forKey:TAB_ARRANGEMENT_SPLIITER_FRAME];
+            [dict setObject:[PTYTab frameToDict:frame] forKey:TAB_ARRANGEMENT_SPLITTER_FRAME];
 
             NSMutableArray *subviews = [NSMutableArray array];
             NSArray *children = [parseTree objectForKey:kLayoutDictChildrenKey];
@@ -3196,7 +3206,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 {
     // The minimum size of a splitter is determined thus:
     // Keep an interval map M: [min, max) -> count
-    // Where intervals are in the space perpindicular to the size we're measuring.
+    // Where intervals are in the space perpendicular to the size we're measuring.
     // Increment [min, max) by the number of splitters.
     // If a subview is a splitter, recurse
     // If a subview is a sessionview, add its number of rows/cols based on pixels
@@ -3326,7 +3336,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     assert(arrangement);
     [view setNeedsDisplay:YES];
     if ([view isKindOfClass:[NSSplitView class]]) {
-        NSDictionary *frameDict = [arrangement objectForKey:TAB_ARRANGEMENT_SPLIITER_FRAME];
+        NSDictionary *frameDict = [arrangement objectForKey:TAB_ARRANGEMENT_SPLITTER_FRAME];
         NSRect frame = [PTYTab dictToFrame:frameDict];
         [view setFrame:frame];
 
@@ -3468,10 +3478,10 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
         idMap[@([aSession tmuxPane])] = aSession.view;
     }
     NSArray *preexistingPanes = [[idMap allKeys] copy];
-    NSSplitView *newRoot = (NSSplitView *)[PTYTab _recusiveRestoreSplitters:[arrangement objectForKey:TAB_ARRANGEMENT_ROOT]
-                                                                  fromIdMap:idMap
-                                                                 sessionMap:nil
-                                                            revivedSessions:nil];
+    NSSplitView *newRoot = (NSSplitView *)[PTYTab _recursiveRestoreSplitters:[arrangement objectForKey:TAB_ARRANGEMENT_ROOT]
+                                                                   fromIdMap:idMap
+                                                                  sessionMap:nil
+                                                             revivedSessions:nil];
     // Instantiate sessions in the skeleton view tree.
     iTermObjectType objectType;
     if ([realParentWindow_ numberOfTabs] == 0) {
@@ -3742,10 +3752,10 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     [formerlyMaximizedSessionView setFrameSize:savedSize_];
 
     // Build a tree with splitters and SessionViews/PTYSessions from idMap.
-    NSSplitView *newRoot = [PTYTab _recusiveRestoreSplitters:[savedArrangement_ objectForKey:TAB_ARRANGEMENT_ROOT]
-                                                   fromIdMap:idMap_
-                                                  sessionMap:nil
-                                             revivedSessions:nil];
+    NSSplitView *newRoot = [PTYTab _recursiveRestoreSplitters:[savedArrangement_ objectForKey:TAB_ARRANGEMENT_ROOT]
+                                                    fromIdMap:idMap_
+                                                   sessionMap:nil
+                                              revivedSessions:nil];
     [PTYTab _recursiveSetDelegateIn:newRoot to:self];
 
     // Create a tab.
@@ -4126,7 +4136,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 }
 
 // Prevent any session from becoming smaller than its minimum size because of
-// a divder's movement.
+// a divider's movement.
 - (CGFloat)splitView:(NSSplitView *)splitView constrainMinCoordinate:(CGFloat)proposedMin ofSubviewAt:(NSInteger)dividerIndex {
     if (tmuxOriginatedResizeInProgress_) {
         // Whoever's doing the resizing is responsible for making everything
@@ -5008,6 +5018,8 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
         _metalUnavailableReason = iTermMetalUnavailableReasonTooManyPanesReason;
     } else if (![_delegate tabCanUseMetal:self reason:&reason]) {
         _metalUnavailableReason = reason;
+    } else if (_bounceMetal) {
+        _metalUnavailableReason = iTermMetalUnavailableReasonScreensChanging;
     } else {
         _metalUnavailableReason = iTermMetalUnavailableReasonNone;
         allowed = YES;
@@ -5022,26 +5034,37 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     if (!foregroundTab) {
         _metalUnavailableReason = iTermMetalUnavailableReasonTabInactive;
     }
-    const BOOL useMetal = allowed && satisfiesKeyRequirement && foregroundTab;
+    BOOL useMetal = NO;
+    if (allowed && satisfiesKeyRequirement && foregroundTab) {
+        useMetal = [self.sessions allWithBlock:^BOOL(PTYSession *session) {
+            return [session willEnableMetal];
+        }];
+        if (!useMetal) {
+            DLog(@"Not enabling metal. A session failed in willEnableMetal.");
+            _metalUnavailableReason = iTermMetalUnavailableReasonContextAllocationFailure;
+        }
+    }
     [self.sessions enumerateObjectsUsingBlock:^(PTYSession * _Nonnull obj, NSUInteger idx, BOOL * _Nonnull stop) {
         obj.useMetal = useMetal;
     }];
     [_delegate tab:self didSetMetalEnabled:useMetal];
 }
 
-- (void)bounceMetal:(NSNotification *)notification {
-    [self temporarilyDisableMetal];
+- (void)metalSettingsDidChange:(NSNotification *)notification {
+    [self bounceMetal];
 }
 
-- (void)temporarilyDisableMetal {
-    if (@available(macOS 10.11, *)) {
-        for (PTYSession *session in self.sessions) {
-            session.useMetal = NO;
-        }
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [self updateUseMetal];
-        });
-    }
+- (void)screenParametersDidChange:(NSNotification *)notification {
+    [self bounceMetal];
+}
+
+- (void)bounceMetal {
+    _bounceMetal = YES;
+    [self updateUseMetal];
+    _bounceMetal = NO;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self updateUseMetal];
+    });
 }
 
 #pragma mark - PTYSessionDelegate
@@ -5199,6 +5222,26 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 
 - (NSView *)sessionContainerView:(PTYSession *)session {
     return root_;
+}
+
+- (void)sessionDraggingExited:(PTYSession *)session {
+    if (_temporarilyUnmaximizedSessionGUID) {
+        PTYSession *session = [self.sessions objectPassingTest:^BOOL(PTYSession *session, NSUInteger index, BOOL *stop) {
+            return [session.guid isEqualToString:self->_temporarilyUnmaximizedSessionGUID];
+        }];
+        if (session && !self.hasMaximizedPane) {
+            [self setActiveSession:session];
+            [self maximize];
+        }
+    }
+    _temporarilyUnmaximizedSessionGUID = nil;
+}
+
+- (void)sessionDraggingEntered:(PTYSession *)session {
+    if (self.hasMaximizedPane) {
+        _temporarilyUnmaximizedSessionGUID = [[session guid] copy];
+        [self unmaximize];
+    }
 }
 
 @end

@@ -158,7 +158,8 @@ static NSColor *ColorForVector(vector_float4 v) {
 
 - (instancetype)initWithTextView:(PTYTextView *)textView
                           screen:(VT100Screen *)screen
-                            glue:(iTermMetalGlue *)glue NS_DESIGNATED_INITIALIZER;
+                            glue:(iTermMetalGlue *)glue
+                         context:(CGContextRef)context NS_DESIGNATED_INITIALIZER;
 - (instancetype)init NS_UNAVAILABLE;
 
 @end
@@ -210,7 +211,10 @@ static NSColor *ColorForVector(vector_float4 v) {
     if (self.textView.drawingHelper.delegate == nil) {
         return nil;
     }
-    return [[iTermMetalPerFrameState alloc] initWithTextView:self.textView screen:self.screen glue:self];
+    return [[iTermMetalPerFrameState alloc] initWithTextView:self.textView
+                                                      screen:self.screen
+                                                        glue:self
+                                                     context:self.delegate.metalGlueContext];
 }
 
 - (void)metalDidFindImages:(NSSet<NSString *> *)foundImages
@@ -267,21 +271,30 @@ static NSColor *ColorForVector(vector_float4 v) {
 
 #pragma mark -
 
-@implementation iTermMetalPerFrameState
+@implementation iTermMetalPerFrameState {
+    CGContextRef _metalContext;
+}
 
 - (instancetype)initWithTextView:(PTYTextView *)textView
                           screen:(VT100Screen *)screen
-                            glue:(iTermMetalGlue *)glue {
+                            glue:(iTermMetalGlue *)glue
+                         context:(CGContextRef)context {
     assert([NSThread isMainThread]);
     self = [super init];
     if (self) {
         _startTime = [NSDate timeIntervalSinceReferenceDate];
-
+        _metalContext = CGContextRetain(context);
         [textView performBlockWithFlickerFixerGrid:^{
             [self loadAllWithTextView:textView screen:screen glue:glue];
         }];
     }
     return self;
+}
+
+- (void)dealloc {
+    if (_metalContext) {
+        CGContextRelease(_metalContext);
+    }
 }
 
 - (void)loadAllWithTextView:(PTYTextView *)textView
@@ -1200,7 +1213,7 @@ ambiguousIsDoubleWidth:(BOOL)ambiguousIsDoubleWidth
                                         colorKey->bgColorMode == ColorModeAlternate);
         // When set in preferences, applies alpha only to the defaultBackground
         // color, useful for keeping Powerline segments opacity(background)
-        // consistent with their seperator glyphs opacity(foreground).
+        // consistent with their separator glyphs opacity(foreground).
         if (_transparencyAffectsOnlyDefaultBackgroundColor && !defaultBackground) {
             alpha = 1;
         }
@@ -1331,15 +1344,6 @@ ambiguousIsDoubleWidth:(BOOL)ambiguousIsDoubleWidth
                                                                                  size:(CGSize)size
                                                                                 scale:(CGFloat)scale
                                                                                 emoji:(nonnull BOOL *)emoji {
-    if (glyphKey->boxDrawing) {
-        *emoji = NO;
-        CGSize cellSize = _cellSize;
-        cellSize.width *= scale;
-        cellSize.height *= scale;
-        iTermCharacterBitmap *bitmap = [self bitmapForBoxDrawingCode:glyphKey->code glyphSize:size cellSize:cellSize scale:scale];
-        return @{ @(iTermTextureMapMiddleCharacterPart): bitmap };
-    }
-
     // Normal path
     BOOL fakeBold = !!(glyphKey->typeface & iTermMetalGlyphKeyTypefaceBold);
     BOOL fakeItalic = !!(glyphKey->typeface & iTermMetalGlyphKeyTypefaceItalic);
@@ -1355,24 +1359,22 @@ ambiguousIsDoubleWidth:(BOOL)ambiguousIsDoubleWidth
     NSFont *font = fontInfo.font;
     assert(font);
 
-    int radius = iTermTextureMapMaxCharacterParts / 2;
-    if (iTermTextIsMonochrome()) {
-        if (isAscii) {
-            // These are always guaranteed to fit in a single part.
-            radius = 0;
-        }
-    }
+    const int radius = iTermTextureMapMaxCharacterParts / 2;
     iTermCharacterSource *characterSource =
         [[iTermCharacterSource alloc] initWithCharacter:CharToStr(glyphKey->code, glyphKey->isComplex)
                                                    font:font
-                                                   size:size
+                                              glyphSize:size
+                                               cellSize:_cellSize
+                                 cellSizeWithoutSpacing:_cellSizeWithoutSpacing
                                          baselineOffset:_baselineOffset
                                                   scale:scale
                                          useThinStrokes:glyphKey->thinStrokes
                                                fakeBold:fakeBold
                                              fakeItalic:fakeItalic
                                             antialiased:isAscii ? _asciiAntialias : _nonasciiAntialias
-                                                 radius:radius];
+                                             boxDrawing:glyphKey->boxDrawing
+                                                 radius:radius
+                                                context:_metalContext];
     if (characterSource == nil) {
         return nil;
     }
@@ -1380,6 +1382,9 @@ ambiguousIsDoubleWidth:(BOOL)ambiguousIsDoubleWidth
     NSMutableDictionary<NSNumber *, iTermCharacterBitmap *> *result = [NSMutableDictionary dictionary];
     [characterSource.parts enumerateObjectsUsingBlock:^(NSNumber * _Nonnull partNumber, NSUInteger idx, BOOL * _Nonnull stop) {
         int part = partNumber.intValue;
+        if (isAscii && part != iTermImagePartFromDeltas(0, 0)) {
+            return;
+        }
         result[partNumber] = [characterSource bitmapForPart:part];
     }];
     if (emoji) {
@@ -1537,48 +1542,6 @@ ambiguousIsDoubleWidth:(BOOL)ambiguousIsDoubleWidth
         color = [[_colorMap colorForKey:kColorMapCursor] colorWithAlphaComponent:1.0];
     }
     return [_colorMap colorByDimmingTextColor:color];
-}
-
-#pragma mark - Box Drawing
-
-- (iTermCharacterBitmap *)bitmapForBoxDrawingCode:(unichar)code
-                                        glyphSize:(CGSize)glyphSize
-                                         cellSize:(CGSize)cellSize
-                                            scale:(CGFloat)scale {
-    NSColor *backgroundColor;
-    NSColor *foregroundColor;
-    if (iTermTextIsMonochrome()) {
-        backgroundColor = [NSColor clearColor];
-        foregroundColor = [NSColor whiteColor];
-    } else {
-        backgroundColor = [NSColor whiteColor];
-        foregroundColor = [NSColor blackColor];
-    }
-    NSMutableData *data = [NSImage argbDataForImageOfSize:glyphSize drawBlock:^(CGContextRef context) {
-        NSAffineTransform *transform = [NSAffineTransform transform];
-        [transform concat];
-        [backgroundColor set];
-        NSRectFill(NSMakeRect(0, 0, glyphSize.width, glyphSize.height));
-        [foregroundColor set];
-
-        BOOL solid = NO;
-        for (NSBezierPath *path in [iTermBoxDrawingBezierCurveFactory bezierPathsForBoxDrawingCode:code
-                                                                                          cellSize:cellSize
-                                                                                             scale:scale
-                                                                                             solid:&solid]) {
-            if (solid) {
-                [path fill];
-            } else {
-                [path setLineWidth:scale];
-                [path stroke];
-            }
-        }
-    }];
-
-    iTermCharacterBitmap *bitmap = [[iTermCharacterBitmap alloc] init];
-    bitmap.data = data;
-    bitmap.size = glyphSize;
-    return bitmap;
 }
 
 #pragma mark - iTermSmartCursorColorDelegate

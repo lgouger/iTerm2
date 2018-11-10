@@ -169,7 +169,7 @@ ITERM_WEAKLY_REFERENCEABLE
 
 - (void)toggleFullScreen:(nullable id)sender {
     if (![[self ptyDelegate] lionFullScreen]  &&
-        ![iTermPreferences boolForKey:kPreferenceKeyLionStyleFullscren]) {
+        ![iTermPreferences boolForKey:kPreferenceKeyLionStyleFullscreen]) {
         // The user must have clicked on the toolbar arrow, but the pref is set
         // to use traditional fullscreen.
         [(id<PTYWindowDelegateProtocol>)[self delegate] toggleTraditionalFullScreenMode];
@@ -327,6 +327,18 @@ ITERM_WEAKLY_REFERENCEABLE
 
     NSArray *orderedWindows = [[NSApplication sharedApplication] orderedWindows];
     NSUInteger myIndex = [orderedWindows indexOfObject:self];
+    NSRect myFrame = [self frame];
+    double onScreenFraction = 0;
+    const double myArea = myFrame.size.width * myFrame.size.height;
+    if (myArea >= 1) {
+        for (NSScreen *screen in [NSScreen screens]) {
+            const NSRect screenFrame = screen.frame;
+            const NSRect onscreenFrame = NSIntersectionRect(myFrame, screenFrame);
+            const CGFloat onscreenArea = (onscreenFrame.size.width * onscreenFrame.size.height);
+            onScreenFraction += onscreenArea / myArea;
+        }
+    }
+    const double offscreenFraction = MAX(MIN(1, 1 - onScreenFraction), 0);
     CGFloat totalOcclusion = 0;
     if (myIndex != 0 && myIndex != NSNotFound) {
         const int kRows = 3;
@@ -336,7 +348,7 @@ ITERM_WEAKLY_REFERENCEABLE
             double occlusion;
         } OcclusionPart;
         OcclusionPart parts[kRows][kCols];
-        NSRect myFrame = [self frame];
+
         NSSize partSize = NSMakeSize(myFrame.size.width / kCols, myFrame.size.height / kRows);
         for (int y = 0; y < kRows; y++) {
             for (int x = 0; x < kCols; x++) {
@@ -351,7 +363,7 @@ ITERM_WEAKLY_REFERENCEABLE
 
         // This loop iterates over each window in front of this one and measures
         // how much of it intersects each part of this one (a part is one 9th of
-        // the window, as divded into a 3x3 grid). For each part, an occlusion
+        // the window, as divided into a 3x3 grid). For each part, an occlusion
         // fraction is tracked, which is the fraction of that part which is covered
         // by another window. It's approximate because it's the maximum occlusion
         // for that part by all other windows, so it could be too low (if two
@@ -381,11 +393,14 @@ ITERM_WEAKLY_REFERENCEABLE
                     totalOcclusion += parts[y][x].occlusion / (kRows * kCols);
                 }
             }
+            totalOcclusion = MAX(totalOcclusion, offscreenFraction);
             if (totalOcclusion > 0.99) {
                 totalOcclusion = 1;
                 break;
             }
         }
+    } else {
+        totalOcclusion = offscreenFraction;
     }
 
     _totalOcclusionCacheTime = [NSDate timeIntervalSinceReferenceDate];

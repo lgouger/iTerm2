@@ -79,6 +79,7 @@ typedef struct {
     int columns;
     CGFloat scale;
     CGSize glyphSize;
+    CGContextRef context;
 } iTermMetalDriverMainThreadState;
 
 @interface iTermMetalDriver()
@@ -112,9 +113,8 @@ typedef struct {
     iTermCursorRenderer *_keyCursorRenderer;
     iTermImageRenderer *_imageRenderer;
 #if ENABLE_USE_TEMPORARY_TEXTURE
-    iTermCopyToDrawableRenderer *_copyToDrawableRenderer NS_DEPRECATED_MAC(10_12, 10_14);
+    iTermCopyToDrawableRenderer *_copyToDrawableRenderer;
 #endif
-    iTermPremultiplyAlphaRenderer *_premultiplyAlphaRenderer NS_AVAILABLE_MAC(10_14);
 
     // This one is special because it's debug only
     iTermCopyOffscreenRenderer *_copyOffscreenRenderer;
@@ -186,11 +186,6 @@ typedef struct {
             _copyToDrawableRenderer = [[iTermCopyToDrawableRenderer alloc] initWithDevice:device];
         }
 #endif
-        if (@available(macOS 10.14, *)) {
-            if (iTermTextIsMonochromeOnMojave()) {
-                _premultiplyAlphaRenderer = [[iTermPremultiplyAlphaRenderer alloc] initWithDevice:device];
-            }
-        }
 
         _commandQueue = [device newCommandQueue];
 #if ENABLE_PRIVATE_QUEUE
@@ -220,6 +215,14 @@ typedef struct {
 
 - (void)dealloc {
     [[NSNotificationCenter defaultCenter] removeObserver:self];
+
+    // This reference to _mainThreadState is *possibly* unsafe! dealloc gets called off the main
+    // queue. But there should not be any remaining references to mainThreadState once you get to
+    // dealloc.
+    CGContextRef context = _mainThreadState.context;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        CGContextRelease(context);
+    });
 }
 
 - (iTermMetalDriverMainThreadState *)mainThreadState {
@@ -250,7 +253,8 @@ typedef struct {
 cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
           glyphSize:(CGSize)glyphSize
            gridSize:(VT100GridSize)gridSize
-              scale:(CGFloat)scale {
+              scale:(CGFloat)scale
+            context:(CGContextRef)context {
     scale = MAX(1, scale);
     cellSize.width *= scale;
     cellSize.height *= scale;
@@ -265,12 +269,18 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
         DLog(@"Warning: scale is 0");
     }
     DLog(@"Cell size is now %@x%@, grid size is now %@x%@", @(cellSize.width), @(cellSize.height), @(gridSize.width), @(gridSize.height));
+    if (self.mainThreadState->context) {
+        CGContextRelease(self.mainThreadState->context);
+        self.mainThreadState->context = NULL;
+    }
+    CGContextRetain(context);
     self.mainThreadState->cellSize = cellSize;
     self.mainThreadState->cellSizeWithoutSpacing = cellSizeWithoutSpacing;
     self.mainThreadState->rows = MAX(1, gridSize.height);
     self.mainThreadState->columns = MAX(1, gridSize.width);
     self.mainThreadState->scale = scale;
     self.mainThreadState->glyphSize = glyphSize;
+    self.mainThreadState->context = context;
 }
 
 #pragma mark - MTKViewDelegate
@@ -316,7 +326,7 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
     }
 
     const CGFloat slowEnoughToDowngradeThreshold = 0.002;
-    const CGFloat fastEnoughToUpgradeTreshold = 0.0005;
+    const CGFloat fastEnoughToUpgradeThreshold = 0.0005;
     if (_currentDrawableTime.numberOfMeasurements > 5 &&
         _maxFramesInFlight > 1 &&
         _currentDrawableTime.value > slowEnoughToDowngradeThreshold) {
@@ -329,7 +339,7 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
         [_currentDrawableTime reset];
     } else if (_currentDrawableTime.numberOfMeasurements > 10 &&
                _maxFramesInFlight < iTermMetalDriverMaximumNumberOfFramesInFlight &&
-               _currentDrawableTime.value < fastEnoughToUpgradeTreshold) {
+               _currentDrawableTime.value < fastEnoughToUpgradeThreshold) {
         DLog(@"Moving average of currentDrawable latency of %0.2fms with %@ measurements with mff of %@ is low. Increase mff to %@",
               _currentDrawableTime.value * 1000,
               @(_currentDrawableTime.numberOfMeasurements),
@@ -512,13 +522,6 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
     if ([self shouldCreateIntermediateRenderPassDescriptor:frameData]) {
         [frameData createIntermediateRenderPassDescriptor];
     }
-    if (frameData.perFrameState.transparencyAlpha < 1) {
-        if (@available(macOS 10.14, *)) {
-            if (iTermTextIsMonochromeOnMojave()) {
-                [frameData createpostmultipliedRenderPassDescriptor];
-            }
-        }
-    }
 #if ENABLE_USE_TEMPORARY_TEXTURE
     if (iTermTextIsMonochrome()) {} else {
         [frameData createTemporaryRenderPassDescriptor];
@@ -564,8 +567,8 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
 #endif
 
     [frameData enqueueDrawCallsWithBlock:^{
-        [self enequeueDrawCallsForFrameData:frameData
-                              commandBuffer:commandBuffer];
+        [self enqueueDrawCallsForFrameData:frameData
+                             commandBuffer:commandBuffer];
     }];
     for (iTermMetalRowData *rowData in frameData.rows) {
         [rowData.lineData checkForOverrun];
@@ -648,13 +651,6 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
     [self updateTextRendererForFrameData:frameData];
     [self updateBackgroundImageRendererForFrameData:frameData];
     [self updateCopyBackgroundRendererForFrameData:frameData];
-    if (@available(macOS 10.14, *)) {
-        if (iTermTextIsMonochromeOnMojave()) {
-            if (frameData.postmultipliedRenderPassDescriptor) {
-                [self updatePremultiplyAlphaRendererForFrameData:frameData];
-            }
-        }
-    }
     [self updateBadgeRendererForFrameData:frameData];
     [self updateBroadcastStripesRendererForFrameData:frameData];
     [self updateCursorGuideRendererForFrameData:frameData];
@@ -712,13 +708,6 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
                                        range:(NSRange)range {
     [self populateMarginRendererTransientStateWithFrameData:frameData];
     [self populateCopyBackgroundRendererTransientStateWithFrameData:frameData];
-    if (@available(macOS 10.14, *)) {
-        if (iTermTextIsMonochromeOnMojave()) {
-            if (frameData.postmultipliedRenderPassDescriptor) {
-                [self populatePremultiplyAlphaTransientStateWithFrameData:frameData];
-            }
-        }
-    }
     [self populateCursorRendererTransientStateWithFrameData:frameData];
     [self populateTextAndBackgroundRenderersTransientStateWithFrameData:frameData];
     [self populateBadgeRendererTransientStateWithFrameData:frameData];
@@ -801,9 +790,9 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
     }
 }
 
-- (void)enequeueDrawCallsForFrameData:(iTermMetalFrameData *)frameData
-                        commandBuffer:(id<MTLCommandBuffer>)commandBuffer {
-    DLog(@"  enequeueDrawCallsForFrameData %@", frameData);
+- (void)enqueueDrawCallsForFrameData:(iTermMetalFrameData *)frameData
+                       commandBuffer:(id<MTLCommandBuffer>)commandBuffer {
+    DLog(@"  enqueueDrawCallsForFrameData %@", frameData);
 
     NSString *firstLabel;
     if (frameData.intermediateRenderPassDescriptor) {
@@ -907,6 +896,7 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
                                   mode:mode
                                  frame:frameData.perFrameState.relativeFrame
                          containerSize:frameData.perFrameState.containerSize
+                                 color:frameData.perFrameState.defaultBackgroundColor
                                context:frameData.framePoolContext];
 }
 
@@ -920,13 +910,6 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
         _copyToDrawableRenderer.enabled = YES;
     }
 #endif
-}
-
-- (void)updatePremultiplyAlphaRendererForFrameData:(iTermMetalFrameData *)frameData NS_AVAILABLE_MAC(10_14) {
-    if (_premultiplyAlphaRenderer.rendererDisabled) {
-        return;
-    }
-    _premultiplyAlphaRenderer.enabled = YES;
 }
 
 - (void)updateBadgeRendererForFrameData:(iTermMetalFrameData *)frameData {
@@ -987,14 +970,6 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
     iTermCopyToDrawableRendererTransientState *dState = [frameData transientStateForRenderer:_copyToDrawableRenderer];
     dState.sourceTexture = frameData.temporaryRenderPassDescriptor.colorAttachments[0].texture;
 #endif
-}
-
-- (void)populatePremultiplyAlphaTransientStateWithFrameData:(iTermMetalFrameData *)frameData NS_AVAILABLE_MAC(10_14) {
-    if (_premultiplyAlphaRenderer.rendererDisabled) {
-        return;
-    }
-    iTermPremultiplyAlphaRendererTransientState *tstate = [frameData transientStateForRenderer:_premultiplyAlphaRenderer];
-    tstate.sourceTexture = frameData.postmultipliedRenderPassDescriptor.colorAttachments[0].texture;
 }
 
 - (void)populateCursorRendererTransientStateWithFrameData:(iTermMetalFrameData *)frameData {
@@ -1117,7 +1092,7 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
             rowData.y <= imeInfo.markedRange.end.y) {
             // This line contains at least part of the marked range
             if (rowData.y == imeInfo.markedRange.start.y) {
-                // Makred range starts on this line
+                // Marked range starts on this line
                 if (rowData.y == imeInfo.markedRange.end.y) {
                     // Marked range starts and ends on this line.
                     markedRangeOnLine = NSMakeRange(imeInfo.markedRange.start.x,
@@ -1316,7 +1291,7 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
 }
 
 // frameData's renderEncoder must have just had -endEncoding called on it at this point.
-// It will be left in the same staate.
+// It will be left in the same state.
 - (void)copyOffscreenTextureToDrawableInFrameData:(iTermMetalFrameData *)frameData {
     [self copyToDrawableFromTexture:frameData.destinationTexture
            withRenderPassDescriptor:frameData.debugRealRenderPassDescriptor
@@ -1432,28 +1407,11 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
                frameData.renderPassDescriptor ];
     } else {
         // No temporary texture
-
-        BOOL premultiply = NO;
-        if (@available(macOS 10.14, *)) {
-            if (iTermTextIsMonochromeOnMojave()) {
-                if (frameData.postmultipliedRenderPassDescriptor) {
-                    assert(pass >= 0 && pass <= 2);
-                    descriptors =
-                    @[ frameData.intermediateRenderPassDescriptor ?: frameData.postmultipliedRenderPassDescriptor,
-                       frameData.postmultipliedRenderPassDescriptor,
-                       frameData.renderPassDescriptor ];
-                    premultiply = YES;
-                }
-            }
-        }
-        if (!premultiply) {
-            assert(pass >= 0 && pass <= 1);
-            descriptors =
-            @[ frameData.intermediateRenderPassDescriptor ?: frameData.renderPassDescriptor,
-               frameData.renderPassDescriptor,
-               frameData.renderPassDescriptor ];
-        }
-        
+        assert(pass >= 0 && pass <= 1);
+        descriptors =
+        @[ frameData.intermediateRenderPassDescriptor ?: frameData.renderPassDescriptor,
+           frameData.renderPassDescriptor,
+           frameData.renderPassDescriptor ];
     }
 
     [frameData updateRenderEncoderWithRenderPassDescriptor:descriptors[pass]
@@ -1657,7 +1615,7 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
 
     if (@available(macOS 10.14, *)) {
         if (iTermTextIsMonochromeOnMojave()) {
-            shouldCopyToDrawable = (frameData.postmultipliedRenderPassDescriptor != nil);
+            shouldCopyToDrawable = NO;
         }
     }
     
@@ -1677,17 +1635,11 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
         // Copy to the drawable
         frameData.currentPass = 2;
         [frameData.renderEncoder endEncoding];
-        if (iTermTextIsMonochrome()) {
-            [self updateRenderEncoderForCurrentPass:frameData label:@"Premultiply Alpha"];
-            [self drawRenderer:_premultiplyAlphaRenderer
-                     frameData:frameData
-                          stat:iTermMetalFrameDataStatPqEnqueueCopyToDrawable];
-        } else {
-            [self updateRenderEncoderForCurrentPass:frameData label:@"Copy to drawable"];
-            [self drawRenderer:_copyToDrawableRenderer
-                     frameData:frameData
-                          stat:iTermMetalFrameDataStatPqEnqueueCopyToDrawable];
-        }
+
+        [self updateRenderEncoderForCurrentPass:frameData label:@"Copy to drawable"];
+        [self drawRenderer:_copyToDrawableRenderer
+                 frameData:frameData
+                      stat:iTermMetalFrameDataStatPqEnqueueCopyToDrawable];
     }
     [frameData measureTimeForStat:iTermMetalFrameDataStatPqEnqueueDrawEndEncodingToDrawable ofBlock:^{
         [frameData.renderEncoder endEncoding];
@@ -1842,9 +1794,6 @@ cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
     if (useTemporaryTexture) {
         return [shared arrayByAddingObject:_copyToDrawableRenderer];
     } else {
-        if (iTermTextIsMonochrome()) {
-            return [shared arrayByAddingObject:_premultiplyAlphaRenderer];
-        }
         return shared;
     }
 }

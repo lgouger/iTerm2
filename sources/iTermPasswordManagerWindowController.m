@@ -9,6 +9,7 @@
 #import "iTermPasswordManagerWindowController.h"
 
 #import "DebugLogging.h"
+#import "iTermAdvancedSettingsModel.h"
 #import "iTermApplication.h"
 #import "iTermSearchField.h"
 #import "iTermSystemVersion.h"
@@ -19,6 +20,21 @@
 static NSString *const kServiceName = @"iTerm2";
 static NSString *const kPasswordManagersShouldReloadData = @"kPasswordManagersShouldReloadData";
 static BOOL sAuthenticated;
+
+@interface iTermPasswordManagerPanel : NSPanel
+@end
+
+@implementation iTermPasswordManagerPanel
+
+- (NSTimeInterval)animationResizeTime:(NSRect)newFrame {
+    BOOL noAnimations = [iTermAdvancedSettingsModel disablePasswordManagerAnimations];
+    if (noAnimations) {
+        return 0;
+    }
+    return [super animationResizeTime:newFrame];
+}
+
+@end
 
 @interface iTermPasswordManagerWindowController () <
     NSTableViewDataSource,
@@ -35,8 +51,6 @@ static BOOL sAuthenticated;
     IBOutlet NSButton *_enterPasswordButton;
     IBOutlet iTermSearchField *_searchField;
     NSArray *_accounts;
-    NSString *_passwordBeingShown;
-    NSInteger _rowForPasswordBeingShown;
     NSString *_accountNameToSelectAfterAuthentication;
 }
 
@@ -214,7 +228,11 @@ static BOOL sAuthenticated;
 
 - (void)doubleClickOnTableView:(id)sender {
     if ([_tableView selectedRow] >= 0) {
-        [self enterPassword:nil];
+        if (_tableView.clickedColumn == 1) {
+            [self edit:nil];
+        } else {
+            [self enterPassword:nil];
+        }
     }
 }
 
@@ -244,13 +262,31 @@ static BOOL sAuthenticated;
 }
 
 - (IBAction)edit:(id)sender {
-    if ([_tableView selectedRow] >= 0) {
-        NSInteger row = _tableView.selectedRow;
-        [self setPasswordBeingShown:[self selectedPassword] onRow:row];
-        [_tableView editColumn:[[_tableView tableColumns] indexOfObject:_passwordColumn]
-                           row:row
-                     withEvent:nil
-                        select:YES];
+    const NSInteger row = _tableView.selectedRow;
+    if (row >= 0 && row < _accounts.count) {
+        NSString *accountName = [self accountNameForRow:row];
+        if (!accountName) {
+            return;
+        }
+
+        @autoreleasepool {
+            NSAlert *alert = [[[NSAlert alloc] init] autorelease];
+            alert.messageText = [NSString stringWithFormat:@"Enter password for %@:", accountName];
+            [alert addButtonWithTitle:@"OK"];
+            [alert addButtonWithTitle:@"Cancel"];
+
+            NSSecureTextField *newPassword = [[[NSSecureTextField alloc] initWithFrame:NSMakeRect(0, 0, 200, 24)] autorelease];
+            newPassword.editable = YES;
+            newPassword.selectable = YES;
+            alert.accessoryView = newPassword;
+            [alert layout];
+            [[alert window] makeFirstResponder:newPassword];
+
+            if ([alert runModal] == NSAlertFirstButtonReturn) {
+                [[self keychain] setPassword:newPassword.stringValue forService:kServiceName account:accountName];
+                [self passwordsDidChange];
+            }
+        }
     }
 }
 
@@ -276,9 +312,26 @@ static BOOL sAuthenticated;
 }
 
 - (IBAction)revealPassword:(id)sender {
-    if (!_passwordBeingShown && [_tableView selectedRow] >= 0) {
-        [self setPasswordBeingShown:[self selectedPassword] onRow:[_tableView selectedRow]];
-        [_tableView reloadData];
+    const NSInteger row = _tableView.selectedRow;
+    if (row >= 0) {
+        @autoreleasepool {
+            NSString *accountName = [self accountNameForRow:row];
+            if (!accountName) {
+                return;
+            }
+            NSAlert *alert = [[[NSAlert alloc] init] autorelease];
+            alert.messageText = [NSString stringWithFormat:@"Password for %@", accountName];
+            NSString *password = [[[self selectedPassword] retain] autorelease];
+            alert.informativeText = password;
+            [alert addButtonWithTitle:@"OK"];
+            [alert addButtonWithTitle:@"Copy"];
+
+            if ([alert runModal] == NSAlertSecondButtonReturn) {
+                NSPasteboard *pasteboard = [NSPasteboard generalPasteboard];
+                [pasteboard declareTypes:@[ NSStringPboardType ] owner:self];
+                [pasteboard setString:password forType:NSStringPboardType];
+            }
+        }
     }
 }
 
@@ -370,27 +423,15 @@ static BOOL sAuthenticated;
     }];
 }
 
-- (void)setPasswordBeingShown:(NSString *)password onRow:(NSInteger)row {
-    [_passwordBeingShown release];
-    _passwordBeingShown = [password retain];
-    _rowForPasswordBeingShown = row;
-}
-
-- (void)clearPasswordBeingShown {
-    [_passwordBeingShown release];
-    _passwordBeingShown = nil;
-    _rowForPasswordBeingShown = -1;
-}
-
 - (NSString *)selectedPassword {
-    DLog(@"selectedPassowrd");
+    DLog(@"selectedPassword");
     if (!sAuthenticated) {
-        DLog(@"selectedPassowrd: return nil, not authenticated");
+        DLog(@"selectedPassword: return nil, not authenticated");
         return nil;
     }
     NSInteger index = [_tableView selectedRow];
     if (index < 0) {
-        DLog(@"selectedPassowrd: return nil, negative index");
+        DLog(@"selectedPassword: return nil, negative index");
         return nil;
     }
     NSError *error = nil;
@@ -398,7 +439,7 @@ static BOOL sAuthenticated;
                                                      account:_accounts[index]
                                                        error:&error];
     if (error) {
-        DLog(@"selectedPassowrd: return nil, keychain gave error %@", error);
+        DLog(@"selectedPassword: return nil, keychain gave error %@", error);
         static dispatch_once_t onceToken;
         dispatch_once(&onceToken, ^{
             NSAlert *alert = [[[NSAlert alloc] init] autorelease];
@@ -408,7 +449,7 @@ static BOOL sAuthenticated;
         });
         return nil;
     } else {
-        DLog(@"selectedPassowrd: return nonnil password");
+        DLog(@"selectedPassword: return nonnil password");
         return password ?: @"";
     }
 }
@@ -433,7 +474,6 @@ static BOOL sAuthenticated;
 }
 
 - (void)reloadAccounts {
-    [self clearPasswordBeingShown];
     [_accounts release];
     NSString *filter = [_searchField stringValue];
     if (sAuthenticated) {
@@ -467,12 +507,7 @@ objectValueForTableColumn:(NSTableColumn *)aTableColumn
     if (aTableColumn == _accountNameColumn) {
         return accountName;
     } else {
-        NSString *password = nil;
-        if (_passwordBeingShown && [aTableView selectedRow] == rowIndex && rowIndex == _rowForPasswordBeingShown) {
-            NSLog(@"Returning plaintext password because selected row %@ equals queried index %@", @(aTableView.selectedRow), @(rowIndex));
-            password = _passwordBeingShown;
-        }
-        return password ?: @"••••••••";
+        return @"••••••••";
     }
 }
 
@@ -501,9 +536,6 @@ objectValueForTableColumn:(NSTableColumn *)aTableColumn
                 [self reloadAccounts];
             }
         }
-    } else {
-        [self clearPasswordBeingShown];
-        [[self keychain] setPassword:anObject forService:kServiceName account:accountName];
     }
     [self passwordsDidChange];
 }
@@ -516,17 +548,13 @@ shouldEditTableColumn:(NSTableColumn *)aTableColumn
     if (aTableColumn == _accountNameColumn) {
         return YES;
     } else {
-        return (_rowForPasswordBeingShown == rowIndex && _passwordBeingShown != nil);
+        return NO;
     }
 }
 
 - (void)tableViewSelectionDidChange:(NSNotification *)notification {
     [_removeButton setEnabled:([_tableView selectedRow] != -1)];
     [_editButton setEnabled:([_tableView selectedRow] != -1)];
-    if (_passwordBeingShown) {
-        [self clearPasswordBeingShown];
-        [_tableView reloadData];
-    }
     [self update];
 }
 

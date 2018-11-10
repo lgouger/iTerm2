@@ -21,18 +21,23 @@
 + (NSRect)boundingRectForCharactersInRange:(NSRange)range
                                       font:(NSFont *)font
                             baselineOffset:(CGFloat)baselineOffset
-                                     scale:(CGFloat)scale;
+                                     scale:(CGFloat)scale
+                                   context:(CGContextRef)context;
 
 - (instancetype)initWithCharacter:(NSString *)string
                              font:(NSFont *)font
-                             size:(CGSize)size
+                        glyphSize:(CGSize)glyphSize
+                         cellSize:(CGSize)cellSize
+           cellSizeWithoutSpacing:(CGSize)cellSizeWithoutSpacing
                    baselineOffset:(CGFloat)baselineOffset
                             scale:(CGFloat)scale
                    useThinStrokes:(BOOL)useThinStrokes
                          fakeBold:(BOOL)fakeBold
                        fakeItalic:(BOOL)fakeItalic
                       antialiased:(BOOL)antialiased
-                           radius:(int)radius;
+                       boxDrawing:(BOOL)boxDrawing
+                           radius:(int)radius
+                          context:(CGContextRef)context;
 
 - (iTermCharacterBitmap *)bitmapForPart:(int)part;
 

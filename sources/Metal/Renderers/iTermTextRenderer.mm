@@ -141,7 +141,7 @@ static BOOL gMonochromeText;
     float stride = 255.0/17.0;
     for (float textColor = 0; textColor < 256; textColor += stride) {
         for (float backgroundColor = 0; backgroundColor < 256; backgroundColor += stride) {
-            iTermSubpixelModel *model = [[iTermSubpixelModelBuilder sharedInstance] modelForForegoundColor:MIN(MAX(0, textColor / 255.0), 1)
+            iTermSubpixelModel *model = [[iTermSubpixelModelBuilder sharedInstance] modelForForegroundColor:MIN(MAX(0, textColor / 255.0), 1)
                                                                                            backgroundColor:MIN(MAX(0, backgroundColor / 255.0), 1)];
             block(textColor, backgroundColor, model);
         }
@@ -196,7 +196,7 @@ static BOOL gMonochromeText;
         // NOTE: The vertex and fragment function names get changed later. These aren't used but must be valid.
         iTermMetalBlending *blending;
         if (iTermTextIsMonochrome()) {
-            blending = [iTermMetalBlending backgroundColorCompositing];
+            blending = [iTermMetalBlending premultipliedCompositing];
         } else {
             blending = [[iTermMetalBlending alloc] init];
         }

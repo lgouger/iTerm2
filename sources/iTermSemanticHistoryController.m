@@ -216,15 +216,24 @@ NSString *const kSemanticHistoryWorkingDirectorySubstitutionKey = @"semanticHist
 }
 
 - (void)launchAppWithBundleIdentifier:(NSString *)bundleIdentifier path:(NSString *)path {
+    if (!path) {
+        return;
+    }
+    [self launchAppWithBundleIdentifier:bundleIdentifier args:@[ path ]];
+}
+
+- (void)launchAppWithBundleIdentifier:(NSString *)bundleIdentifier args:(NSArray *)args {
     NSString *bundlePath =
         [[NSWorkspace sharedWorkspace] absolutePathForAppBundleWithIdentifier:bundleIdentifier];
     NSBundle *bundle = [NSBundle bundleWithPath:bundlePath];
     NSString *executable = [bundlePath stringByAppendingPathComponent:@"Contents/MacOS"];
     executable = [executable stringByAppendingPathComponent:
                             [bundle objectForInfoDictionaryKey:(id)kCFBundleExecutableKey]];
-    if (bundle && executable && path) {
-        DLog(@"Launch %@: %@ %@", bundleIdentifier, executable, path);
-        [self launchTaskWithPath:executable arguments:@[ path ] wait:NO];
+    if (bundle && executable) {
+        DLog(@"Launch %@: %@ %@", bundleIdentifier, executable, args);
+        [self launchTaskWithPath:executable arguments:args wait:NO];
+    } else {
+        DLog(@"Not launching bundle=%@ executable=%@", bundle, executable);
     }
 }
 
@@ -244,10 +253,14 @@ NSString *const kSemanticHistoryWorkingDirectorySubstitutionKey = @"semanticHist
         } else {
             // This isn't as good as opening "code -g" because it always opens a new instance
             // of the app but it's the OS-sanctioned way of running VSCode.  We can't
-            // use Applescript because it won't open the file to a particular line number.
+            // use AppleScript because it won't open the file to a particular line number.
             [self launchAppWithBundleIdentifier:kVSCodeIdentifier path:path];
         }
     }
+}
+
+- (void)launchEmacsWithArguments:(NSArray *)args {
+    [self launchAppWithBundleIdentifier:kEmacsAppIdentifier args:[@[ @"emacs" ] arrayByAddingObjectsFromArray:args]];
 }
 
 - (NSString *)absolutePathForAppBundleWithIdentifier:(NSString *)bundleId {
@@ -270,7 +283,7 @@ NSString *const kSemanticHistoryWorkingDirectorySubstitutionKey = @"semanticHist
         } else {
             // This isn't as good as opening "subl" because it always opens a new instance
             // of the app but it's the OS-sanctioned way of running Sublimetext.  We can't
-            // use Applescript because it won't open the file to a particular line number.
+            // use AppleScript because it won't open the file to a particular line number.
             [self launchAppWithBundleIdentifier:bundleId path:path];
         }
     }
@@ -284,7 +297,8 @@ NSString *const kSemanticHistoryWorkingDirectorySubstitutionKey = @"semanticHist
               kMacVimIdentifier,
               kTextmateIdentifier,
               kTextmate2Identifier,
-              kBBEditIdentifier ];
+              kBBEditIdentifier,
+              kEmacsAppIdentifier];
 }
 
 - (void)openFile:(NSString *)path
@@ -325,6 +339,17 @@ NSString *const kSemanticHistoryWorkingDirectorySubstitutionKey = @"semanticHist
             }
 
             [self launchSublimeTextWithBundleIdentifier:bundleId path:path];
+        } else if ([identifier isEqualToString:kEmacsAppIdentifier]) {
+            NSMutableArray *args = [NSMutableArray array];
+            [args addObject:path];
+            if (lineNumber) {
+                if (columnNumber) {
+                    [args insertObject:[NSString stringWithFormat:@"+%@:%@", lineNumber, columnNumber] atIndex:0];
+                } else {
+                    [args insertObject:[NSString stringWithFormat:@"+%@", lineNumber] atIndex:0];
+                }
+            }
+            [self launchEmacsWithArguments:args];
         } else {
             path = [path stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLHostAllowedCharacterSet]];
             NSURL *url = nil;
@@ -434,7 +459,7 @@ NSString *const kSemanticHistoryWorkingDirectorySubstitutionKey = @"semanticHist
     }
 
     if ([prefs_[kSemanticHistoryActionKey] isEqualToString:kSemanticHistoryCoprocessAction]) {
-        DLog(@"Launch coproress with script %@", script);
+        DLog(@"Launch coprocess with script %@", script);
         assert(delegate_);
         [delegate_ semanticHistoryLaunchCoprocessWithCommand:script];
         return YES;
