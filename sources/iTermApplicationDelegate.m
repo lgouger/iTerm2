@@ -919,7 +919,19 @@ static BOOL hasBecomeActive = NO;
         if (hotkeyWindowsStates) {
             // We have to create the hotkey window now because we need to attach to servers before
             // launch finishes; otherwise any running hotkey window jobs will be treated as orphans.
-            [[iTermHotKeyController sharedInstance] createHiddenWindowsFromRestorableStates:hotkeyWindowsStates];
+            const NSInteger count = [[iTermHotKeyController sharedInstance] createHiddenWindowsFromRestorableStates:hotkeyWindowsStates];
+            if (count > 0) {
+                switch (_untitledFileOpenStatus) {
+                    case iTermUntitledFileOpenUnsafe:
+                    case iTermUntitledFileOpenAllowed:
+                    case iTermUntitledFileOpenDisallowed:
+                        _untitledFileOpenStatus = iTermUntitledFileOpenDisallowed;
+                        break;
+                    case iTermUntitledFileOpenPending:
+                    case iTermUntitledFileOpenComplete:
+                        break;
+                }
+            }
         } else {
             // Restore hotkey window from pre-3.1 version.
             legacyState = [coder decodeObjectForKey:kHotkeyWindowRestorableState];
@@ -2429,13 +2441,17 @@ static BOOL hasBecomeActive = NO;
 
 #pragma mark - iTermPasswordManagerDelegate
 
-- (void)iTermPasswordManagerEnterPassword:(NSString *)password {
+- (void)iTermPasswordManagerEnterPassword:(NSString *)password broadcast:(BOOL)broadcast {
   [[[[iTermController sharedInstance] currentTerminal] currentSession] enterPassword:password];
 }
 
 - (BOOL)iTermPasswordManagerCanEnterPassword {
   PTYSession *session = [[[iTermController sharedInstance] currentTerminal] currentSession];
   return session && ![session exited];
+}
+
+- (BOOL)iTermPasswordManagerCanBroadcast {
+    return NO;
 }
 
 - (void)currentSessionDidChange {

@@ -262,6 +262,9 @@ int decode_utf8_char(const unsigned char * restrict datap,
 // Contains only digits?
 - (BOOL)isNumeric;
 
+// First character is a digit?
+- (BOOL)startsWithDigit;
+
 // Modify the range's endpoint to not sever a surrogate pair.
 - (NSRange)makeRangeSafe:(NSRange)range;
 
@@ -287,6 +290,7 @@ int decode_utf8_char(const unsigned char * restrict datap,
 - (NSString *)stringByReplacingVariableReferencesWithVariablesFromScope:(iTermVariableScope *)scope
                                                 nonVariableReplacements:(NSDictionary *)nonvars;
 + (NSString *)sparkWithHeight:(double)fraction;
+- (id)it_jsonSafeValue;
 
 @end
 

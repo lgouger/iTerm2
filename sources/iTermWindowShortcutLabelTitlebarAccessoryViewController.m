@@ -93,10 +93,12 @@
 
 - (void)updateTextColor {
     if (@available(macOS 10.14, *)) {
-        if (_isMain) {
-            _label.textColor = [_label.textColor colorWithAlphaComponent:0.5];
+        NSString *closest = [_label.effectiveAppearance bestMatchFromAppearancesWithNames:@[ NSAppearanceNameDarkAqua, NSAppearanceNameAqua]];
+        _label.textColor = [NSColor windowFrameTextColor];
+        if ([closest isEqualToString:NSAppearanceNameDarkAqua]) {
+            self.view.alphaValue = 0.5;
         } else {
-            _label.textColor = [_label.textColor colorWithAlphaComponent:0.3];
+            self.view.alphaValue = 1.0;
         }
         return;
     }

@@ -2,6 +2,7 @@
 
 #import "Api.pbobjc.h"
 #import "DVR.h"
+#import "iTermEchoProbe.h"
 #import "iTermFindDriver.h"
 #import "iTermFileDescriptorClient.h"
 #import "iTermMetalUnavailableReason.h"
@@ -37,6 +38,7 @@ extern NSString *const PTYSessionRevivedNotification;
 @class CapturedOutput;
 @class FakeWindow;
 @class iTermAnnouncementViewController;
+@class iTermEchoProbe;
 @class iTermStatusBarViewController;
 @class iTermVariables;
 @class iTermVariableScope;
@@ -193,6 +195,7 @@ typedef enum {
 
 - (void)sessionCurrentDirectoryDidChange:(PTYSession *)session;
 - (void)sessionCurrentHostDidChange:(PTYSession *)session;
+- (void)sessionProxyIconDidChange:(PTYSession *)session;
 
 // Remove a session from the tab, even if it's the only one.
 - (void)sessionRemoveSession:(PTYSession *)session;
@@ -222,6 +225,7 @@ typedef enum {
 
 @class SessionView;
 @interface PTYSession : NSResponder <
+    iTermEchoProbeDelegate,
     iTermFindDriverDelegate,
     iTermWeaklyReferenceable,
     PopupDelegate,
@@ -277,6 +281,10 @@ typedef enum {
 // The window title that should be used when this session is current. Otherwise defaultName
 // should be used.
 @property(nonatomic, readonly) NSString *windowTitle;
+
+// The path to the proxy icon that should be used when this session is current. If is nil the current directory icon
+// is shown.
+@property(nonatomic, retain) NSURL *preferredProxyIcon;
 
 // Shell wraps the underlying file descriptor pair.
 @property(nonatomic, retain) PTYTask *shell;
@@ -470,6 +478,8 @@ typedef enum {
 @property(nonatomic, readonly) NSImage *tabGraphic;
 @property(nonatomic, readonly) iTermStatusBarViewController *statusBarViewController;
 @property(nonatomic, readonly) BOOL shouldShowTabGraphic;
+@property(nonatomic, readonly) NSData *backspaceData;
+@property(nonatomic, readonly) iTermEchoProbe *echoProbe;
 
 #pragma mark - methods
 
@@ -573,6 +583,8 @@ typedef enum {
 - (void)writeTaskNoBroadcast:(NSString *)string
                     encoding:(NSStringEncoding)optionalEncoding
                forceEncoding:(BOOL)forceEncoding;
+
+- (void)writeLatin1EncodedData:(NSData *)data broadcastAllowed:(BOOL)broadcast;
 
 // PTYTextView
 - (BOOL)hasTextSendingKeyMappingForEvent:(NSEvent*)event;
