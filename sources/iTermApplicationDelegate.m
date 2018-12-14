@@ -162,9 +162,6 @@ static BOOL hasBecomeActive = NO;
     IBOutlet NSMenuItem *logStop;
     IBOutlet NSMenuItem *closeTab;
     IBOutlet NSMenuItem *closeWindow;
-    IBOutlet NSMenuItem *sendInputToAllSessions;
-    IBOutlet NSMenuItem *sendInputToAllPanes;
-    IBOutlet NSMenuItem *sendInputNormally;
     IBOutlet NSMenuItem *irPrev;
     IBOutlet NSMenuItem *windowArrangements_;
     IBOutlet NSMenuItem *windowArrangementsAsTabs_;
@@ -530,34 +527,6 @@ static BOOL hasBecomeActive = NO;
     }
     return [uploadsMenu_ submenu];
 }
-
-- (void)updateBroadcastMenuState {
-    BOOL sessions = NO;
-    BOOL panes = NO;
-    BOOL noBroadcast = NO;
-    PseudoTerminal *frontTerminal;
-    frontTerminal = [[iTermController sharedInstance] currentTerminal];
-    switch ([frontTerminal broadcastMode]) {
-        case BROADCAST_OFF:
-            noBroadcast = YES;
-            break;
-
-        case BROADCAST_TO_ALL_TABS:
-            sessions = YES;
-            break;
-
-        case BROADCAST_TO_ALL_PANES:
-            panes = YES;
-            break;
-
-        case BROADCAST_CUSTOM:
-            break;
-    }
-    [sendInputToAllSessions setState:sessions];
-    [sendInputToAllPanes setState:panes];
-    [sendInputNormally setState:noBroadcast];
-}
-
 
 #pragma mark - Application Delegate Overrides
 
@@ -1049,7 +1018,7 @@ static BOOL hasBecomeActive = NO;
     BOOL highContrast = NO;
     BOOL minimal = NO;
 
-    switch ([iTermPreferences intForKey:kPreferenceKeyTabStyle]) {
+    switch ((iTermPreferencesTabStyle)[iTermPreferences intForKey:kPreferenceKeyTabStyle]) {
         case TAB_STYLE_DARK:
             dark = YES;
             break;
@@ -2245,6 +2214,10 @@ static BOOL hasBecomeActive = NO;
             return @"most of the window is not visible.";
         case iTermMetalUnavailableReasonContextAllocationFailure:
             return @"of a temporary failure to allocate a graphics context.";
+        case iTermMetalUnavailableReasonTabDragInProgress:
+            return @"a tab is being dragged.";
+        case iTermMetalUnavailableReasonSessionHasNoWindow:
+            return @"the current session has no window (this shouldn't happen).";
     }
 
     return @"of an internal error. Please file a bug report!";

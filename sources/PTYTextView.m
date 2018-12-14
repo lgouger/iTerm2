@@ -547,6 +547,7 @@ static const int kDragThreshold = 3;
         [_altScreenMouseScrollInferrer firstResponderDidChange];
         [self removeUnderline];
         [self placeFindCursorOnAutoHide];
+        [_delegate textViewDidResignFirstResponder];
         DLog(@"resignFirstResponder %@", self);
         DLog(@"%@", [NSThread callStackSymbols]);
     } else {
@@ -1158,6 +1159,7 @@ static const int kDragThreshold = 3;
     _drawingHelper.passwordInput = ([self isInKeyWindow] &&
                                     [_delegate textViewIsActiveSession] &&
                                     _delegate.textViewPasswordInput);
+    _drawingHelper.useNativePowerlineGlyphs = self.useNativePowerlineGlyphs;
 
     CGFloat rightMargin = 0;
     if (_drawingHelper.showTimestamps) {
@@ -1324,8 +1326,10 @@ static const int kDragThreshold = 3;
 // view handles it. It's necessary to setUserScroll in the PTYScroller, or else
 // it scrolls back to the bottom right away. This code handles those two
 // keypresses and scrolls correctly.
-- (BOOL)performKeyEquivalent:(NSEvent *)theEvent
-{
+- (BOOL)performKeyEquivalent:(NSEvent *)theEvent {
+    if (self.window.firstResponder != self) {
+        return [super performKeyEquivalent:theEvent];
+    }
     NSString* unmodkeystr = [theEvent charactersIgnoringModifiers];
     if ([unmodkeystr length] == 0) {
         return [super performKeyEquivalent:theEvent];

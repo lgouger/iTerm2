@@ -442,6 +442,7 @@ static const NSUInteger kMaxHosts = 100;
     VT100RemoteHost *_currentHost;
 
     NSMutableDictionary<id, ITMNotificationRequest *> *_keystrokeSubscriptions;
+    NSMutableDictionary<id, ITMNotificationRequest *> *_keyboardFilterSubscriptions;
     NSMutableDictionary<id, ITMNotificationRequest *> *_updateSubscriptions;
     NSMutableDictionary<id, ITMNotificationRequest *> *_promptSubscriptions;
     NSMutableDictionary<id, ITMNotificationRequest *> *_locationChangeSubscriptions;
@@ -610,6 +611,7 @@ static const NSUInteger kMaxHosts = 100;
         _cadenceController.delegate = self;
 
         _keystrokeSubscriptions = [[NSMutableDictionary alloc] init];
+        _keyboardFilterSubscriptions = [[NSMutableDictionary alloc] init];
         _updateSubscriptions = [[NSMutableDictionary alloc] init];
         _promptSubscriptions = [[NSMutableDictionary alloc] init];
         _locationChangeSubscriptions = [[NSMutableDictionary alloc] init];
@@ -759,6 +761,7 @@ ITERM_WEAKLY_REFERENCEABLE
     [_currentHost release];
 
     [_keystrokeSubscriptions release];
+    [_keyboardFilterSubscriptions release];
     [_updateSubscriptions release];
     [_promptSubscriptions release];
     [_locationChangeSubscriptions release];
@@ -2253,6 +2256,11 @@ ITERM_WEAKLY_REFERENCEABLE
              self, @(encoding), @(forceEncoding), @(canBroadcast), stack);
         DLog(@"writeTaskImpl string=%@", string);
     }
+    if (string.length == 0) {
+        DLog(@"String length is 0");
+        // Abort early so the surrogate hack works.
+        return;
+    }
     if (canBroadcast && _terminal.sendReceiveMode && !self.isTmuxClient && !self.isTmuxGateway) {
         // Local echo. Only for broadcastable text to avoid printing passwords from the password manager.
         [_screen appendStringAtCursor:[string stringByMakingControlCharactersToPrintable]];
@@ -2273,7 +2281,7 @@ ITERM_WEAKLY_REFERENCEABLE
             PTYScroller *verticalScroller = [_view.scrollview ptyVerticalScroller];
             [verticalScroller setUserScroll:NO];
         }
-        NSData *data = [string dataUsingEncoding:encoding allowLossyConversion:YES];
+        NSData *data = [self dataForInputString:string usingEncoding:encoding];
         const char *bytes = data.bytes;
         for (NSUInteger i = 0; i < data.length; i++) {
             DLog(@"Write byte 0x%02x (%c)", (((int)bytes[i]) & 0xff), bytes[i]);
@@ -2282,6 +2290,35 @@ ITERM_WEAKLY_REFERENCEABLE
     }
 }
 
+// Convert the string to the requested encoding. If the string is a lone surrogate, deal with it by
+// saving the high surrogate and then combining it with a subsequent low surrogate.
+- (NSData *)dataForInputString:(NSString *)string usingEncoding:(NSStringEncoding)encoding {
+    NSData *data = [string dataUsingEncoding:encoding allowLossyConversion:YES];
+    if (data) {
+        _shell.pendingHighSurrogate = 0;
+        return data;
+    }
+    if (string.length != 1) {
+        _shell.pendingHighSurrogate = 0;
+        return nil;
+    }
+
+    const unichar c = [string characterAtIndex:0];
+    if (IsHighSurrogate(c)) {
+        _shell.pendingHighSurrogate = c;
+        DLog(@"Detected high surrogate 0x%x", (int)c);
+        return nil;
+    } else if (IsLowSurrogate(c) && _shell.pendingHighSurrogate) {
+        DLog(@"Detected low surrogate 0x%x with pending high surrogate 0x%x", (int)c, (int)_shell.pendingHighSurrogate);
+        unichar chars[2] = { _shell.pendingHighSurrogate, c };
+        _shell.pendingHighSurrogate = 0;
+        NSString *composite = [NSString stringWithCharacters:chars length:2];
+        return [composite dataUsingEncoding:encoding allowLossyConversion:YES];
+    }
+
+    _shell.pendingHighSurrogate = 0;
+    return nil;
+}
 
 - (void)writeTaskNoBroadcast:(NSString *)string {
     [self writeTaskNoBroadcast:string encoding:_terminal.encoding forceEncoding:NO];
@@ -3630,7 +3667,7 @@ ITERM_WEAKLY_REFERENCEABLE
                                                       inProfile:aDict]
                    nonAscii:[iTermProfilePreferences boolForKey:KEY_NONASCII_ANTI_ALIASED
                                                       inProfile:aDict]];
-
+    [_textview setUseNativePowerlineGlyphs:[iTermProfilePreferences boolForKey:KEY_POWERLINE inProfile:aDict]];
     [self setEncoding:[iTermProfilePreferences unsignedIntegerForKey:KEY_CHARACTER_ENCODING inProfile:aDict]];
     [self setTermVariable:[iTermProfilePreferences stringForKey:KEY_TERMINAL_TYPE inProfile:aDict]];
     [_terminal setAnswerBackString:[iTermProfilePreferences stringForKey:KEY_ANSWERBACK_STRING inProfile:aDict]];
@@ -4330,7 +4367,7 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (void)updateDisplayBecause:(NSString *)reason {
-    DLog(@"updateDisplayBecause:%@", reason);
+    DLog(@"updateDisplayBecause:%@ %@", reason, _cadenceController);
     _updateCount++;
     if (@available(macOS 10.11, *)) {
         if (_useMetal && _updateCount % 10 == 0) {
@@ -4535,6 +4572,7 @@ ITERM_WEAKLY_REFERENCEABLE
 - (void)apiServerUnsubscribe:(NSNotification *)notification {
     [_promptSubscriptions removeObjectForKey:notification.object];
     [_keystrokeSubscriptions removeObjectForKey:notification.object];
+    [_keyboardFilterSubscriptions removeObjectForKey:notification.object];
     [_updateSubscriptions removeObjectForKey:notification.object];
     [_locationChangeSubscriptions removeObjectForKey:notification.object];
     [_customEscapeSequenceNotifications removeObjectForKey:notification.object];
@@ -4982,6 +5020,12 @@ ITERM_WEAKLY_REFERENCEABLE
         }
         return NO;
     }
+    if (!self.view.window) {
+        if (reason) {
+            *reason = iTermMetalUnavailableReasonSessionHasNoWindow;
+        }
+        return NO;
+    }
     if ([PTYSession onePixelContext] == nil) {
         if (reason) {
             *reason = iTermMetalUnavailableReasonContextAllocationFailure;
@@ -5273,13 +5317,32 @@ ITERM_WEAKLY_REFERENCEABLE
     DLog(@"%@", self);
     const CGSize cellSize = CGSizeMake(_textview.charWidth, _textview.lineHeight);
     CGSize glyphSize;
+    const CGFloat scale = _view.window.backingScaleFactor ?: 1;
+    NSRect rect = [iTermCharacterSource boundingRectForCharactersInRange:NSMakeRange(32, 127-32)
+                                                           asciiFontInfo:_textview.primaryFont
+                                                        nonAsciiFontInfo:_textview.secondaryFont
+                                                                   scale:scale
+                                                             useBoldFont:_textview.useBoldFont
+                                                           useItalicFont:_textview.useItalicFont
+                                                        usesNonAsciiFont:_textview.useNonAsciiFont
+                                                                 context:[PTYSession onePixelContext]];
+    CGSize asciiOffset = CGSizeZero;
+    if (rect.origin.y < 0) {
+        // Iosevka Light is the only font I've found that needs this.
+        // It rides *very* low in its box. The lineheight that PTYFontInfo calculates is actually too small
+        // to contain the glyphs (it uses a weird algorithm that was discovered "organically").
+        // There are gobs of empty pixels at the top, so we shift all its ASCII glyphs a bit so they'll
+        // fit. Non-ASCII characters may take multiple parts and so can properly extend beyond their
+        // cell, so we only need to think about ASCII. In other words, this hack shifts the character up
+        // *in the texture* to make better use of space without using a larger glyph size.
+        //
+        // In a monochrome world, this is still necessary because even though glyph size and cell
+        // size are no longer required to be the same, part of the glyph will be drawn outside its
+        // bounds and get clipped in the texture.
+        asciiOffset.height = -floor(rect.origin.y * scale);
+    }
     if (iTermTextIsMonochrome()) {
         // Mojave can use a glyph size larger than cell size because compositing is trivial without subpixel AA.
-        NSRect rect = [iTermCharacterSource boundingRectForCharactersInRange:NSMakeRange(32, 127-32)
-                                                                        font:_textview.font
-                                                              baselineOffset:_textview.primaryFont.baselineOffset
-                                                                       scale:_view.window.backingScaleFactor ?: 1
-                                                                     context:[PTYSession onePixelContext]];
         glyphSize.width = MAX(cellSize.width, NSMaxX(rect));
         glyphSize.height = MAX(cellSize.height, NSMaxY(rect));
     } else {
@@ -5294,6 +5357,11 @@ ITERM_WEAKLY_REFERENCEABLE
         }
         _errorCreatingMetalContext = YES;
         [self.delegate sessionUpdateMetalAllowed];
+        if (!_useMetal) {
+            DLog(@"Failed to create context for %@ but metal is not allowed", self);
+            return;
+        }
+        DLog(@"Failed to create context for %@. schedule retry", self);
         __weak __typeof(self) weakSelf = self;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{
@@ -5305,6 +5373,7 @@ ITERM_WEAKLY_REFERENCEABLE
        cellSizeWithoutSpacing:CGSizeMake(_textview.charWidthWithoutSpacing, _textview.charHeightWithoutSpacing)
                     glyphSize:glyphSize
                      gridSize:_screen.currentGrid.size
+                  asciiOffset:asciiOffset
                         scale:_view.window.screen.backingScaleFactor
                       context:_metalContext];
 }
@@ -5340,6 +5409,10 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 #pragma mark - Password Management
+
+- (BOOL)canOpenPasswordManager {
+    return !self.echoProbe.isActive;
+}
 
 - (void)enterPassword:(NSString *)password {
     _echoProbe.delegate = self;
@@ -5836,6 +5909,14 @@ ITERM_WEAKLY_REFERENCEABLE
 - (void)tmuxHostDisconnected:(NSString *)dcsID {
     _hideAfterTmuxWindowOpens = NO;
 
+    if ([iTermPreferences boolForKey:kPreferenceKeyAutoHideTmuxClientSession] &&
+        [[[iTermBuriedSessions sharedInstance] buriedSessions] containsObject:self]) {
+        // Do this before detaching because it may be the only tab in a hotkey window. If all the
+        // tabs close the window is destroyed and it breaks the reference from iTermProfileHotkey.
+        // See issue 7384.
+        [[iTermBuriedSessions sharedInstance] restoreSession:self];
+    }
+
     [_tmuxController detach];
     // Autorelease the gateway because it called this function so we can't free
     // it immediately.
@@ -5853,10 +5934,6 @@ ITERM_WEAKLY_REFERENCEABLE
     self.tmuxMode = TMUX_NONE;
     [self.variablesScope setValue:nil forVariableNamed:iTermVariableKeySessionTmuxClientName];
     [self.variablesScope setValue:nil forVariableNamed:iTermVariableKeySessionTmuxWindowTitle];
-    if ([iTermPreferences boolForKey:kPreferenceKeyAutoHideTmuxClientSession] &&
-        [[[iTermBuriedSessions sharedInstance] buriedSessions] containsObject:self]) {
-        [[iTermBuriedSessions sharedInstance] restoreSession:self];
-    }
 }
 
 - (void)tmuxCannotSendCharactersInSupplementaryPlanes:(NSString *)string windowPane:(int)windowPane {
@@ -6069,9 +6146,9 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (BOOL)keystrokeIsFilteredByMonitor:(NSEvent *)event {
-    for (NSString *identifier in _keystrokeSubscriptions) {
-        ITMNotificationRequest *request = _keystrokeSubscriptions[identifier];
-        for (ITMKeystrokePattern *pattern in request.keystrokeMonitorRequest.patternsToIgnoreArray) {
+    for (NSString *identifier in _keyboardFilterSubscriptions) {
+        ITMNotificationRequest *request = _keyboardFilterSubscriptions[identifier];
+        for (ITMKeystrokePattern *pattern in request.keystrokeFilterRequest.patternsToIgnoreArray) {
             if ([self event:event matchesPattern:pattern]) {
                 return YES;
             }
@@ -7310,6 +7387,11 @@ ITERM_WEAKLY_REFERENCEABLE
 
 - (void)textViewDidBecomeFirstResponder {
     [_delegate setActiveSession:self];
+    [_view setNeedsDisplay:YES];
+}
+
+- (void)textViewDidResignFirstResponder {
+    [_view setNeedsDisplay:YES];
 }
 
 - (BOOL)textViewReportMouseEvent:(NSEventType)eventType
@@ -10225,7 +10307,7 @@ ITERM_WEAKLY_REFERENCEABLE
 #pragma mark - iTermUpdateCadenceController
 
 - (void)updateCadenceControllerUpdateDisplay:(iTermUpdateCadenceController *)controller {
-    [self updateDisplayBecause:controller.description];
+    [self updateDisplayBecause:nil];
 }
 
 - (iTermUpdateCadenceState)updateCadenceControllerState {
@@ -10453,6 +10535,9 @@ ITERM_WEAKLY_REFERENCEABLE
         case ITMNotificationType_NotifyOnKeystroke:
             subscriptions = _keystrokeSubscriptions;
             break;
+        case ITMNotificationType_KeystrokeFilter:
+            subscriptions = _keyboardFilterSubscriptions;
+            break;
         case ITMNotificationType_NotifyOnScreenUpdate:
             subscriptions = _updateSubscriptions;
             break;
@@ -10657,7 +10742,7 @@ ITERM_WEAKLY_REFERENCEABLE
 
 - (NSColor *)textColorForStatusBar {
     if (self.view.window.ptyWindow.it_terminalWindowUseMinimalStyle) {
-        return self.view.window.ptyWindow.it_terminalWindowDecorationTextColor;
+        return [self.view.window.ptyWindow it_terminalWindowDecorationTextColorForBackgroundColor:nil];
     } else if (@available(macOS 10.14, *)) {
         return [NSColor labelColor];
     } else if ([_view.effectiveAppearance.name isEqualToString:NSAppearanceNameVibrantDark]) {

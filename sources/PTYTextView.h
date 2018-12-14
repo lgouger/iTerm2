@@ -110,6 +110,7 @@ typedef NS_ENUM(NSInteger, PTYTextViewSelectionExtensionUnit) {
 - (void)writeTask:(NSString *)string;
 - (void)writeStringWithLatin1Encoding:(NSString *)string;
 - (void)textViewDidBecomeFirstResponder;
+- (void)textViewDidResignFirstResponder;
 - (void)refresh;
 - (BOOL)textViewIsActiveSession;
 - (BOOL)textViewSessionIsBroadcastingInput;
@@ -372,6 +373,7 @@ typedef void (^PTYTextViewDrawingHookBlock)(iTermTextDrawingHelper *);
 
 @property (nonatomic) BOOL suppressDrawing;
 @property (nonatomic, readonly) long long firstVisibleAbsoluteLineNumber;
+@property (nonatomic) BOOL useNativePowerlineGlyphs;
 
 // Returns the size of a cell for a given font. hspace and vspace are multipliers and the width
 // and height.
@@ -608,6 +610,8 @@ typedef void (^PTYTextViewDrawingHookBlock)(iTermTextDrawingHelper *);
 
 // Turns on the flicker fixer (if enabled) while drawing.
 - (void)performBlockWithFlickerFixerGrid:(void (NS_NOESCAPE ^)(void))block;
+
+- (id)contentWithAttributes:(BOOL)attributes;
 
 #pragma mark - Testing only
 

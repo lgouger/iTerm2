@@ -201,6 +201,8 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     // If YES then force metal off. Does a hard reset when changing screens.
     BOOL _bounceMetal;
     NSString *_temporarilyUnmaximizedSessionGUID;
+
+    NSMutableArray<PTYSession *> *_sessionsWithDeferredFontChanges;
 }
 
 @synthesize parentWindow = parentWindow_;
@@ -378,6 +380,8 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     [self.variablesScope setValue:_userVariables forVariableNamed:@"user"];
 
     self.tmuxWindow = -1;
+    _sessionsWithDeferredFontChanges = [[NSMutableArray alloc] init];
+
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(_refreshLabels:)
                                                  name:kUpdateLabelsNotification
@@ -907,7 +911,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 
 // This is KVO-observed by PSMTabBarControl and determines whether the activity indicator is visible.
 - (BOOL)isProcessing {
-    return (![iTermPreferences boolForKey:kPreferenceKeyHideTabActivityIndicator] &&
+    return (![iTermPreferences hideTabActivityIndicator] &&
             isProcessing_ &&
             ![self isForegroundTab]);
 }
@@ -1495,7 +1499,30 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     return [self isForegroundTab];
 }
 
+- (void)setDeferFontChanges:(BOOL)deferFontChanges {
+    if (deferFontChanges == _deferFontChanges) {
+        return;
+    }
+    _deferFontChanges = deferFontChanges;
+    if (!deferFontChanges) {
+        for (PTYSession *session in _sessionsWithDeferredFontChanges) {
+            [self reallyChangeSessionFontSize:session];
+        }
+        [_sessionsWithDeferredFontChanges removeAllObjects];
+    }
+}
+
 - (void)sessionDidChangeFontSize:(PTYSession *)session {
+    if (self.deferFontChanges) {
+        if (![_sessionsWithDeferredFontChanges containsObject:session]) {
+            [_sessionsWithDeferredFontChanges addObject:session];
+        }
+        return;
+    }
+    [self reallyChangeSessionFontSize:session];
+}
+
+- (void)reallyChangeSessionFontSize:(PTYSession *)session {
     if (![[self parentWindow] anyFullScreen]) {
         if ([iTermPreferences boolForKey:kPreferenceKeyAdjustWindowForFontSizeChange]) {
             [[self parentWindow] fitWindowToTab:self];
@@ -2723,12 +2750,12 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 
 // Uses idMap_ to reconstitute the TAB_ARRANGEMENT_SESSION elements of an arrangement including their
 // contents.
-- (NSDictionary *)arrangementNodeWithContentsFromArrangementNode:(NSDictionary *)node {
+- (NSDictionary *)arrangementNodeWithContents:(BOOL)includeContents fromArrangementNode:(NSDictionary *)node {
     NSMutableDictionary *result = [node mutableCopy];
     if ([node[TAB_ARRANGEMENT_VIEW_TYPE] isEqual:VIEW_TYPE_SPLITTER]) {
         NSMutableArray *subnodes = [node[SUBVIEWS] mutableCopy];
         for (int i = 0; i < subnodes.count; i++) {
-            subnodes[i] = [self arrangementNodeWithContentsFromArrangementNode:subnodes[i]];
+            subnodes[i] = [self arrangementNodeWithContents:includeContents fromArrangementNode:subnodes[i]];
         }
         result[SUBVIEWS] = subnodes;
     } else {
@@ -2741,7 +2768,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
                 sessionView &&
                 [self sessionForSessionView:sessionView]) {
                 result[TAB_ARRANGEMENT_SESSION] =
-                    [[self sessionForSessionView:sessionView] arrangementWithContents:YES];
+                    [[self sessionForSessionView:sessionView] arrangementWithContents:includeContents];
             } else {
                 XLog(@"Bogus value in idmap for key %@: %@", sessionId, sessionView);
             }
@@ -2779,7 +2806,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
         mutableRootNode[TAB_ARRANGEMENT_IS_MAXIMIZED] = @YES;
 
         // Fill in the contents.
-        rootNode = [self arrangementNodeWithContentsFromArrangementNode:mutableRootNode];
+        rootNode = [self arrangementNodeWithContents:contents fromArrangementNode:mutableRootNode];
     } else {
         // Build a new arrangement. If |constructIdMap| is set then pass in
         // idMap_, and it will get filled in with number->SessionView entries.
@@ -4984,7 +5011,15 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     const BOOL resizing = self.realParentWindow.windowIsResizing;
     const BOOL powerOK = [[iTermPowerManager sharedInstance] metalAllowed];
     __block iTermMetalUnavailableReason sessionReason = iTermMetalUnavailableReasonNone;
-    const BOOL allSessionsAllowMetal = [self.sessions allWithBlock:^BOOL(PTYSession *anObject) {
+    NSArray<PTYSession *> *nonHiddenSessions = [self.sessions filteredArrayUsingBlock:^BOOL(PTYSession *session) {
+        if (!isMaximized_) {
+            // Invisible sessions in a maximized tab aren't in the view hierarchy and so will always
+            // say Metal is disallowed.
+            return YES;
+        }
+        return session == self.activeSession;
+    }];
+    const BOOL allSessionsAllowMetal = [nonHiddenSessions allWithBlock:^BOOL(PTYSession *anObject) {
         return [anObject metalAllowed:&sessionReason];
     }];
     const BOOL allSessionsIdle = (allSessionsAllowMetal &&
@@ -5000,7 +5035,9 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 
     iTermMetalUnavailableReason reason = iTermMetalUnavailableReasonNone;
     BOOL allowed = NO;
-    if (resizing) {
+    if ([self.delegate tabAnyDragInProgress:self]) {
+        _metalUnavailableReason = iTermMetalUnavailableReasonTabDragInProgress;
+    } else if (resizing) {
         _metalUnavailableReason = iTermMetalUnavailableReasonWindowResizing;
     } else if (!powerOK) {
         _metalUnavailableReason = iTermMetalUnavailableReasonDisconnectedFromPower;
@@ -5036,7 +5073,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     }
     BOOL useMetal = NO;
     if (allowed && satisfiesKeyRequirement && foregroundTab) {
-        useMetal = [self.sessions allWithBlock:^BOOL(PTYSession *session) {
+        useMetal = [nonHiddenSessions allWithBlock:^BOOL(PTYSession *session) {
             return [session willEnableMetal];
         }];
         if (!useMetal) {
@@ -5045,6 +5082,10 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
         }
     }
     [self.sessions enumerateObjectsUsingBlock:^(PTYSession * _Nonnull obj, NSUInteger idx, BOOL * _Nonnull stop) {
+        if (isMaximized_) {
+            obj.useMetal = useMetal && (obj == self.activeSession);
+            return;
+        }
         obj.useMetal = useMetal;
     }];
     [_delegate tab:self didSetMetalEnabled:useMetal];

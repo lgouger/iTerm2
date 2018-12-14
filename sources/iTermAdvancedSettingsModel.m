@@ -9,49 +9,10 @@
 #import <Foundation/Foundation.h>
 
 #import "iTermAdvancedSettingsModel.h"
+#import "iTermUserDefaultsObserver.h"
 #import "NSApplication+iTerm.h"
 #import "NSStringITerm.h"
 #import <objc/runtime.h>
-
-static char iTermAdvancedSettingsModelKVOKey;
-
-@interface iTermAdvancedSettingsModelChangeObserver: NSObject
-- (void)observeKey:(NSString *)key block:(void (^)(void))block;
-@end
-
-@implementation iTermAdvancedSettingsModelChangeObserver {
-    NSMutableDictionary<NSString *, void (^)(void)> *_blocks;
-}
-
-- (instancetype)init {
-    self = [super init];
-    if (self) {
-        _blocks = [NSMutableDictionary dictionary];
-    }
-    return self;
-}
-
-- (void)observeKey:(NSString *)key block:(void (^)(void))block {
-    _blocks[key] = [block copy];
-    [[NSUserDefaults standardUserDefaults] addObserver:self
-                                            forKeyPath:key
-                                               options:NSKeyValueObservingOptionNew
-                                               context:(void *)&iTermAdvancedSettingsModelKVOKey];
-}
-
-// This is called when user defaults are changed anywhere.
-- (void)observeValueForKeyPath:(NSString *)keyPath
-                      ofObject:(id)object
-                        change:(NSDictionary *)change
-                       context:(void *)context {
-    if (context == &iTermAdvancedSettingsModelKVOKey) {
-        void (^block)(void) = _blocks[keyPath];
-        if (block) {
-            block();
-        }
-    }
-}
-@end
 
 
 NSString *const kAdvancedSettingIdentifier = @"kAdvancedSettingIdentifier";
@@ -349,7 +310,7 @@ DEFINE_STRING(pathToTelnet, @"telnet", SECTION_GENERAL @"Path to telnet for open
 DEFINE_STRING(fallbackLCCType, @"", SECTION_GENERAL @"Value to set LC_CTYPE to if the machine‘s combination of country and language are not supported.\nIf unset, the encoding (e.g., UTF-8) will be used.");
 // See issue 6994
 DEFINE_BOOL(useVirtualKeyCodesForDetectingDigits, NO, SECTION_GENERAL @"Treat the top row of keys like number keys on an English keyboard for the purposes of switching panes, tabs, and windows with modifier+number.\nFor example, AZERTY requires you to hold down Shift to enter a number. To switch tabs with ⌘+Number on an AZERTY keyboard, you must enable this setting. Then, for example, ⌘-& switches to tab 1. When this setting is enabled, some user-defined shortcuts may become unavailable because the tab/window/pane switching behavior takes precedence.");
-DEFINE_BOOL(hotkeyWindowsExcludedFromCycling, YES, SECTION_GENERAL @"Hotkey windows are excluded from Cycle Through Windows.");
+DEFINE_BOOL(hotkeyWindowsExcludedFromCycling, NO, SECTION_GENERAL @"Hotkey windows are excluded from Cycle Through Windows.");
 
 #pragma mark - Drawing
 
@@ -544,8 +505,8 @@ DEFINE_STRING(pythonRuntimeDownloadURL, @"https://iterm2.com/downloads/pyenv/man
 
 + (void)initialize {
     if (self == [iTermAdvancedSettingsModel self]) {
-        static iTermAdvancedSettingsModelChangeObserver *observer;
-        observer = [[iTermAdvancedSettingsModelChangeObserver alloc] init];
+        static iTermUserDefaultsObserver *observer;
+        observer = [[iTermUserDefaultsObserver alloc] init];
         [self enumerateMethods:^(Method method, SEL selector) {
             NSString *name = NSStringFromSelector(selector);
             if ([name hasPrefix:@"load_"]) {

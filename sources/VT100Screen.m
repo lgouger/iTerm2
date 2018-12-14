@@ -2019,6 +2019,15 @@ basedAtAbsoluteLineNumber:(long long)absoluteLineNumber
     return [NSDate dateWithTimeIntervalSinceReferenceDate:interval];
 }
 
+- (NSInteger)generationForLine:(int)y {
+    int numLinesInLineBuffer = [linebuffer_ numLinesWithWidth:currentGrid_.size.width];
+    if (y >= numLinesInLineBuffer) {
+        return [currentGrid_ generationForLine:y - numLinesInLineBuffer];
+    } else {
+        return [linebuffer_ generationForLineNumber:y width:currentGrid_.size.width];
+    }
+}
+
 - (Interval *)intervalForGridCoordRange:(VT100GridCoordRange)range
                                   width:(int)width
                             linesOffset:(long long)linesOffset
@@ -5291,29 +5300,29 @@ static void SwapInt(int *a, int *b) {
     NSMutableDictionary *dict = [[[temp dictionary] mutableCopy] autorelease];
     static NSString *const kScreenStateTabStopsKey = @"Tab Stops";
     dict[kScreenStateKey] =
-        @{ kScreenStateTabStopsKey: [tabStops_ allObjects] ?: @[],
-           kScreenStateTerminalKey: [terminal_ stateDictionary] ?: @{},
-           kScreenStateLineDrawingModeKey: @[ @(charsetUsesLineDrawingMode_[0]),
-                                              @(charsetUsesLineDrawingMode_[1]),
-                                              @(charsetUsesLineDrawingMode_[2]),
-                                              @(charsetUsesLineDrawingMode_[3]) ],
-           kScreenStateNonCurrentGridKey: [self contentsOfNonCurrentGrid] ?: @{},
-           kScreenStateCurrentGridIsPrimaryKey: @(primaryGrid_ == currentGrid_),
-           kScreenStateIntervalTreeKey: [intervalTree_ dictionaryValueWithOffset:intervalOffset] ?: @{},
-           kScreenStateSavedIntervalTreeKey: [savedIntervalTree_ dictionaryValueWithOffset:0] ?: [NSNull null],
-           kScreenStateCommandStartXKey: @(commandStartX_),
-           kScreenStateCommandStartYKey: @(commandStartY_),
-           kScreenStateNextCommandOutputStartKey: [NSDictionary dictionaryWithGridAbsCoord:_startOfRunningCommandOutput],
-           kScreenStateCursorVisibleKey: @(_cursorVisible),
-           kScreenStateTrackCursorLineMovementKey: @(_trackCursorLineMovement),
-           kScreenStateLastCommandOutputRangeKey: [NSDictionary dictionaryWithGridAbsCoordRange:_lastCommandOutputRange],
-           kScreenStateShellIntegrationInstalledKey: @(_shellIntegrationInstalled),
-           kScreenStateLastCommandMarkKey: _lastCommandMark.guid ?: [NSNull null],
-           kScreenStatePrimaryGridStateKey: primaryGrid_.dictionaryValue ?: @{},
-           kScreenStateAlternateGridStateKey: altGrid_.dictionaryValue ?: [NSNull null],
-           kScreenStateNumberOfLinesDroppedKey: @(linesDroppedForBrevity)
-           };
-    return [dict dictionaryByRemovingNullValues];
+        [@{ kScreenStateTabStopsKey: [tabStops_ allObjects] ?: @[],
+            kScreenStateTerminalKey: [terminal_ stateDictionary] ?: @{},
+            kScreenStateLineDrawingModeKey: @[ @(charsetUsesLineDrawingMode_[0]),
+                                               @(charsetUsesLineDrawingMode_[1]),
+                                               @(charsetUsesLineDrawingMode_[2]),
+                                               @(charsetUsesLineDrawingMode_[3]) ],
+            kScreenStateNonCurrentGridKey: [self contentsOfNonCurrentGrid] ?: @{},
+            kScreenStateCurrentGridIsPrimaryKey: @(primaryGrid_ == currentGrid_),
+            kScreenStateIntervalTreeKey: [intervalTree_ dictionaryValueWithOffset:intervalOffset] ?: @{},
+            kScreenStateSavedIntervalTreeKey: [savedIntervalTree_ dictionaryValueWithOffset:0] ?: [NSNull null],
+            kScreenStateCommandStartXKey: @(commandStartX_),
+            kScreenStateCommandStartYKey: @(commandStartY_),
+            kScreenStateNextCommandOutputStartKey: [NSDictionary dictionaryWithGridAbsCoord:_startOfRunningCommandOutput],
+            kScreenStateCursorVisibleKey: @(_cursorVisible),
+            kScreenStateTrackCursorLineMovementKey: @(_trackCursorLineMovement),
+            kScreenStateLastCommandOutputRangeKey: [NSDictionary dictionaryWithGridAbsCoordRange:_lastCommandOutputRange],
+            kScreenStateShellIntegrationInstalledKey: @(_shellIntegrationInstalled),
+            kScreenStateLastCommandMarkKey: _lastCommandMark.guid ?: [NSNull null],
+            kScreenStatePrimaryGridStateKey: primaryGrid_.dictionaryValue ?: @{},
+            kScreenStateAlternateGridStateKey: altGrid_.dictionaryValue ?: [NSNull null],
+            kScreenStateNumberOfLinesDroppedKey: @(linesDroppedForBrevity)
+            } dictionaryByRemovingNullValues];
+    return dict;
 }
 
 - (NSDictionary *)contentsOfNonCurrentGrid {
