@@ -159,24 +159,6 @@ async def async_subscribe_to_prompt_notification(connection, callback, session=N
         callback,
         session=session)
 
-async def async_subscribe_to_location_change_notification(connection, callback, session=None):
-    """
-    Registers a callback to be run when the host or current directory changes.
-
-    :param connection: A connected :class:`Connection`.
-    :param callback: A coroutine taking two arguments: an :class:`Connection` and
-      iterm2.api_pb2.LocationChangeNotification.
-    :param session: The session to monitor, or None.
-
-    :returns: A token that can be passed to unsubscribe.
-    """
-    return await _async_subscribe(
-        connection,
-        True,
-        iterm2.api_pb2.NOTIFY_ON_LOCATION_CHANGE,
-        callback,
-        session=session)
-
 async def async_subscribe_to_custom_escape_sequence_notification(connection,
                                                                  callback,
                                                                  session=None):
@@ -255,7 +237,7 @@ async def async_subscribe_to_broadcast_domains_change_notification(connection, c
     """
     Registers a callback to be run when the current broadcast domains change.
 
-    See also: :meth:`iTerm2.App.parse_broadcast_domains`. Pass it `notification.broadcast_domains`.
+    See also: :meth:`~iTerm2.App.parse_broadcast_domains`. Pass it `notification.broadcast_domains`.
 
     :param connection: A connected :class:`Connection`.
     :param callback: A coroutine taking two arguments: an :class:`Connection` and
@@ -268,11 +250,21 @@ async def async_subscribe_to_broadcast_domains_change_notification(connection, c
         callback,
         session=None)
 
-async def async_subscribe_to_server_originated_rpc_notification(connection, callback, name, arguments=[], timeout_seconds=5, defaults={}, role=RPC_ROLE_GENERIC, session_title_display_name=None, status_bar_component=None):
+async def async_subscribe_to_server_originated_rpc_notification(
+        connection,
+        callback,
+        name,
+        arguments=[],
+        timeout_seconds=5,
+        defaults={},
+        role=RPC_ROLE_GENERIC,
+        session_title_display_name=None,
+        session_title_unique_id=None,
+        status_bar_component=None):
     """
     Registers a callback to be run when the server wants to invoke an RPC.
 
-    You probably want to use :meth:`iterm2.Registration.async_register_rpc_handler`
+    You probably want to use :meth:`~iterm2.Registration.async_register_rpc_handler`
     instead of this. It's a much higher level API.
 
     :param connection: A connected :class:`Connection`.
@@ -310,6 +302,8 @@ async def async_subscribe_to_server_originated_rpc_notification(connection, call
 
     if session_title_display_name is not None:
         rpc_registration_request.session_title_attributes.display_name = session_title_display_name
+        assert session_title_unique_id
+        rpc_registration_request.session_title_attributes.unique_identifier = session_title_unique_id
     elif status_bar_component is not None:
         status_bar_component.set_fields_in_proto(rpc_registration_request.status_bar_component_attributes)
 
@@ -328,9 +322,8 @@ async def async_subscribe_to_variable_change_notification(connection, callback, 
     :param callback: A coroutine taking two arguments: an :class:`Connection` and iterm2.api_pb2.VariableChangedNotification.
     :param scope: A :class:`VariableScopes` enumerated value.
     :param name: The name of the variable, a string.
-    :param identifier: The identifier of the object (window, tab, or session) being monitored, or None for app.
+    :param identifier: The identifier of the object (window, tab, or session) being monitored, or None for app. Sometimes this will be "all" or "active".
     """
-    # TODO: Support identifiers of "all"
     request = iterm2.api_pb2.VariableMonitorRequest()
     request.name = name
     request.scope = scope
@@ -459,6 +452,19 @@ async def _async_dispatch_helper(connection, message):
 
     return bool(handlers)
 
+def _get_all_sessions_handler_key_from_notification(notification):
+    if notification.HasField('variable_changed_notification'):
+        return (iterm2.api_pb2.VariableScope.Value("SESSION"),
+                "all",
+                notification.variable_changed_notification.name,
+                iterm2.api_pb2.NOTIFY_ON_VARIABLE_CHANGE)
+    else:
+        standard_key, _ = _get_handler_key_from_notification(notification)
+        return (None, standard_key[1])
+
+    return None
+
+
 def _get_handler_key_from_notification(notification):
     key = None
 
@@ -512,7 +518,8 @@ def _get_notification_handlers(message):
     if key is None:
         return ([], None)
 
-    fallback = (None, key[1])
+    # This fallback catches "all"-style subscriptions.
+    fallback = _get_all_sessions_handler_key_from_notification(message.notification)
 
     if key in _get_handlers():
         return (_get_handlers()[key], sub_notification)
@@ -548,45 +555,4 @@ def _unregister_notification_handler_impl(key, coro):
     if key in _get_handlers():
         if coro in _get_handlers()[key]:
             _get_handlers()[key].remove(coro)
-
-class NewSessionMonitor:
-    """Watches for the creation of new sessions.
-
-      :param connection: The :class:`iterm2.Connection` to use.
-
-       Example:
-
-       .. code-block:: python
-
-           app = await iterm2.async_get_app(connection)
-           async with NewSessionMonitor(connection) as mon:
-               while True:
-                   session_id = await mon.async_get()
-                   DoSomethingWithSession(app.get_session_by_id(session_id))
-
-      """
-    def __init__(self, connection):
-        self.__connection = connection
-        self.__queue = asyncio.Queue(loop=asyncio.get_event_loop())
-
-    async def __aenter__(self):
-        async def callback(_connection, message):
-            """Called when a new session is created."""
-            await self.__queue.put(message)
-
-        self.__token = await async_subscribe_to_new_session_notification(
-                self.__connection,
-                callback)
-        return self
-
-    async def async_get(self):
-        """
-        Returns the new session ID.
-        """
-        result = await self.__queue.get()
-        session_id = result.uniqueIdentifier
-        return session_id
-
-    async def __aexit__(self, exc_type, exc, _tb):
-        await async_unsubscribe(self.__connection, self.__token)
 

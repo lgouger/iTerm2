@@ -6540,10 +6540,12 @@ typedef struct ITMRPCRegistrationRequest_RPCArgument__storage_ {
 @implementation ITMRPCRegistrationRequest_SessionTitleAttributes
 
 @dynamic hasDisplayName, displayName;
+@dynamic hasUniqueIdentifier, uniqueIdentifier;
 
 typedef struct ITMRPCRegistrationRequest_SessionTitleAttributes__storage_ {
   uint32_t _has_storage_[1];
   NSString *displayName;
+  NSString *uniqueIdentifier;
 } ITMRPCRegistrationRequest_SessionTitleAttributes__storage_;
 
 // This method is threadsafe because it is initially called
@@ -6558,6 +6560,15 @@ typedef struct ITMRPCRegistrationRequest_SessionTitleAttributes__storage_ {
         .number = ITMRPCRegistrationRequest_SessionTitleAttributes_FieldNumber_DisplayName,
         .hasIndex = 0,
         .offset = (uint32_t)offsetof(ITMRPCRegistrationRequest_SessionTitleAttributes__storage_, displayName),
+        .flags = GPBFieldOptional,
+        .dataType = GPBDataTypeString,
+      },
+      {
+        .name = "uniqueIdentifier",
+        .dataTypeSpecific.className = NULL,
+        .number = ITMRPCRegistrationRequest_SessionTitleAttributes_FieldNumber_UniqueIdentifier,
+        .hasIndex = 1,
+        .offset = (uint32_t)offsetof(ITMRPCRegistrationRequest_SessionTitleAttributes__storage_, uniqueIdentifier),
         .flags = GPBFieldOptional,
         .dataType = GPBDataTypeString,
       },
@@ -8230,11 +8241,11 @@ typedef struct ITMCustomEscapeSequenceNotification__storage_ {
 
 @implementation ITMNewSessionNotification
 
-@dynamic hasUniqueIdentifier, uniqueIdentifier;
+@dynamic hasSessionId, sessionId;
 
 typedef struct ITMNewSessionNotification__storage_ {
   uint32_t _has_storage_[1];
-  NSString *uniqueIdentifier;
+  NSString *sessionId;
 } ITMNewSessionNotification__storage_;
 
 // This method is threadsafe because it is initially called
@@ -8244,12 +8255,12 @@ typedef struct ITMNewSessionNotification__storage_ {
   if (!descriptor) {
     static GPBMessageFieldDescription fields[] = {
       {
-        .name = "uniqueIdentifier",
+        .name = "sessionId",
         .dataTypeSpecific.className = NULL,
-        .number = ITMNewSessionNotification_FieldNumber_UniqueIdentifier,
+        .number = ITMNewSessionNotification_FieldNumber_SessionId,
         .hasIndex = 0,
-        .offset = (uint32_t)offsetof(ITMNewSessionNotification__storage_, uniqueIdentifier),
-        .flags = (GPBFieldFlags)(GPBFieldOptional | GPBFieldTextFormatNameCustom),
+        .offset = (uint32_t)offsetof(ITMNewSessionNotification__storage_, sessionId),
+        .flags = GPBFieldOptional,
         .dataType = GPBDataTypeString,
       },
     };
@@ -8261,11 +8272,6 @@ typedef struct ITMNewSessionNotification__storage_ {
                                     fieldCount:(uint32_t)(sizeof(fields) / sizeof(GPBMessageFieldDescription))
                                    storageSize:sizeof(ITMNewSessionNotification__storage_)
                                          flags:GPBDescriptorInitializationFlag_None];
-#if !GPBOBJC_SKIP_MESSAGE_TEXTFORMAT_EXTRAS
-    static const char *extraTextFormatInfo =
-        "\001\001\020\000";
-    [localDescriptor setupExtraTextInfo:extraTextFormatInfo];
-#endif  // !GPBOBJC_SKIP_MESSAGE_TEXTFORMAT_EXTRAS
     NSAssert(descriptor == nil, @"Startup recursed!");
     descriptor = localDescriptor;
   }
@@ -8457,11 +8463,11 @@ BOOL ITMFocusChangedNotification_Window_WindowStatus_IsValidValue(int32_t value_
 
 @implementation ITMTerminateSessionNotification
 
-@dynamic hasUniqueIdentifier, uniqueIdentifier;
+@dynamic hasSessionId, sessionId;
 
 typedef struct ITMTerminateSessionNotification__storage_ {
   uint32_t _has_storage_[1];
-  NSString *uniqueIdentifier;
+  NSString *sessionId;
 } ITMTerminateSessionNotification__storage_;
 
 // This method is threadsafe because it is initially called
@@ -8471,12 +8477,12 @@ typedef struct ITMTerminateSessionNotification__storage_ {
   if (!descriptor) {
     static GPBMessageFieldDescription fields[] = {
       {
-        .name = "uniqueIdentifier",
+        .name = "sessionId",
         .dataTypeSpecific.className = NULL,
-        .number = ITMTerminateSessionNotification_FieldNumber_UniqueIdentifier,
+        .number = ITMTerminateSessionNotification_FieldNumber_SessionId,
         .hasIndex = 0,
-        .offset = (uint32_t)offsetof(ITMTerminateSessionNotification__storage_, uniqueIdentifier),
-        .flags = (GPBFieldFlags)(GPBFieldOptional | GPBFieldTextFormatNameCustom),
+        .offset = (uint32_t)offsetof(ITMTerminateSessionNotification__storage_, sessionId),
+        .flags = GPBFieldOptional,
         .dataType = GPBDataTypeString,
       },
     };
@@ -8488,11 +8494,6 @@ typedef struct ITMTerminateSessionNotification__storage_ {
                                     fieldCount:(uint32_t)(sizeof(fields) / sizeof(GPBMessageFieldDescription))
                                    storageSize:sizeof(ITMTerminateSessionNotification__storage_)
                                          flags:GPBDescriptorInitializationFlag_None];
-#if !GPBOBJC_SKIP_MESSAGE_TEXTFORMAT_EXTRAS
-    static const char *extraTextFormatInfo =
-        "\001\001\020\000";
-    [localDescriptor setupExtraTextInfo:extraTextFormatInfo];
-#endif  // !GPBOBJC_SKIP_MESSAGE_TEXTFORMAT_EXTRAS
     NSAssert(descriptor == nil, @"Startup recursed!");
     descriptor = localDescriptor;
   }

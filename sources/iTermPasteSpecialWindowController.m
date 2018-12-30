@@ -72,6 +72,8 @@
     // Is currently at shell prompt? Sets wait-for-prompt default value.
     BOOL _isAtShellPrompt;
 
+    BOOL _forceEscapeSymbols;
+
     // String to paste before transforms.
     NSArray *_originalValues;
     NSArray *_labels;
@@ -99,6 +101,7 @@
                 bracketingEnabled:(BOOL)bracketingEnabled
                  canWaitForPrompt:(BOOL)canWaitForPrompt
                   isAtShellPrompt:(BOOL)isAtShellPrompt
+               forceEscapeSymbols:(BOOL)forceEscapeSymbols
                    encoding:(NSStringEncoding)encoding {
     self = [super initWithWindowNibName:@"iTermPasteSpecialWindow"];
     if (self) {
@@ -106,6 +109,7 @@
         _bracketingEnabled = bracketingEnabled;
         _canWaitForPrompt = canWaitForPrompt;
         _isAtShellPrompt = isAtShellPrompt;
+        _forceEscapeSymbols = forceEscapeSymbols;
         NSMutableArray *values = [NSMutableArray array];
         NSMutableArray *labels = [NSMutableArray array];
 
@@ -118,8 +122,11 @@
                         continue;
                     }
                     if (entry == historyEntries.lastObject) {
-                        // This is better handled by examining the pasteboard.
-                        continue;
+                        NSString *pasteboardString = [NSString stringFromPasteboard];
+                        if (pasteboardString && entry.mainValue && [pasteboardString isEqualToString:entry.mainValue]) {
+                            // Include the last entry only if it differs from the current pasteboard contents.
+                            continue;
+                        }
                     }
                     NSString *title = entry.mainValue;
                     static const NSUInteger kMaxLength = 50;
@@ -314,7 +321,7 @@
     BOOL containsNewlines = containsDosNewlines || [string containsString:@"\r"];
     BOOL containsUnicodePunctuation = ([string rangeOfRegex:kPasteSpecialViewControllerUnicodePunctuationRegularExpression].location != NSNotFound);
     BOOL convertValue = [iTermPreferences boolForKey:kPreferenceKeyPasteSpecialConvertDosNewlines];
-    BOOL shouldEscape = [iTermPreferences boolForKey:kPreferenceKeyPasteSpecialEscapeShellCharsWithBackslash];
+    BOOL shouldEscape = _forceEscapeSymbols || [iTermPreferences boolForKey:kPreferenceKeyPasteSpecialEscapeShellCharsWithBackslash];
     BOOL convertUnicodePunctuation = [iTermPreferences boolForKey:kPreferenceKeyPasteSpecialConvertUnicodePunctuation];
     NSMutableCharacterSet *unsafeSet = [iTermPasteHelper unsafeControlCodeSet];
     NSRange unsafeRange = [string rangeOfCharacterFromSet:unsafeSet];
@@ -405,6 +412,7 @@
                    encoding:(NSStringEncoding)encoding
            canWaitForPrompt:(BOOL)canWaitForPrompt
             isAtShellPrompt:(BOOL)isAtShellPrompt
+         forceEscapeSymbols:(BOOL)forceEscapeSymbols
                  completion:(iTermPasteSpecialCompletionBlock)completion {
     iTermPasteSpecialWindowController *controller =
         [[[iTermPasteSpecialWindowController alloc] initWithChunkSize:chunkSize
@@ -412,6 +420,7 @@
                                                     bracketingEnabled:bracketingEnabled
                                                      canWaitForPrompt:canWaitForPrompt
                                                       isAtShellPrompt:isAtShellPrompt
+                                                   forceEscapeSymbols:forceEscapeSymbols
                                                              encoding:encoding] autorelease];
     NSWindow *window = [controller window];
     [presentingWindow beginSheet:window completionHandler:^(NSModalResponse returnCode) {
@@ -508,6 +517,10 @@
 
 - (IBAction)ok:(id)sender {
     _shouldPaste = YES;
+    NSString *string = [[self pasteEvent] string];
+    if (string.length > 0) {
+        [[PasteboardHistory sharedInstance] save:string];
+    }
     [NSApp stopModal];
 }
 

@@ -19,6 +19,7 @@
 #import "iTermLSOF.h"
 #import "iTermProfilePreferences.h"
 #import "iTermPythonArgumentParser.h"
+#import "iTermScriptHistory.h"
 #import "iTermSelection.h"
 #import "iTermStatusBarComponent.h"
 #import "iTermStatusBarViewController.h"
@@ -46,6 +47,7 @@
 NSString *const iTermRemoveAPIServerSubscriptionsNotification = @"iTermRemoveAPIServerSubscriptionsNotification";
 NSString *const iTermAPIRegisteredFunctionsDidChangeNotification = @"iTermAPIRegisteredFunctionsDidChangeNotification";
 NSString *const iTermAPIDidRegisterSessionTitleFunctionNotification = @"iTermAPIDidRegisterSessionTitleFunctionNotification";
+NSString *const iTermAPIDidRegisterStatusBarComponentNotification = @"iTermAPIDidRegisterStatusBarComponentNotification";
 
 const NSInteger iTermAPIHelperFunctionCallUnregisteredErrorCode = 100;
 const NSInteger iTermAPIHelperFunctionCallOtherErrorCode = 1;
@@ -59,36 +61,83 @@ static id sAPIHelperInstance;
 @property (nonatomic, copy) NSString *connectionKey;
 @end
 
-@interface ITMRPCRegistrationRequest(Extensions)
-@property (nonatomic, readonly) BOOL it_valid;
-@property (nonatomic, readonly) NSString *it_stringRepresentation;
+@implementation iTermSessionTitleProvider
+
+- (instancetype)initWithNotificationRequest:(ITMNotificationRequest *)req {
+    self = [super init];
+    if (self) {
+        if (req.rpcRegistrationRequest.role != ITMRPCRegistrationRequest_Role_SessionTitle) {
+            return nil;
+        }
+        _invocation = [self invocationOfRegistrationRequest:req.rpcRegistrationRequest];
+        if (!_invocation) {
+            return nil;
+        }
+        _displayName = [req.rpcRegistrationRequest.sessionTitleAttributes.displayName copy];
+        if (!_displayName) {
+            return nil;
+        }
+        _uniqueIdentifier = req.rpcRegistrationRequest.sessionTitleAttributes.uniqueIdentifier;
+        if (!_uniqueIdentifier) {
+            return nil;
+        }
+    }
+    return self;
+}
+
+- (NSString *)invocationOfRegistrationRequest:(ITMRPCRegistrationRequest *)req {
+    return [iTermAPIHelper invocationWithName:req.name
+                                     defaults:req.defaultsArray];
+}
+
 @end
 
 @implementation ITMRPCRegistrationRequest(Extensions)
 
-- (BOOL)it_valid {
+- (BOOL)it_rpcRegistrationRequestValidWithError:(out NSError **)error {
     NSCharacterSet *ascii = [NSCharacterSet characterSetWithRange:NSMakeRange(0, 128)];
     NSMutableCharacterSet *invalidIdentifierCharacterSet = [NSMutableCharacterSet alphanumericCharacterSet];
     [invalidIdentifierCharacterSet addCharactersInString:@"_"];
     [invalidIdentifierCharacterSet formIntersectionWithCharacterSet:ascii];
     [invalidIdentifierCharacterSet invert];
 
+    NSError *(^newErrorWithReason)(NSString *) = ^NSError *(NSString *reason) {
+        NSDictionary *userinfo = @{ NSLocalizedDescriptionKey: reason };
+        return [NSError errorWithDomain:@"com.iterm2.api"
+                                   code:3
+                               userInfo:userinfo];
+    };
     if (self.name.length == 0) {
+        if (error) {
+            *error = newErrorWithReason(@"Name has length 0");
+        }
         return NO;
     }
     if ([self.name rangeOfCharacterFromSet:invalidIdentifierCharacterSet].location != NSNotFound) {
+        if (error) {
+            *error = newErrorWithReason([NSString stringWithFormat:@"Function name '%@' contains an invalid character. Must match /[A-Za-z0-9_]/", self.name]);
+        }
         return NO;
     }
     NSMutableSet<NSString *> *args = [NSMutableSet set];
     for (ITMRPCRegistrationRequest_RPCArgumentSignature *arg in self.argumentsArray) {
         NSString *name = arg.name;
         if (name.length == 0) {
+            if (error) {
+                *error = newErrorWithReason(@"Argument has 0-length name");
+            }
             return NO;
         }
         if ([name rangeOfCharacterFromSet:invalidIdentifierCharacterSet].location != NSNotFound) {
+            if (error) {
+                *error = newErrorWithReason([NSString stringWithFormat:@"Argument name '%@' contains an invalid character. Must match /[A-Za-z0-9_]/", name]);
+            }
             return NO;
         }
         if ([args containsObject:name]) {
+            if (error) {
+                *error = newErrorWithReason([NSString stringWithFormat:@"Two arguments share the name '%@'. Argument names must be unique.", name]);
+            }
             return NO;
         }
         [args addObject:name];
@@ -188,9 +237,10 @@ static id sAPIHelperInstance;
     NSMutableDictionary<id, NSMutableArray<iTermTuple<ITMNotificationRequest *, iTermVariableReference *> *> *> *_tabVariableSubscriptions;
     NSMutableDictionary<id, NSMutableArray<iTermTuple<ITMNotificationRequest *, iTermVariableReference *> *> *> *_windowVariableSubscriptions;
     NSMutableDictionary<id, NSMutableArray<iTermTuple<ITMNotificationRequest *, iTermVariableReference *> *> *> *_sessionVariableSubscriptions;
+    NSMutableDictionary<id, NSMutableArray<iTermTuple<ITMNotificationRequest *, iTermVariableReference *> *> *> *_allSessionVariableSubscriptions; // Will have one entry per session
     // signature -> ( connection, request )
-    NSMutableDictionary<NSString *, iTermTuple<id, ITMNotificationRequest *> *> *_serverOriginatedRPCSubscriptions;
-    NSMutableArray<iTermAllSessionsSubscription *> *_allSessionsSubscriptions;
+    NSMutableDictionary<NSString *, iTermTuple<id, ITMNotificationRequest *> *> *_internalServerOriginatedRPCSubscriptions;
+    NSMutableArray<iTermAllSessionsSubscription *> *_allSessionsSubscriptions;  // Has one entry per "all" subscription
     NSMutableDictionary<NSString *, iTermServerOriginatedRPCCompletionBlock> *_serverOriginatedRPCCompletionBlocks;
     // connectionKey -> RPC ID (RPC ID is key in _serverOriginatedRPCCompletionBlocks)
     // WARNING: These can exist after the block has been removed from
@@ -206,11 +256,31 @@ static id sAPIHelperInstance;
     return sAPIHelperInstance;
 }
 
+- (NSDictionary<NSString *, iTermTuple<id, ITMNotificationRequest *> *> *)serverOriginatedRPCSubscriptions {
+    return _internalServerOriginatedRPCSubscriptions;
+}
+
+- (void)setServerOriginatedRPCSubscriptionWithSignature:(NSString *)signatureString
+                                          connectionKey:(NSString *)connectionKey
+                                                request:(ITMNotificationRequest *)request {
+    _internalServerOriginatedRPCSubscriptions[signatureString] = [iTermTuple tupleWithObject:connectionKey
+                                                                                   andObject:request];
+}
+
+- (void)removeServerOriginatedRPCSubscriptionWithSignature:(NSString *)signatureString {
+    [_internalServerOriginatedRPCSubscriptions removeObjectForKey:signatureString];
+}
+
+- (NSInteger)removeServerOriginatedRPCSubscriptionsPasstingTest:(BOOL (^)(NSString *signature,
+                                                                          iTermTuple<id, ITMNotificationRequest *> *tuple))block {
+    return [_internalServerOriginatedRPCSubscriptions removeObjectsPassingTest:block];
+}
+
 + (NSDictionary<NSString *, NSArray<NSString *> *> *)registeredFunctionSignatureDictionary {
     return [sAPIHelperInstance registeredFunctionSignatureDictionary] ?: @{};
 }
 
-+ (NSArray<iTermTuple<NSString *, NSString *> *> *)sessionTitleFunctions {
++ (NSArray<iTermSessionTitleProvider *> *)sessionTitleFunctions {
     return [sAPIHelperInstance sessionTitleFunctions] ?: @[];
 }
 
@@ -312,14 +382,21 @@ static id sAPIHelperInstance;
 - (void)sessionCreated:(NSNotification *)notification {
     PTYSession *session = notification.object;
     for (iTermAllSessionsSubscription *sub in _allSessionsSubscriptions) {
+        if (sub.request.notificationType == ITMNotificationType_NotifyOnVariableChange) {
+            [self monitorVariableChangesForConnectionKey:sub.connectionKey
+                                              identifier:session.guid
+                                                 request:sub.request
+                                                   scope:session.variablesScope
+                                           subscriptions:_allSessionVariableSubscriptions];
+             continue;
+        }
         [session handleAPINotificationRequest:sub.request
                                 connectionKey:sub.connectionKey];
     }
-
     [_newSessionSubscriptions enumerateKeysAndObjectsUsingBlock:^(id  _Nonnull key, ITMNotificationRequest * _Nonnull obj, BOOL * _Nonnull stop) {
         ITMNotification *notification = [[ITMNotification alloc] init];
         notification.newSessionNotification = [[ITMNewSessionNotification alloc] init];
-        notification.newSessionNotification.uniqueIdentifier = session.guid;
+        notification.newSessionNotification.sessionId = session.guid;
         [self postAPINotification:notification toConnectionKey:key];
     }];
 }
@@ -329,7 +406,7 @@ static id sAPIHelperInstance;
     [_terminateSessionSubscriptions enumerateKeysAndObjectsUsingBlock:^(id  _Nonnull key, ITMNotificationRequest * _Nonnull obj, BOOL * _Nonnull stop) {
         ITMNotification *notification = [[ITMNotification alloc] init];
         notification.terminateSessionNotification = [[ITMTerminateSessionNotification alloc] init];
-        notification.terminateSessionNotification.uniqueIdentifier = session.guid;
+        notification.terminateSessionNotification.sessionId = session.guid;
         [self postAPINotification:notification toConnectionKey:key];
     }];
 }
@@ -481,7 +558,7 @@ static id sAPIHelperInstance;
 }
 
 - (NSString *)connectionKeyForRPCWithSignature:(NSString *)signature {
-    return _serverOriginatedRPCSubscriptions[signature].firstObject;
+    return self.serverOriginatedRPCSubscriptions[signature].firstObject;
 }
 
 - (ITMServerOriginatedRPC *)serverOriginatedRPCWithName:(NSString *)name
@@ -538,15 +615,30 @@ static id sAPIHelperInstance;
     [self dispatchServerOriginatedRPC:rpc completion:completion];
 }
 
+- (NSString *)signatureOfAnyRegisteredFunctionWithName:(NSString *)name {
+    for (NSString *key in self.serverOriginatedRPCSubscriptions) {
+        iTermTuple<id, ITMNotificationRequest *> *sub = self.serverOriginatedRPCSubscriptions[key];
+        ITMNotificationRequest *request = sub.secondObject;
+        if ([request.rpcRegistrationRequest.name isEqual:name]) {
+            return request.rpcRegistrationRequest.it_stringRepresentation;
+        }
+    }
+    return nil;
+}
+
 // Dispatches a well-formed proto buffer or gives an error if not connected.
 - (void)dispatchServerOriginatedRPC:(ITMServerOriginatedRPC *)rpc
                          completion:(iTermServerOriginatedRPCCompletionBlock)completion {
     NSString *signature = rpc.it_stringRepresentation;
-    iTermTuple<id, ITMNotificationRequest *> *sub = _serverOriginatedRPCSubscriptions[signature];
+    iTermTuple<id, ITMNotificationRequest *> *sub = self.serverOriginatedRPCSubscriptions[signature];
 
     id connectionKey = sub.firstObject;
     if (!connectionKey) {
-        NSString *reason = [NSString stringWithFormat:@"No function registered for invocation “%@”", signature];
+        NSString *reason = [NSString stringWithFormat:@"No function registered for invocation “%@”. Ensure the script is running and the function name and argument names are correct.", signature];
+        NSString *bestMatch = [self signatureOfAnyRegisteredFunctionWithName:rpc.name];
+        if (bestMatch) {
+            reason = [reason stringByAppendingFormat:@" There is a similarly named function available with a different signature: %@", bestMatch];
+        }
         completion(nil, [self rpcDispatchError:reason detail:nil unregistered:YES connectionKey:nil]);
         return;
     }
@@ -627,8 +719,8 @@ static id sAPIHelperInstance;
 
 - (NSDictionary<NSString *, NSArray<NSString *> *> *)registeredFunctionSignatureDictionary {
     NSMutableDictionary<NSString *, NSArray<NSString *> *> *result = [NSMutableDictionary dictionary];
-    for (NSString *stringSignature in _serverOriginatedRPCSubscriptions.allKeys) {
-        ITMNotificationRequest *req = _serverOriginatedRPCSubscriptions[stringSignature].secondObject;
+    for (NSString *stringSignature in self.serverOriginatedRPCSubscriptions.allKeys) {
+        ITMNotificationRequest *req = self.serverOriginatedRPCSubscriptions[stringSignature].secondObject;
         if (!req) {
             continue;
         }
@@ -640,10 +732,6 @@ static id sAPIHelperInstance;
         result[functionName] = args;
     }
     return result;
-}
-
-- (NSString *)invocationOfRegistrationRequest:(ITMRPCRegistrationRequest *)req {
-    return [iTermAPIHelper invocationWithName: req.name defaults:req.defaultsArray];
 }
 
 + (NSString *)invocationWithName:(NSString *)name
@@ -660,23 +748,27 @@ static id sAPIHelperInstance;
     return [NSString stringWithFormat:@"%@(%@)", name, [defaults componentsJoinedByString:@","]];
 }
 
-- (NSArray<iTermTuple<NSString *,NSString *> *> *)sessionTitleFunctions {
-    return [_serverOriginatedRPCSubscriptions.allKeys mapWithBlock:^id(NSString *signature) {
-        ITMNotificationRequest *req = self->_serverOriginatedRPCSubscriptions[signature].secondObject;
++ (NSString *)userDefaultsKeyForNameOfScriptVendingStatusBarComponentWithID:(NSString *)uniqueID {
+    return [NSString stringWithFormat:@"NoSyncScriptNameForStatusBarComponent_%@", uniqueID];
+}
+
++ (NSString *)nameOfScriptVendingStatusBarComponentWithUniqueIdentifier:(NSString *)uniqueID {
+    return [[NSUserDefaults standardUserDefaults] objectForKey:[self userDefaultsKeyForNameOfScriptVendingStatusBarComponentWithID:uniqueID]];
+}
+
+- (NSArray<iTermSessionTitleProvider *> *)sessionTitleFunctions {
+    return [self.serverOriginatedRPCSubscriptions.allKeys mapWithBlock:^id(NSString *signature) {
+        ITMNotificationRequest *req = self.serverOriginatedRPCSubscriptions[signature].secondObject;
         if (!req) {
             return nil;
         }
-        if (req.rpcRegistrationRequest.role != ITMRPCRegistrationRequest_Role_SessionTitle) {
-            return nil;
-        }
-        NSString *invocation = [self invocationOfRegistrationRequest:req.rpcRegistrationRequest];
-        return [iTermTuple tupleWithObject:req.rpcRegistrationRequest.sessionTitleAttributes.displayName andObject:invocation];
+        return [[iTermSessionTitleProvider alloc] initWithNotificationRequest:req];
     }];
 }
 
 - (NSArray<ITMRPCRegistrationRequest *> *)statusBarComponentProviderRegistrationRequests {
-    return [_serverOriginatedRPCSubscriptions.allKeys mapWithBlock:^id(NSString *signature) {
-        ITMNotificationRequest *req = self->_serverOriginatedRPCSubscriptions[signature].secondObject;
+    return [self.serverOriginatedRPCSubscriptions.allKeys mapWithBlock:^id(NSString *signature) {
+        ITMNotificationRequest *req = self.serverOriginatedRPCSubscriptions[signature].secondObject;
         if (!req) {
             return nil;
         }
@@ -687,6 +779,12 @@ static id sAPIHelperInstance;
     }];
 }
 
++ (ITMRPCRegistrationRequest *)registrationRequestForStatusBarComponentWithUniqueIdentifier:(NSString *)uniqueIdentifier {
+    return [[[self sharedInstance] statusBarComponentProviderRegistrationRequests] objectPassingTest:^BOOL(ITMRPCRegistrationRequest *request, NSUInteger index, BOOL *stop) {
+        return [request.statusBarComponentAttributes.uniqueIdentifier isEqualToString:uniqueIdentifier];
+    }];
+}
+
 - (BOOL)haveRegisteredFunctionWithName:(NSString *)name
                              arguments:(NSArray<NSString *> *)arguments {
     NSString *stringSignature = iTermFunctionSignatureFromNameAndArguments(name, arguments);
@@ -694,7 +792,7 @@ static id sAPIHelperInstance;
 }
 
 - (BOOL)haveRegisteredFunctionWithSignature:(NSString *)stringSignature {
-    return _serverOriginatedRPCSubscriptions[stringSignature].secondObject != nil;
+    return self.serverOriginatedRPCSubscriptions[stringSignature].secondObject != nil;
 }
 
 - (void)enumerateBroadcastDomains:(void (^)(NSArray<PTYSession *> *))addDomain {
@@ -721,6 +819,44 @@ static id sAPIHelperInstance;
                 break;
         }
     }
+}
+
+- (void)logToConnectionHostingFunctionWithSignature:(NSString *)signatureString
+                                             format:(NSString *)format, ... {
+    va_list arguments;
+    va_start(arguments, format);
+    NSString *string = [[NSString alloc] initWithFormat:format arguments:arguments];
+    va_end(arguments);
+    NSString *connectionKey = [self.serverOriginatedRPCSubscriptions[signatureString] firstObject];
+    [self logToConnectionWithKey:connectionKey string:string];
+}
+
+- (void)logToConnectionHostingFunctionWithSignature:(NSString *)signatureString
+                                             string:(NSString *)string {
+    NSString *connectionKey = [self.serverOriginatedRPCSubscriptions[signatureString] firstObject];
+    [self logToConnectionWithKey:connectionKey string:string];
+}
+
+- (void)logToConnectionWithKey:(NSString *)connectionKey
+                        format:(NSString *)format, ... {
+    va_list arguments;
+    va_start(arguments, format);
+    NSString *string = [[NSString alloc] initWithFormat:format arguments:arguments];
+    va_end(arguments);
+    [self logToConnectionWithKey:connectionKey string:string];
+}
+
+- (void)logToConnectionWithKey:(NSString *)connectionKey string:(NSString *)string {
+    NSString *key = connectionKey ? [_apiServer websocketKeyForConnectionKey:connectionKey] : nil;
+    iTermScriptHistoryEntry *entry = key ? [[iTermScriptHistory sharedInstance] entryWithIdentifier:key] : nil;
+    if (!entry) {
+        entry = [iTermScriptHistoryEntry globalEntry];
+    }
+
+    [entry addOutput:@"❗️ "];
+    [entry addOutput:string];
+    [entry addOutput:@"\n"];
+    XLog(@"%@", string);
 }
 
 #pragma mark - iTermAPIServerDelegate
@@ -922,11 +1058,20 @@ static id sAPIHelperInstance;
     }
 }
 
-- (BOOL)rpcNotificationRequestIsValid:(ITMNotificationRequest *)request {
+- (BOOL)rpcNotificationRequestIsValid:(ITMNotificationRequest *)request
+                        connectionKey:(NSString *)connectionKey {
     if (request.argumentsOneOfCase != ITMNotificationRequest_Arguments_OneOfCase_RpcRegistrationRequest) {
+        [self logToConnectionWithKey:connectionKey format:@"Expected an RPC registration request, but got:\n%@", request];
         return NO;
     }
-    return request.rpcRegistrationRequest.it_valid;
+    NSError *error = nil;
+    if (![request.rpcRegistrationRequest it_rpcRegistrationRequestValidWithError:&error]) {
+        [self logToConnectionWithKey:connectionKey format:@"Malformed RPC function signature: %@", error.localizedDescription];
+
+        return NO;
+    }
+
+    return YES;
 }
 
 - (void)createSubscriptionDictionariesIfNeeded {
@@ -935,12 +1080,13 @@ static id sAPIHelperInstance;
         _terminateSessionSubscriptions = [[NSMutableDictionary alloc] init];
         _layoutChangeSubscriptions = [[NSMutableDictionary alloc] init];
         _focusChangeSubscriptions = [[NSMutableDictionary alloc] init];
-        _serverOriginatedRPCSubscriptions = [[NSMutableDictionary alloc] init];
+        _internalServerOriginatedRPCSubscriptions = [[NSMutableDictionary alloc] init];
         _broadcastDomainChangeSubscriptions = [[NSMutableDictionary alloc] init];
         _appVariableSubscriptions = [[NSMutableDictionary alloc] init];
         _tabVariableSubscriptions = [[NSMutableDictionary alloc] init];
         _windowVariableSubscriptions = [[NSMutableDictionary alloc] init];
         _sessionVariableSubscriptions = [[NSMutableDictionary alloc] init];
+        _allSessionVariableSubscriptions = [[NSMutableDictionary alloc] init];
         _profileChangeSubscriptions = [[NSMutableDictionary alloc] init];
     }
 }
@@ -975,6 +1121,44 @@ static id sAPIHelperInstance;
     return nil;
 }
 
+- (void)monitorVariableChangesForConnectionKey:(NSString *)connectionKey
+                                    identifier:(NSString *)identifier
+                                       request:(ITMNotificationRequest *)request
+                                         scope:(iTermVariableScope *)scope
+                                 subscriptions:(NSMutableDictionary<id,NSMutableArray<iTermTuple<ITMNotificationRequest *,iTermVariableReference *> *> *> *)subscriptions {
+    NSString *name = request.variableMonitorRequest.name;
+    iTermVariableReference *ref = [[iTermVariableReference alloc] initWithPath:name
+                                                                         scope:scope];
+    __weak __typeof(ref) weakRef = ref;
+    __weak __typeof(self) weakSelf = self;
+    ref.onChangeBlock = ^{
+        ITMNotification *notification = [weakSelf variableChangeNotificationWithScope:request.variableMonitorRequest.scope
+                                                                           identifier:identifier
+                                                                                 name:name
+                                                                             newValue:weakRef.value];
+        if (notification) {
+            [weakSelf postAPINotification:notification toConnectionKey:connectionKey];
+        }
+    };
+    [subscriptions it_addObject:[iTermTuple tupleWithObject:request andObject:ref] toMutableArrayForKey:connectionKey];
+}
+
+- (BOOL)monitorVariableChangesForConnectionKey:(NSString *)connectionKey
+                                    identifier:(NSString *)identifier
+                                       request:(ITMNotificationRequest *)request
+                                 subscriptions:(NSMutableDictionary<id,NSMutableArray<iTermTuple<ITMNotificationRequest *,iTermVariableReference *> *> *> *)subscriptions {
+    iTermVariableScope *scope = [self scopeForCategory:request.variableMonitorRequest.scope identifier:identifier];
+    if (scope == nil) {
+        return NO;
+    }
+    [self monitorVariableChangesForConnectionKey:connectionKey
+                                      identifier:identifier
+                                         request:request
+                                           scope:scope
+                                   subscriptions:subscriptions];
+    return YES;
+}
+
 - (ITMNotificationResponse *)handleVariableChangeNotificationRequest:(ITMNotificationRequest *)request
                                                        connectionKey:(NSString *)connectionKey {
     ITMNotificationResponse *response = [[ITMNotificationResponse alloc] init];
@@ -982,6 +1166,19 @@ static id sAPIHelperInstance;
         response.status = ITMNotificationResponse_Status_RequestMalformed;
         return response;
     }
+
+    // Handle the special case of (un)subscribing to "all" sessions.
+    NSString *identifier = request.variableMonitorRequest.identifier;
+    if ([identifier isEqualToString:@"all"]) {
+        if (request.variableMonitorRequest.scope != ITMVariableScope_Session) {
+            // TODO, I guess.
+            response.status = ITMNotificationResponse_Status_InvalidIdentifier;
+            return response;
+        }
+        return [self handleSubscriptionRequestForAllSessionsFromConnectionKey:connectionKey
+                                                                      request:request];
+    }
+
     NSMutableDictionary<id, NSMutableArray<iTermTuple<ITMNotificationRequest *, iTermVariableReference *> *> *> *subscriptions =
         [self subscriptionsForVariableChangeScope:request.variableMonitorRequest.scope];
     NSMutableArray *array = subscriptions[connectionKey];
@@ -995,27 +1192,16 @@ static id sAPIHelperInstance;
             response.status = ITMNotificationResponse_Status_AlreadySubscribed;
             return response;
         }
-        NSString *identifier = request.variableMonitorRequest.identifier;
-        iTermVariableScope *scope = [self scopeForCategory:request.variableMonitorRequest.scope identifier:identifier];
-        if (scope == nil) {
+        BOOL ok = [self monitorVariableChangesForConnectionKey:connectionKey
+                                                    identifier:identifier
+                                                       request:request
+                                                 subscriptions:subscriptions];
+        if (ok) {
+            response.status = ITMNotificationResponse_Status_Ok;
+        } else {
             response.status = ITMNotificationResponse_Status_InvalidIdentifier;
-            return response;
         }
-        NSString *name = request.variableMonitorRequest.name;
-        iTermVariableReference *ref = [[iTermVariableReference alloc] initWithPath:name
-                                                                             scope:scope];
-        __weak __typeof(ref) weakRef = ref;
-        __weak __typeof(self) weakSelf = self;
-        ref.onChangeBlock = ^{
-            ITMNotification *notification = [weakSelf variableChangeNotificationWithScope:request.variableMonitorRequest.scope
-                                                                               identifier:identifier
-                                                                                     name:name
-                                                                                 newValue:weakRef.value];
-            if (notification) {
-                [weakSelf postAPINotification:notification toConnectionKey:connectionKey];
-            }
-        };
-        [subscriptions it_addObject:[iTermTuple tupleWithObject:request andObject:ref] toMutableArrayForKey:connectionKey];
+        return response;
     } else {
         if (index == NSNotFound) {
             response.status = ITMNotificationResponse_Status_NotSubscribed;
@@ -1024,9 +1210,9 @@ static id sAPIHelperInstance;
         iTermTuple<ITMNotificationRequest *, iTermVariableReference *> *tuple = array[index];
         [tuple.secondObject removeAllLinks];
         [array removeObjectAtIndex:index];
+        response.status = ITMNotificationResponse_Status_Ok;
+        return response;
     }
-    response.status = ITMNotificationResponse_Status_Ok;
-    return response;
 }
 
 - (ITMNotification *)variableChangeNotificationWithScope:(ITMVariableScope)scope
@@ -1041,6 +1227,24 @@ static id sAPIHelperInstance;
     notification.variableChangedNotification.name = variableName;
     notification.variableChangedNotification.jsonNewValue = [NSJSONSerialization it_jsonStringForObject:newValue];
     return notification;
+}
+
+- (void)didRegisterStatusBarComponent:(ITMRPCRegistrationRequest_StatusBarComponentAttributes *)attributes
+                         onConnection:(NSString *)connectionKey {
+    [[NSNotificationCenter defaultCenter] postNotificationName:iTermAPIDidRegisterStatusBarComponentNotification
+                                                        object:attributes.uniqueIdentifier];
+    NSString *key = connectionKey ? [_apiServer websocketKeyForConnectionKey:connectionKey] : nil;
+    iTermScriptHistoryEntry *entry = key ? [[iTermScriptHistory sharedInstance] entryWithIdentifier:key] : nil;
+    if (!entry) {
+        return;
+    }
+    NSString *fullPath = entry.fullPath;
+    if (!fullPath) {
+        return;
+    }
+    NSString *uniqueID = attributes.uniqueIdentifier;
+    return [[NSUserDefaults standardUserDefaults] setObject:fullPath
+                                                     forKey:[self.class userDefaultsKeyForNameOfScriptVendingStatusBarComponentWithID:uniqueID]];
 }
 
 - (ITMNotificationResponse *)handleAPINotificationRequest:(ITMNotificationRequest *)request
@@ -1065,13 +1269,7 @@ static id sAPIHelperInstance;
     } else if (request.notificationType == ITMNotificationType_NotifyOnProfileChange) {
         subscriptions = _profileChangeSubscriptions;
     } else if (request.notificationType == ITMNotificationType_NotifyOnServerOriginatedRpc) {
-        if (!request.rpcRegistrationRequest.it_valid) {
-            XLog(@"RPC signature not valid: %@", request.rpcRegistrationRequest);
-            response.status = ITMNotificationResponse_Status_RequestMalformed;
-            return response;
-        }
-
-        if (![self rpcNotificationRequestIsValid:request]) {
+        if (![self rpcNotificationRequestIsValid:request connectionKey:connectionKey]) {
             XLog(@"RPC notification request invalid: %@", request);
             response.status = ITMNotificationResponse_Status_RequestMalformed;
             return response;
@@ -1079,12 +1277,13 @@ static id sAPIHelperInstance;
 
         NSString *signatureString = request.rpcRegistrationRequest.it_stringRepresentation;
         if (request.subscribe) {
-            if (_serverOriginatedRPCSubscriptions[signatureString]) {
+            if (self.serverOriginatedRPCSubscriptions[signatureString]) {
                 response.status = ITMNotificationResponse_Status_DuplicateServerOriginatedRpc;
                 return response;
             }
-            _serverOriginatedRPCSubscriptions[signatureString] = [iTermTuple tupleWithObject:connectionKey
-                                                                                   andObject:request];
+            [self setServerOriginatedRPCSubscriptionWithSignature:signatureString
+                                                    connectionKey:connectionKey
+                                                          request:request];
             [[NSNotificationCenter defaultCenter] postNotificationName:iTermAPIRegisteredFunctionsDidChangeNotification
                                                                 object:nil];
             switch (request.rpcRegistrationRequest.role) {
@@ -1093,16 +1292,19 @@ static id sAPIHelperInstance;
                                                                         object:request.rpcRegistrationRequest.name];
                     break;
                 case ITMRPCRegistrationRequest_Role_Generic:
+                    break;
                 case ITMRPCRegistrationRequest_Role_StatusBarComponent:
+                    [self didRegisterStatusBarComponent:request.rpcRegistrationRequest.statusBarComponentAttributes
+                                           onConnection:connectionKey];
                     break;
             }
         } else {
-            if (!_serverOriginatedRPCSubscriptions[signatureString] ||
-                _serverOriginatedRPCSubscriptions[signatureString].firstObject != connectionKey) {
+            if (!self.serverOriginatedRPCSubscriptions[signatureString] ||
+                self.serverOriginatedRPCSubscriptions[signatureString].firstObject != connectionKey) {
                 response.status = ITMNotificationResponse_Status_NotSubscribed;
                 return response;
             }
-            [_serverOriginatedRPCSubscriptions removeObjectForKey:signatureString];
+            [self removeServerOriginatedRPCSubscriptionWithSignature:signatureString];
         }
         response.status = ITMNotificationResponse_Status_Ok;
         return response;
@@ -1170,6 +1372,99 @@ static id sAPIHelperInstance;
     }];
 }
 
+- (BOOL)unsubscribeFromVariableChangeNotificationsForAllSessionsForConnectionKey:(NSString *)connectionKey
+                                                                         request:(ITMNotificationRequest *)request {
+    NSMutableArray *array = _allSessionVariableSubscriptions[connectionKey];
+    NSIndexSet *indexes = [array indexesOfObjectsPassingTest:^BOOL(iTermTuple<ITMNotificationRequest *, iTermVariableReference *> * _Nonnull tuple,
+                                                                   NSUInteger idx,
+                                                                   BOOL * _Nonnull stop) {
+        return ([NSObject object:tuple.firstObject.variableMonitorRequest isEqualToObject:request.variableMonitorRequest]);
+    }];
+
+    [indexes enumerateIndexesUsingBlock:^(NSUInteger index, BOOL * _Nonnull stop) {
+        iTermTuple<ITMNotificationRequest *, iTermVariableReference *> *tuple = array[index];
+        [tuple.secondObject removeAllLinks];
+    }];
+    [array removeObjectsAtIndexes:indexes];
+
+    return indexes.count > 0;
+}
+
+- (void)subscribeToVariableChangeNotificationsForAllSessionsForConnectionKey:(NSString *)connectionKey
+                                                                     request:(ITMNotificationRequest *)request {
+    for (PTYSession *session in [self allSessions]) {
+        [self monitorVariableChangesForConnectionKey:connectionKey
+                                          identifier:session.guid
+                                             request:request
+                                       subscriptions:_allSessionVariableSubscriptions];
+    }
+}
+
+- (ITMNotificationResponse *)handleVariableSubscriptionRequestForAllSessionsForConnection:(NSString *)connectionKey request:(ITMNotificationRequest *)request {
+    [self createSubscriptionDictionariesIfNeeded];
+    if (request.subscribe) {
+        [self subscribeToVariableChangeNotificationsForAllSessionsForConnectionKey:connectionKey
+                                                                           request:request];
+        ITMNotificationResponse *response = [[ITMNotificationResponse alloc] init];
+        response.status = ITMNotificationResponse_Status_Ok;
+        return response;
+    }
+
+    const BOOL wasSubscribed = [self unsubscribeFromVariableChangeNotificationsForAllSessionsForConnectionKey:connectionKey
+                                                                                                      request:request];
+    ITMNotificationResponse *response = [[ITMNotificationResponse alloc] init];
+    if (wasSubscribed) {
+        response.status = ITMNotificationResponse_Status_Ok;
+    } else {
+        response.status = ITMNotificationResponse_Status_NotSubscribed;
+    }
+    return response;
+}
+
+- (ITMNotificationResponse *)handleSubscriptionRequestForAllSessionsFromConnectionKey:(NSString *)connectionKey
+                                                                              request:(ITMNotificationRequest *)request {
+    if (request.notificationType == ITMNotificationType_NotifyOnVariableChange) {
+        ITMNotificationResponse *response = [self handleVariableSubscriptionRequestForAllSessionsForConnection:connectionKey
+                                                                                                       request:request];
+        if (response.status != ITMNotificationResponse_Status_Ok) {
+            return response;
+        }
+    } else {
+        for (PTYSession *session in [self allSessions]) {
+            ITMNotificationResponse *response = [session handleAPINotificationRequest:request
+                                                                        connectionKey:connectionKey];
+            if (response.status != ITMNotificationResponse_Status_AlreadySubscribed &&
+                response.status != ITMNotificationResponse_Status_NotSubscribed &&
+                response.status != ITMNotificationResponse_Status_Ok) {
+                return response;
+            }
+        }
+    }
+
+    if (request.subscribe) {
+        iTermAllSessionsSubscription *sub = [[iTermAllSessionsSubscription alloc] init];
+        sub.request = [request copy];
+        sub.connectionKey = connectionKey;
+        [_allSessionsSubscriptions addObject:sub];
+    } else {
+        ITMNotificationRequest *requestToRemove = [request copy];
+        requestToRemove.subscribe = YES;
+        const NSInteger countBefore = _allSessionsSubscriptions.count;
+        [_allSessionsSubscriptions removeObjectsPassingTest:^BOOL(iTermAllSessionsSubscription *sub) {
+            return [NSObject object:sub.request isEqualToObject:requestToRemove];
+        }];
+        const NSInteger countAfter = _allSessionsSubscriptions.count;
+        if (countBefore == countAfter) {
+            ITMNotificationResponse *response = [[ITMNotificationResponse alloc] init];
+            response.status = ITMNotificationResponse_Status_NotSubscribed;
+            return response;
+        }
+    }
+    ITMNotificationResponse *response = [[ITMNotificationResponse alloc] init];
+    response.status = ITMNotificationResponse_Status_Ok;
+    return response;
+}
+
 - (void)apiServerNotification:(ITMNotificationRequest *)request
                 connectionKey:(NSString *)connectionKey
                       handler:(void (^)(ITMNotificationResponse *))handler {
@@ -1187,23 +1482,8 @@ static id sAPIHelperInstance;
         handler([self handleAPINotificationRequest:request
                                      connectionKey:connectionKey]);
     } else if ([request.session isEqualToString:@"all"]) {
-        for (PTYSession *session in [self allSessions]) {
-            ITMNotificationResponse *response = [session handleAPINotificationRequest:request
-                                                                        connectionKey:connectionKey];
-            if (response.status != ITMNotificationResponse_Status_AlreadySubscribed &&
-                response.status != ITMNotificationResponse_Status_NotSubscribed &&
-                response.status != ITMNotificationResponse_Status_Ok) {
-                handler(response);
-                return;
-            }
-        }
-        iTermAllSessionsSubscription *sub = [[iTermAllSessionsSubscription alloc] init];
-        sub.request = [request copy];
-        sub.connectionKey = connectionKey;
-        [_allSessionsSubscriptions addObject:sub];
-
-        ITMNotificationResponse *response = [[ITMNotificationResponse alloc] init];
-        response.status = ITMNotificationResponse_Status_Ok;
+        ITMNotificationResponse *response = [self handleSubscriptionRequestForAllSessionsFromConnectionKey:connectionKey
+                                                                                                   request:request];
         handler(response);
     } else {
         PTYSession *session = [self sessionForAPIIdentifier:request.session includeBuriedSessions:YES];
@@ -1221,11 +1501,14 @@ static id sAPIHelperInstance;
 - (void)removeAllSubscriptionsForConnectionKey:(id)connectionKey {
     // Remove all notification subscriptions.
     // RPCs are special.
-    NSInteger rpcsRemoved = [_serverOriginatedRPCSubscriptions removeObjectsPassingTest:
+    NSInteger rpcsRemoved = [self removeServerOriginatedRPCSubscriptionsPasstingTest:
          ^BOOL(NSString *signature,
                iTermTuple<id, ITMNotificationRequest *> *tuple) {
              return [tuple.firstObject isEqual:connectionKey];
          }];
+    [_allSessionVariableSubscriptions[connectionKey] enumerateObjectsUsingBlock:^(iTermTuple<ITMNotificationRequest *,iTermVariableReference *> * _Nonnull tuple, NSUInteger idx, BOOL * _Nonnull stop) {
+        [tuple.secondObject removeAllLinks];
+    }];
     NSMutableDictionary *empty = [NSMutableDictionary dictionary];
     NSArray<NSMutableDictionary<id, ITMNotificationRequest *> *> *dicts =
     @[ _newSessionSubscriptions ?: empty,
@@ -1233,7 +1516,8 @@ static id sAPIHelperInstance;
        _terminateSessionSubscriptions  ?: empty,
        _layoutChangeSubscriptions ?: empty,
        _focusChangeSubscriptions ?: empty,
-       _broadcastDomainChangeSubscriptions ?: empty ];
+       _broadcastDomainChangeSubscriptions ?: empty,
+       _allSessionVariableSubscriptions ?: empty];
     [dicts enumerateObjectsUsingBlock:^(NSMutableDictionary<id,ITMNotificationRequest *> * _Nonnull dict,
                                         NSUInteger idx,
                                         BOOL * _Nonnull stop) {
@@ -1359,6 +1643,7 @@ static id sAPIHelperInstance;
         ITMSetProfilePropertyResponse *response = [[ITMSetProfilePropertyResponse alloc] init];
         response.status = ITMSetProfilePropertyResponse_Status_RequestMalformed;
         handler(response);
+        return;
     }
 
     for (id object in objects) {
@@ -1597,6 +1882,7 @@ static id sAPIHelperInstance;
         ITMSetPropertyResponse *response = [[ITMSetPropertyResponse alloc] init];
         response.status = ITMSetPropertyResponse_Status_InvalidValue;
         handler(response);
+        return;
     }
     switch (request.identifierOneOfCase) {
         case ITMSetPropertyRequest_Identifier_OneOfCase_GPBUnsetOneOfCase:
@@ -1621,6 +1907,7 @@ static id sAPIHelperInstance;
                 for (PTYSession *session in [self allSessions]) {
                     response.status = [self setPropertyInSession:session name:request.name value:value];
                     handler(response);
+                    return;
                 }
             } else {
                 PTYSession *session = [self sessionForAPIIdentifier:request.sessionId includeBuriedSessions:YES];
@@ -1631,9 +1918,12 @@ static id sAPIHelperInstance;
                 }
                 response.status = [self setPropertyInSession:session name:request.name value:value];
                 handler(response);
+                return;
             }
         }
     }
+    response.status = ITMSetPropertyResponse_Status_InvalidTarget;
+    handler(response);
 }
 
 - (ITMSetPropertyResponse_Status)setPropertyInWindow:(PseudoTerminal *)term name:(NSString *)name value:(id)value {
@@ -1769,8 +2059,11 @@ static id sAPIHelperInstance;
                 response.status = ITMGetPropertyResponse_Status_UnrecognizedName;
             }
             handler(response);
+            return;
         }
     }
+    response.status = ITMGetPropertyResponse_Status_InvalidTarget;
+    handler(response);
 }
 
 - (NSString *)getPropertyFromWindow:(PseudoTerminal *)term name:(NSString *)name {
@@ -1915,9 +2208,6 @@ static id sAPIHelperInstance;
             return;
         }
         [tab setActiveSession:session];
-        response.status = ITMActivateResponse_Status_Ok;
-        handler(response);
-        return;
     }
 
     if (request.selectTab) {
@@ -2463,6 +2753,7 @@ static BOOL iTermCheckSplitTreesIsomorphic(ITMSplitTreeNode *node1, ITMSplitTree
     if (!request.windowId.isNumeric) {
         response.status = ITMTmuxResponse_Status_InvalidWindowId;
         handler(response);
+        return;
     }
 
     if (request.visible) {
@@ -2476,18 +2767,18 @@ static BOOL iTermCheckSplitTreesIsomorphic(ITMSplitTreeNode *node1, ITMSplitTree
         [controller openWindowWithId:[[request windowId] intValue] intentional:YES];
         response.status = ITMTmuxResponse_Status_Ok;
         handler(response);
-    } else {
-        // Hide the window
-        if ([controller windowIsHidden:[request.windowId intValue]]) {
-            response.status = ITMTmuxResponse_Status_InvalidWindowId;
-            handler(response);
-            return;
-        }
-
-        [controller hideWindow:request.windowId.intValue];
-        response.status = ITMTmuxResponse_Status_Ok;
-        handler(response);
+        return;
     }
+    // Hide the window
+    if ([controller windowIsHidden:[request.windowId intValue]]) {
+        response.status = ITMTmuxResponse_Status_InvalidWindowId;
+        handler(response);
+        return;
+    }
+
+    [controller hideWindow:request.windowId.intValue];
+    response.status = ITMTmuxResponse_Status_Ok;
+    handler(response);
 }
 
 - (void)apiServerTmuxRequest:(ITMTmuxRequest *)request handler:(void (^)(ITMTmuxResponse *))handler {

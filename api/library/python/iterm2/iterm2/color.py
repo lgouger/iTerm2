@@ -1,17 +1,20 @@
+import enum
+
+class ColorSpace(enum.Enum):
+    SRGB="sRGB" #: SRGB color space
+    CALIBRATED="Calibrated"  #: Device color space
+
 class Color:
-    """Describes a color."""
+    """Describes a color.
 
-    COLOR_SPACE_NAME_SRGB="sRGB"
-    COLOR_SPACE_NAME_CALIBRATED="Calibrated"
-
-    def __init__(self, r=0, g=0, b=0, a=255, color_space="sRGB"):
-        """Create a color.
-
-          r: Red, in 0-255
-          g: Green, in 0-255
-          b: Blue, in 0-255
-          a: Alpha, in 0-255
-          color_space: The color space. Only sRGB is supported currently."""
+      :param r: Red, in 0-255
+      :param g: Green, in 0-255
+      :param b: Blue, in 0-255
+      :param a: Alpha, in 0-255
+      :param color_space: The color space. Only sRGB is supported currently.
+      """
+    def __init__(self, r: int=0, g: int=0, b: int=0, a: int=255, color_space: str="sRGB"):
+        """Create a color."""
         self.__red = r
         self.__green = g
         self.__blue = b
@@ -27,54 +30,52 @@ class Color:
             self.color_space)
 
     @property
-    def red(self):
+    def red(self) -> int:
         """The color's red component."""
         return self.__red
 
     @red.setter
-    def red(self, value):
+    def red(self, value: float):
         """Sets the color's red component."""
         self.__red = value
 
     @property
-    def green(self):
+    def green(self) -> float:
         """The color's green component."""
         return self.__green
 
     @green.setter
-    def green(self, value):
+    def green(self, value: float):
         """Sets the color's green component."""
         self.__green = value
 
     @property
-    def blue(self):
+    def blue(self) -> float:
         """The color's blue component."""
         return self.__blue
 
     @blue.setter
-    def blue(self, value):
+    def blue(self, value: float):
         """Sets the color's blue component."""
         self.__blue = value
 
     @property
-    def alpha(self):
+    def alpha(self) -> float:
         """The color's alpha component."""
         return self.__alpha
 
     @alpha.setter
-    def alpha(self, value):
+    def alpha(self, value: float):
         """Sets the color's alpha component."""
         self.__alpha = value
 
     @property
-    def color_space(self):
-        """The color's color space.
-
-        Recognized values are: `iterm2.Color.COLOR_SPACE_NAME_SRGB` and `iterm2.Color.COLOR_SPACE_NAME_CALIBRATED`."""
+    def color_space(self) -> ColorSpace:
+        """The color's color space."""
         return self.__color_space
 
     @color_space.setter
-    def color_space(self, value):
+    def color_space(self, value: ColorSpace):
         """Sets the color's scolor space."""
         self.__color_space = value
 
@@ -87,7 +88,7 @@ class Color:
             "Green Component": self.green / 255.0,
             "Blue Component": self.blue / 255.0,
             "Alpha Component": self.alpha / 255.0,
-            "Color Space": self.color_space
+            "Color Space": self.color_space.value
             }
 
     def from_dict(self, input_dict):
@@ -100,10 +101,10 @@ class Color:
         else:
             self.alpha = 255
         if "Color Space" in input_dict:
-            self.color_space = input_dict["Color Space"]
+            self.color_space = ColorSpace(input_dict["Color Space"])
         else:
             # This is the default because it is what profiles use by default.
-            self.color_space = Color.COLOR_SPACE_NAME_CALIBRATED
+            self.color_space = ColorSpace.CALIBRATED
 
     @property
     def json(self):

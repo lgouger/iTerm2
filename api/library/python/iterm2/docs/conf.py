@@ -41,6 +41,8 @@ release = u'0.26'
 extensions = [
     'sphinx.ext.intersphinx',
     'sphinx.ext.autodoc',
+    'sphinx_autodoc_annotation',
+    #    'sphinx_autodoc_typehints'
 ]
 
 intersphinx_mapping = {'http://docs.python.org/dev': None}

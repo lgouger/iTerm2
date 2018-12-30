@@ -4,6 +4,7 @@ import json
 import iterm2.api_pb2
 import iterm2.connection
 import iterm2.selection
+import iterm2.transaction
 
 ACTIVATE_RAISE_ALL_WINDOWS = 1
 ACTIVATE_IGNORING_OTHER_APPS = 2
@@ -143,24 +144,9 @@ async def async_create_tab(connection, profile=None, window=None, index=None, co
         request.create_tab_request.custom_profile_properties.extend(_profile_properties_from_dict(profile_customizations))
     return await _async_call(connection, request)
 
-async def async_get_buffer_with_screen_contents(connection, session=None):
-    """
-    Gets the contents of a session's mutable area.
-
-    connection: A connected iterm2.Connection.
-    session: Session ID to split
-
-    Returns: iterm2.api_pb2.ServerOriginatedMessage
-    """
-    request = _alloc_request()
-    if session is not None:
-        request.get_buffer_request.session = session
-    request.get_buffer_request.line_range.screen_contents_only = True
-    return await _async_call(connection, request)
-
 async def async_get_screen_contents(connection, session, windowedCoordRange):
     """
-    Gets screen contents.
+    Gets screen contents, including both the mutable area and history.
 
     connection: A connected iterm2.Connection.
     session: Session ID
@@ -247,15 +233,19 @@ async def async_set_profile_property(connection, session_id, key, value, guids=N
     :param value: a Python object, whose type depends on the key
     :param guids: List of GUIDs of the profile to modify or None. If None, session_id must be set.
 
-    Returns: iterm2.api_pb2.ServerOriginatedMessage
+    :returns: iterm2.api_pb2.ServerOriginatedMessage
     """
+    return await async_set_profile_property_json(connection, session_id, key, json.dumps(value), guids)
+
+async def async_set_profile_property_json(connection, session_id, key, json_value, guids=None):
+    """Like async_set_profile_property but takes a json-encoded value."""
     request = _alloc_request()
     if session_id is None:
         request.set_profile_property_request.guid_list.guids.extend(guids);
     else:
         request.set_profile_property_request.session = session_id
     request.set_profile_property_request.key = key
-    request.set_profile_property_request.json_value = json.dumps(value)
+    request.set_profile_property_request.json_value = json_value
     return await _async_call(connection, request)
 
 async def async_get_profile(connection, session=None, keys=None):
@@ -458,6 +448,7 @@ async def async_get_broadcast_domains(connection):
 
 async def async_rpc_list_tmux_connections(connection):
     """Requests a list of tmux connections."""
+    _assert_not_in_transaction()
     request = _alloc_request()
     request.tmux_request.SetInParent()
     request.tmux_request.list_connections.SetInParent()
@@ -465,6 +456,7 @@ async def async_rpc_list_tmux_connections(connection):
 
 async def async_rpc_send_tmux_command(connection, tmux_connection_id, command):
     """Sends a command to the tmux server."""
+    _assert_not_in_transaction()
     request = _alloc_request()
     request.tmux_request.SetInParent()
     request.tmux_request.send_command.SetInParent()
@@ -474,6 +466,7 @@ async def async_rpc_send_tmux_command(connection, tmux_connection_id, command):
 
 async def async_rpc_set_tmux_window_visible(connection, tmux_connection_id, window_id, visible):
     """Hides/shows a tmux window (which is an iTerm2 tab)"""
+    _assert_not_in_transaction()
     request = _alloc_request()
     request.tmux_request.SetInParent()
     request.tmux_request.set_window_visible.SetInParent()
@@ -484,6 +477,7 @@ async def async_rpc_set_tmux_window_visible(connection, tmux_connection_id, wind
 
 async def async_rpc_create_tmux_window(connection, tmux_connection_id, affinity=None):
     """Creates a new tmux window."""
+    _assert_not_in_transaction()
     request = _alloc_request()
     request.tmux_request.SetInParent()
     request.tmux_request.create_window.SetInParent()
@@ -618,3 +612,7 @@ async def _async_call(connection, request):
         raise RPCException(response.error)
     else:
         return response
+
+def _assert_not_in_transaction():
+    assert not iterm2.Transaction.current()
+

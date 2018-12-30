@@ -2,10 +2,16 @@
 import json
 import iterm2.api_pb2
 import iterm2.app
+import iterm2.arrangement
+import iterm2.connection
+import iterm2.profile
 import iterm2.rpc
 import iterm2.session
 import iterm2.tab
+import iterm2.tmux
+import iterm2.transaction
 import iterm2.util
+import typing
 
 class CreateTabException(Exception):
     """Something went wrong creating a tab."""
@@ -19,16 +25,20 @@ class GetPropertyException(Exception):
     """Something went wrong fetching a property."""
     pass
 
-class SavedArrangementException(Exception):
-    """Something went wrong saving or restoring a saved arrangement."""
-    pass
-
 class Window:
+    """Represents a terminal window.
+
+    Do not create this yourself. Instead, use :class:`~iterm2.app.App`.
+    """
     @staticmethod
-    async def async_create(connection, profile=None, command=None, profile_customizations=None):
+    async def async_create(
+            connection: iterm2.connection.Connection,
+            profile: str=None,
+            command: str=None,
+            profile_customizations: iterm2.profile.LocalWriteOnlyProfile=None) -> 'Window':
         """Creates a new window.
 
-        :param connection: A :class:`iterm2.Connection`.
+        :param connection: A :class:`~iterm2.connection.Connection`.
         :param profile: The name of the profile to use for the new window.
         :param command: A command to run in lieu of the shell in the new session. Mutually exclusive with profile_customizations.
         :param profile_customizations: LocalWriteOnlyProfile giving changes to make in profile. Mutually exclusive with command.
@@ -54,7 +64,9 @@ class Window:
             profile_customizations=custom_dict)
         ctr = result.create_tab_response
         if ctr.status == iterm2.api_pb2.CreateTabResponse.Status.Value("OK"):
-            app = await iterm2.app.async_get_app(connection)
+            app = await iterm2.app.async_get_app(connection, False)
+            if not app:
+                return await Window._async_load(connection, ctr.window_id)
             session = app.get_session_by_id(ctr.session_id)
             window, _tab = app.get_tab_and_window_for_session(session)
             return window
@@ -62,6 +74,31 @@ class Window:
             raise CreateWindowException(
                 iterm2.api_pb2.CreateTabResponse.Status.Name(
                     result.create_tab_response.status))
+
+    @staticmethod
+    async def _async_load(connection, window_id):
+        response = await iterm2.rpc.async_list_sessions(connection)
+        list_sessions_response = response.list_sessions_response
+        for window in list_sessions_response.windows:
+            if window.window_id == window_id:
+                return Window.create_from_proto(connection, window)
+        return None
+
+    @staticmethod
+    def create_from_proto(connection, window):
+        tabs = []
+        for tab in window.tabs:
+            root = iterm2.session.Splitter.from_node(tab.root, connection)
+            if tab.HasField("tmux_window_id"):
+                tmux_window_id = tab.tmux_window_id
+            else:
+                tmux_window_id = None
+            tabs.append(iterm2.tab.Tab(connection, tab.tab_id, root, tmux_window_id, tab.tmux_connection_id))
+
+        if not tabs:
+            return None
+
+        return iterm2.window.Window(connection, window.window_id, tabs, window.frame, window.number)
 
     """Represents an iTerm2 window."""
     def __init__(self, connection, window_id, tabs, frame, number):
@@ -93,7 +130,7 @@ class Window:
                 return
             i += 1
 
-    def pretty_str(self, indent=""):
+    def pretty_str(self, indent: str="") -> str:
         """
         :returns: A nicely formatted string describing the window, its tabs, and their sessions.
         """
@@ -104,27 +141,27 @@ class Window:
         return session
 
     @property
-    def window_id(self):
+    def window_id(self) -> str:
         """
         :returns: the window's unique identifier.
         """
         return self.__window_id
 
     @property
-    def tabs(self):
+    def tabs(self) -> typing.List[iterm2.tab.Tab]:
         """
         :returns: a list of iterm2.tab.Tab objects.
         """
         return self.__tabs
 
-    async def async_set_tabs(self, tabs):
+    async def async_set_tabs(self, tabs: typing.List[iterm2.tab.Tab]):
         """Changes the tabs and their order.
 
         The provided tabs may belong to any window. They will be moved if needed. Windows entirely denuded of tabs will be closed.
 
         All provided tabs will be inserted in the given order starting at the first positions. Any tabs already belonging to this window not in the list will remain after the provided tabs.
 
-        :param tabs: a list of :class:`iterm2.Tab` objects
+        :param tabs: a list of tabs, forming the new set of tabs in this window.
         :raises: RPCException if something goes wrong.
         """
         tab_ids = map(lambda tab: tab.tab_id, tabs)
@@ -133,21 +170,23 @@ class Window:
             assignments=[(self.window_id, tab_ids)])
 
     @property
-    def current_tab(self):
+    def current_tab(self) -> typing.Optional[iterm2.tab.Tab]:
         """
-        :returns: The current iterm2.Tab in this window or None if it could not be determined.
+        :returns: The current tab in this window or `None` if it could not be determined.
         """
         for tab in self.__tabs:
             if tab.tab_id == self.selected_tab_id:
                 return tab
         return None
 
-    async def async_create_tmux_tab(self, tmux_connection):
+    async def async_create_tmux_tab(self, tmux_connection: iterm2.tmux.TmuxConnection) -> typing.Optional[iterm2.tab.Tab]:
         """Creates a new tmux tab in this window.
 
-        :param tmux_connection: A :class:`TmuxConnection` that owns the new tab.
+        This may not be called from within a :class:`~iterm2.transaction.Transaction`.
 
-        :returns: :class:`Tab`"""
+        :param tmux_connection: The tmux connection to own the new tab.
+
+        :returns: A newly created tab, or `None` if it could not be created."""
         tmux_window_id = "{}".format(-(self.__number + 1))
         response = await iterm2.rpc.async_rpc_create_tmux_window(
             self.connection,
@@ -160,7 +199,12 @@ class Window:
         app = await iterm2.app.async_get_app(self.connection)
         return app.get_tab_by_id(tab_id)
 
-    async def async_create_tab(self, profile=None, command=None, index=None, profile_customizations=None):
+    async def async_create_tab(
+            self,
+            profile: typing.Optional[str]=None,
+            command: typing.Optional[str]=None,
+            index: typing.Optional[int]=None,
+            profile_customizations: typing.Optional[iterm2.profile.LocalWriteOnlyProfile]=None) -> typing.Optional[iterm2.tab.Tab]:
         """
         Creates a new tab in this window.
 
@@ -198,13 +242,13 @@ class Window:
             raise CreateTabException(
                 iterm2.api_pb2.CreateTabResponse.Status.Name(result.create_tab_response.status))
 
-    async def async_get_frame(self):
+    async def async_get_frame(self) -> iterm2.util.Frame:
         """
         Gets the window's frame.
 
-        0,0 is the *bottom* right of the main screen.
+        The origin (0,0) is the *bottom* right of the main screen.
 
-        :returns: :class:`Frame`
+        :returns: This window's frame. This includes window decoration such as the title bar.
 
         :raises: :class:`GetPropertyException` if something goes wrong.
         """
@@ -213,17 +257,17 @@ class Window:
         status = response.get_property_response.status
         if status == iterm2.api_pb2.GetPropertyResponse.Status.Value("OK"):
             frame_dict = json.loads(response.get_property_response.json_value)
-            frame = iterm2.Frame()
+            frame = iterm2.util.Frame()
             frame.load_from_dict(frame_dict)
             return frame
         else:
             raise GetPropertyException(response.get_property_response.status)
 
-    async def async_set_frame(self, frame):
+    async def async_set_frame(self, frame: iterm2.util.Frame) -> None:
         """
         Sets the window's frame.
 
-        :param frame: :class:`Frame`
+        :param frame: The desired frame.
 
         :raises: :class:`SetPropertyException` if something goes wrong.
         """
@@ -237,11 +281,11 @@ class Window:
         if status != iterm2.api_pb2.SetPropertyResponse.Status.Value("OK"):
             raise SetPropertyException(response.get_property_response.status)
 
-    async def async_get_fullscreen(self):
+    async def async_get_fullscreen(self) -> bool:
         """
         Checks if the window is full-screen.
 
-        :returns: True (fullscreen) or False (not fullscreen)
+        :returns: Whether the window is full screen.
 
         :raises: :class:`GetPropertyException` if something goes wrong.
         """
@@ -253,11 +297,11 @@ class Window:
             raise GetPropertyException(response.get_property_response.status)
 
 
-    async def async_set_fullscreen(self, fullscreen):
+    async def async_set_fullscreen(self, fullscreen: bool):
         """
         Changes the window's full-screen status.
 
-        :param fullscreen: True to make fullscreen, False to make not-fullscreen
+        :param fullscreen: Whether you wish the window to be full screen.
 
         :raises: :class:`SetPropertyException` if something goes wrong.
         """
@@ -272,7 +316,7 @@ class Window:
             raise SetPropertyException(response.get_property_response.status)
 
 
-    async def async_activate(self):
+    async def async_activate(self) -> None:
         """
         Gives the window keyboard focus and orders it to the front.
         """
@@ -283,11 +327,11 @@ class Window:
             True,
             window_id=self.__window_id)
 
-    async def async_close(self, force=False):
+    async def async_close(self, force: bool=False):
         """
         Closes the window.
 
-        :param force: If True, the user will not be prompted for a confirmation.
+        :param force: If `True`, the user will not be prompted for a confirmation.
 
         :throws: :class:`RPCException` if something goes wrong.
         """
@@ -296,25 +340,25 @@ class Window:
         if status != iterm2.api_pb2.CloseResponse.Status.Value("OK"):
             raise iterm2.rpc.RPCException(iterm2.api_pb2.CloseResponse.Status.Name(status))
 
-    async def async_save_window_as_arrangement(self, name):
+    async def async_save_window_as_arrangement(self, name: str) -> None:
         """Save the current window as a new arrangement.
 
         :param name: The name to save as. Will overwrite if one already exists with this name.
         """
         result = await iterm2.rpc.async_save_arrangement(self.connection, name, self.__window_id)
         if result.create_tab_response.status != iterm2.api_pb2.CreateTabResponse.Status.Value("OK"):
-            raise SavedArrangementException(
+            raise iterm2.arrangement.SavedArrangementException(
                 iterm2.api_pb2.SavedArrangementResponse.Status.Name(
                     result.saved_arrangement_response.status))
 
-    async def async_restore_window_arrangement(self, name):
+    async def async_restore_window_arrangement(self, name: str) -> None:
         """Restore a window arrangement as tabs in this window.
 
         :param name: The name to restore.
 
-        :raises: :class:`SavedArrangementException` if the named arrangement does not exist."""
+        :raises: :class:`~iterm2.arrangement.SavedArrangementException` if the named arrangement does not exist."""
         result = await iterm2.rpc.async_restore_arrangement(self.connection, name, self.__window_id)
         if result.create_tab_response.status != iterm2.api_pb2.CreateTabResponse.Status.Value("OK"):
-            raise SavedArrangementException(
+            raise iterm2.arrangement.SavedArrangementException(
                 iterm2.api_pb2.SavedArrangementResponse.Status.Name(
                     result.saved_arrangement_response.status))

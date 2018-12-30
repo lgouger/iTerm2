@@ -203,7 +203,7 @@ typedef GPB_ENUM(ITMNotificationType) {
   ITMNotificationType_NotifyOnKeystroke = 1,
   ITMNotificationType_NotifyOnScreenUpdate = 2,
   ITMNotificationType_NotifyOnPrompt = 3,
-  ITMNotificationType_NotifyOnLocationChange = 4,
+  ITMNotificationType_NotifyOnLocationChange DEPRECATED_ATTRIBUTE = 4,
   ITMNotificationType_NotifyOnCustomEscapeSequence = 5,
   ITMNotificationType_NotifyOnVariableChange = 12,
 
@@ -2991,6 +2991,7 @@ typedef GPB_ENUM(ITMRPCRegistrationRequest_RPCArgument_FieldNumber) {
 
 typedef GPB_ENUM(ITMRPCRegistrationRequest_SessionTitleAttributes_FieldNumber) {
   ITMRPCRegistrationRequest_SessionTitleAttributes_FieldNumber_DisplayName = 1,
+  ITMRPCRegistrationRequest_SessionTitleAttributes_FieldNumber_UniqueIdentifier = 6,
 };
 
 @interface ITMRPCRegistrationRequest_SessionTitleAttributes : GPBMessage
@@ -2999,6 +3000,14 @@ typedef GPB_ENUM(ITMRPCRegistrationRequest_SessionTitleAttributes_FieldNumber) {
 @property(nonatomic, readwrite, copy, null_resettable) NSString *displayName;
 /** Test to see if @c displayName has been set. */
 @property(nonatomic, readwrite) BOOL hasDisplayName;
+
+/**
+ * Identifies this title provider uniquely. Must not conflict with other title providers.
+ * Use a backwards domain name identifying yourself and the feature, like "com.example.featurename"
+ **/
+@property(nonatomic, readwrite, copy, null_resettable) NSString *uniqueIdentifier;
+/** Test to see if @c uniqueIdentifier has been set. */
+@property(nonatomic, readwrite) BOOL hasUniqueIdentifier;
 
 @end
 
@@ -3312,9 +3321,9 @@ typedef GPB_ENUM(ITMNotification_FieldNumber) {
 /** Test to see if @c promptNotification has been set. */
 @property(nonatomic, readwrite) BOOL hasPromptNotification;
 
-@property(nonatomic, readwrite, strong, null_resettable) ITMLocationChangeNotification *locationChangeNotification;
+@property(nonatomic, readwrite, strong, null_resettable) ITMLocationChangeNotification *locationChangeNotification DEPRECATED_ATTRIBUTE;
 /** Test to see if @c locationChangeNotification has been set. */
-@property(nonatomic, readwrite) BOOL hasLocationChangeNotification;
+@property(nonatomic, readwrite) BOOL hasLocationChangeNotification DEPRECATED_ATTRIBUTE;
 
 @property(nonatomic, readwrite, strong, null_resettable) ITMCustomEscapeSequenceNotification *customEscapeSequenceNotification;
 /** Test to see if @c customEscapeSequenceNotification has been set. */
@@ -3594,7 +3603,7 @@ typedef GPB_ENUM(ITMCustomEscapeSequenceNotification_FieldNumber) {
 #pragma mark - ITMNewSessionNotification
 
 typedef GPB_ENUM(ITMNewSessionNotification_FieldNumber) {
-  ITMNewSessionNotification_FieldNumber_UniqueIdentifier = 1,
+  ITMNewSessionNotification_FieldNumber_SessionId = 1,
 };
 
 /**
@@ -3602,9 +3611,9 @@ typedef GPB_ENUM(ITMNewSessionNotification_FieldNumber) {
  **/
 @interface ITMNewSessionNotification : GPBMessage
 
-@property(nonatomic, readwrite, copy, null_resettable) NSString *uniqueIdentifier;
-/** Test to see if @c uniqueIdentifier has been set. */
-@property(nonatomic, readwrite) BOOL hasUniqueIdentifier;
+@property(nonatomic, readwrite, copy, null_resettable) NSString *sessionId;
+/** Test to see if @c sessionId has been set. */
+@property(nonatomic, readwrite) BOOL hasSessionId;
 
 @end
 
@@ -3676,17 +3685,14 @@ typedef GPB_ENUM(ITMFocusChangedNotification_Window_FieldNumber) {
 #pragma mark - ITMTerminateSessionNotification
 
 typedef GPB_ENUM(ITMTerminateSessionNotification_FieldNumber) {
-  ITMTerminateSessionNotification_FieldNumber_UniqueIdentifier = 1,
+  ITMTerminateSessionNotification_FieldNumber_SessionId = 1,
 };
 
-/**
- * Note this is sent when a session is removed from the screen but its closure remains undoable.
- **/
 @interface ITMTerminateSessionNotification : GPBMessage
 
-@property(nonatomic, readwrite, copy, null_resettable) NSString *uniqueIdentifier;
-/** Test to see if @c uniqueIdentifier has been set. */
-@property(nonatomic, readwrite) BOOL hasUniqueIdentifier;
+@property(nonatomic, readwrite, copy, null_resettable) NSString *sessionId;
+/** Test to see if @c sessionId has been set. */
+@property(nonatomic, readwrite) BOOL hasSessionId;
 
 @end
 

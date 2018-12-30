@@ -1,4 +1,5 @@
 """Defines interfaces for registering functions."""
+import asyncio
 import inspect
 import iterm2.notifications
 import iterm2.rpc
@@ -33,69 +34,192 @@ async def generic_handle_rpc(coro, connection, notif):
     if ok:
         await iterm2.rpc.async_send_rpc_result(connection, rpc_notif.request_id, False, result)
 
-class Registration:
-    @staticmethod
-    async def async_register_rpc_handler(connection, name, coro, timeout=None, defaults={}):
-        """Register a script-defined RPC.
+class Reference:
+    """Defines a reference to a variable for use in the @RPC decorator.
 
-        iTerm2 may be instructed to invoke a script-registered RPC, such as
-        through a key binding. Use this method to register one.
+    See also: :func:`~iterm2.registration.RPC`.
+    """
+    def __init__(self, name):
+        self.name = name
 
-        :param name: The RPC name. Combined with its arguments, this must be unique among all registered RPCs. It should consist of letters, numbers, and underscores and must begin with a letter.
-        :param coro: An async function. Its arguments are reflected upon to determine the RPC's signature. Only the names of the arguments are used. All arguments should be keyword arguments as any may be omitted at call time.
-        :param timeout: How long iTerm2 should wait before giving up on this function's ever returning. `None` means to use the default timeout.
-        :param defaults: Gives default values. Names correspond to argument names in `arguments`. Values are in-scope variables at the callsite.
-        """
-        args = inspect.signature(coro).parameters.keys()
+def RPC(func):
+    """A decorator that adds an `async_register` value to the coroutine it decorates. `async_register` is a coroutine that will register the function as an RPC.
+
+    An RPC is a function in a script that iTerm2 can invoke in response to some action, such a a keypress or a trigger. You use this decorator to register a coroutine as an RPC.
+
+    Every RPC must have a unique signature. The signature is composed of two parts: first, the name, which comes from the name of the coroutine being decorated; second, the names of its arguments. The order of arguments is not important.
+
+    The decorated coroutine will have a `async_register` value that you must call to complete the registration. `async_register` takes one required argument, the :class:`~iterm2.connection.Connection`. It also takes one optional argument, which is a timeout. The `timeout` is a value in seconds. If not given, the default timeout will be used. When waiting for an RPC to return, iTerm2 will stop waiting for the RPC after the timeout elapses.
+
+    Do not use default values for arguments in your decorated coroutine, with one exception: a special kind of default value of type :class:`Reference`. It names a variable that is visible in the context of the invocation. It will be transformed to the current value of that variable. This is the only way to get information about the current context. For example, a value of `~iterm2.Reference("session.id")` will give you the session ID of the context where the RPC was invoked. If the RPC is run from a keyboard shortcut, that is the ID of the session that had keyboard focus at the time of invocation.
+
+    That's complicated, but an example will make it clearer:
+
+    Example:
+
+      .. code-block:: python
+
+          app = await iterm2.async_get_app(connection)
+
+          @iterm2.RPC
+          async def split_current_session_n_times(session_id=iterm2.Reference("session.id"), n=1):
+              session = app.get_session_by_id(session_id)
+              for i in range(n):
+                  await session.async_split_pane()
+
+          # Remember to call async_register!
+          await split_current_session_n_times.async_register(connection)
+    """
+    async def async_register(connection, timeout=None):
+        signature = inspect.signature(func)
+        defaults = {}
+        for k, v in signature.parameters.items():
+            if isinstance(v.default, Reference):
+                defaults[k] = v.default.name
         async def handle_rpc(connection, notif):
-            await generic_handle_rpc(coro, connection, notif)
-        await iterm2.notifications.async_subscribe_to_server_originated_rpc_notification(connection, handle_rpc, name, args, timeout, defaults, iterm2.notifications.RPC_ROLE_GENERIC)
+            await generic_handle_rpc(func, connection, notif)
+        func.rpc_token = await iterm2.notifications.async_subscribe_to_server_originated_rpc_notification(
+                connection,
+                handle_rpc,
+                func.__name__,
+                signature.parameters.keys(),
+                timeout,
+                defaults,
+                iterm2.notifications.RPC_ROLE_GENERIC)
+        func.rpc_connection = connection
 
-    @staticmethod
-    async def async_register_session_title_provider(connection, name, coro, display_name, timeout=None, defaults={}):
-        """Register a script-defined RPC.
+    func.async_register = async_register
+    return func
 
-        iTerm2 may be instructed to invoke a script-registered RPC, such as
-        through a key binding. Use this method to register one.
+def TitleProviderRPC(func):
+    """A decorator (like :func:`~iterm2.registration.RPC`) that registers a session title provider.
 
-        :param name: The RPC name. Combined with its arguments, this must be unique among all registered RPCs. It should consist of letters, numbers, and underscores and must begin with a letter.
-        :param coro: An async function. Its arguments are reflected upon to determine the RPC's signature. Only the names of the arguments are used. All arguments should be keyword arguments as any may be omitted at call time.
-        :param display_name: Gives the name of the function to show in preferences.
-        :param timeout: How long iTerm2 should wait before giving up on this function's ever returning. `None` means to use the default timeout.
-        :param defaults: Gives default values. Names correspond to argument names in `arguments`. Values are in-scope variables at the callsite.
-        """
+    A session title provider is a function that gets called to compute the title of a session. It may be called frequently, whenever the session title is deemed to need recomputation. Once registered, it appears as an option in the list of title settings in preferences.
+
+    It is called when any of its inputs change. This will only happen if one or more of the inputs are :func:`~iterm2.registration.Reference` references to variables in the session context.
+
+    It must return a string.
+
+    Note that the `async_register` function is different than in the :func:`~iterm2.registration.RPC` decorator: it takes three arguments. The first is the :class:`~iterm2.connection.Connection`. The second is a "display name", which is the string to show in preferences that the user may select to use this title provider. Then it takes a unique identifier, a string, which must be unique among all title providers.
+
+    Example:
+
+      .. code-block:: python
+
+          @iterm2.TitleProviderRPC
+          async def upper_case_title(auto_name=iterm2.Reference("session.autoName?")):
+              if not auto_name:
+                  return ""
+              return auto_name.upper()
+
+          # Remember to call async_register!
+          await upper_case_title.async_register(
+                  connection,
+                  display_name="Upper-case Title",
+                  unique_identifier="com.iterm2.example.title-provider")
+    """
+    async def async_register(connection, display_name, unqiue_identifier, timeout=None):
+        assert unqiue_identifier
+        signature = inspect.signature(func)
+        defaults = {}
+        for k, v in signature.parameters.items():
+            if isinstance(v.default, Reference):
+                defaults[k] = v.default.name
         async def handle_rpc(connection, notif):
-            await generic_handle_rpc(coro, connection, notif)
-        args = inspect.signature(coro).parameters.keys()
-        await iterm2.notifications.async_subscribe_to_server_originated_rpc_notification(connection, handle_rpc, name, args, timeout, defaults, iterm2.notifications.RPC_ROLE_SESSION_TITLE, display_name)
+            await generic_handle_rpc(func, connection, notif)
+        func.rpc_token = await iterm2.notifications.async_subscribe_to_server_originated_rpc_notification(
+                connection=connection,
+                callback=handle_rpc,
+                name=func.__name__,
+                arguments=signature.parameters.keys(),
+                timeout_seconds=timeout,
+                defaults=defaults,
+                role=iterm2.notifications.RPC_ROLE_SESSION_TITLE,
+                session_title_display_name=display_name,
+                session_title_unique_id=unqiue_identifier)
+        func.rpc_connection = connection
 
-    @staticmethod
-    async def async_register_status_bar_component(connection, component, coro, timeout=None, defaults={}):
-        """Registers a status bar component.
+    func.async_register = async_register
+    return func
 
-        :param component: A :class:`StatusBarComponent`.
-        :param coro: An async function. Its arguments are reflected upon to determine the RPC's signature. Only the names of the arguments are used. All arguments should be keyword arguments as any may be omitted at call time. It should take a special argument named "knobs" that is a dictionary with configuration settings. It may return a string or a list of strings. If it returns a list of strings then the longest one that fits will be used.
-        :param timeout: How long iTerm2 should wait before giving up on this function's ever returning. `None` means to use the default timeout.
-        :param defaults: Gives default values. Names correspond to argument names in `arguments`. Values are in-scope variables of the session owning the status bar.
-        """
-        async def coro_wrapper(**kwargs):
+def StatusBarRPC(func):
+    """A decorator (like :func:`~iterm2.registration.RPC`) that registers a custom status bar component.
+
+    See :class:`~iterm2.statusbar.StatusBarComponent` for details on what a status bar component is.
+
+    The coroutine is called when any of its inputs change. This will only happen if one or more of the inputs are :func:`~iterm2.registration.Reference` references to variables in the session context.
+
+    The coroutine *must* take an argument named `knobs` that will contain a dictionary with configuration settings.
+
+    It may return a string or an array of strings. In the case that it returns an array, the longest string fitting the available space will be used.
+
+    Note that unlike the other RPC decorators, you use :meth:`~iterm2.statusbar.StatusBarComponent.async_register` to register it, rather than a register property added to the coroutine.
+
+    Example:
+
+      .. code-block:: python
+
+          component = iterm2.StatusBarComponent(
+              short_description="Session ID",
+              detailed_description="Show the session's identifier",
+              knobs=[],
+              exemplar="[session ID]",
+              update_cadence=None,
+              identifier="com.iterm2.example.statusbar-rpc")
+
+          @iterm2.StatusBarRPC
+          async def session_id_status_bar_coro(
+                  knobs,
+                  session_id=iterm2.Reference("session.id")):
+              # This status bar component shows the current session ID, which
+              # is useful for debugging scripts.
+              return session_id
+
+          @iterm2.RPC
+          async def my_status_bar_click_handler(session_id):
+              # When you click the status bar it opens a popover with the
+              # message "Hello World"
+              await component.async_open_popover(
+                      session_id,
+                      "Hello world",
+                      iterm2.Size(200, 200))
+
+          await component.async_register(
+                  connection,
+                  session_id_status_bar_coro,
+                  onclick=my_status_bar_click_handler)
+    """
+    async def async_register(connection, component, timeout=None):
+        signature = inspect.signature(func)
+        defaults = {}
+        for k, v in signature.parameters.items():
+            if isinstance(v.default, Reference):
+                defaults[k] = v.default.name
+
+        async def wrapper(**kwargs):
+            """handle_rpc->generic_handle_rpc->wrapper->func"""
+            # Fix up knobs to not be JSON
             if "knobs" in kwargs:
                 knobs_json = kwargs["knobs"]
                 kwargs["knobs"] = json.loads(knobs_json)
-            return await coro(**kwargs)
+            return await func(**kwargs)
 
         async def handle_rpc(connection, notif):
-            await generic_handle_rpc(coro_wrapper, connection, notif)
+            """This gets run first."""
+            await generic_handle_rpc(wrapper, connection, notif)
 
-        args = inspect.signature(coro).parameters.keys()
-        await iterm2.notifications.async_subscribe_to_server_originated_rpc_notification(
-                connection,
-                handle_rpc,
-                component.name,
-                args,
-                timeout,
-                defaults,
-                iterm2.notifications.RPC_ROLE_STATUS_BAR_COMPONENT,
-                None,
-                component)
+        func.rpc_token = await iterm2.notifications.async_subscribe_to_server_originated_rpc_notification(
+                connection=connection,
+                callback=handle_rpc,
+                name=func.__name__,
+                arguments=signature.parameters.keys(),
+                timeout_seconds=timeout,
+                defaults=defaults,
+                role=iterm2.notifications.RPC_ROLE_STATUS_BAR_COMPONENT,
+                status_bar_component=component)
+        func.rpc_connection = connection
+
+    func.async_register = async_register
+
+    return func
 

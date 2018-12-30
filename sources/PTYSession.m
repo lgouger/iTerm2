@@ -445,7 +445,6 @@ static const NSUInteger kMaxHosts = 100;
     NSMutableDictionary<id, ITMNotificationRequest *> *_keyboardFilterSubscriptions;
     NSMutableDictionary<id, ITMNotificationRequest *> *_updateSubscriptions;
     NSMutableDictionary<id, ITMNotificationRequest *> *_promptSubscriptions;
-    NSMutableDictionary<id, ITMNotificationRequest *> *_locationChangeSubscriptions;
     NSMutableDictionary<id, ITMNotificationRequest *> *_customEscapeSequenceNotifications;
 
     // Used by auto-hide. We can't auto hide the tmux gateway session until at least one window has been opened.
@@ -614,7 +613,6 @@ static const NSUInteger kMaxHosts = 100;
         _keyboardFilterSubscriptions = [[NSMutableDictionary alloc] init];
         _updateSubscriptions = [[NSMutableDictionary alloc] init];
         _promptSubscriptions = [[NSMutableDictionary alloc] init];
-        _locationChangeSubscriptions = [[NSMutableDictionary alloc] init];
         _customEscapeSequenceNotifications = [[NSMutableDictionary alloc] init];
         _metalDisabledTokens = [[NSMutableSet alloc] init];
         _statusChangedAbsLine = -1;
@@ -764,7 +762,6 @@ ITERM_WEAKLY_REFERENCEABLE
     [_keyboardFilterSubscriptions release];
     [_updateSubscriptions release];
     [_promptSubscriptions release];
-    [_locationChangeSubscriptions release];
     [_customEscapeSequenceNotifications release];
 
     [_copyModeState release];
@@ -2157,7 +2154,6 @@ ITERM_WEAKLY_REFERENCEABLE
     [_pasteHelper abort];
 
     [[_delegate realParentWindow] sessionDidTerminate:self];
-    [[NSNotificationCenter defaultCenter] postNotificationName:PTYSessionTerminatedNotification object:self];
 
     _delegate = nil;
 }
@@ -2195,6 +2191,7 @@ ITERM_WEAKLY_REFERENCEABLE
     if (@available(macOS 10.11, *)) {
         _metalGlue.textView = nil;
     }
+    [[NSNotificationCenter defaultCenter] postNotificationName:PTYSessionTerminatedNotification object:self];
 }
 
 - (void)jumpToLocationWhereCurrentStatusChanged {
@@ -2884,6 +2881,7 @@ ITERM_WEAKLY_REFERENCEABLE
     }
 
     _exited = YES;
+    [[NSNotificationCenter defaultCenter] postNotificationName:PTYSessionTerminatedNotification object:self];
     [[NSNotificationCenter defaultCenter] postNotificationName:kCurrentSessionDidChange object:nil];
     [_delegate updateLabelAttributes];
 
@@ -3752,7 +3750,6 @@ ITERM_WEAKLY_REFERENCEABLE
                                      image:[self tabGraphicForProfile:aDict]];
     [self.delegate sessionUpdateMetalAllowed];
     [self profileNameDidChangeTo:self.profile[KEY_NAME]];
-    [_nameController setNeedsUpdate];
 }
 
 - (void)setBadgeFormat:(NSString *)badgeFormat {
@@ -4224,6 +4221,7 @@ ITERM_WEAKLY_REFERENCEABLE
     [self profileNameDidChangeTo:self.profile[KEY_NAME]];
     [[_delegate realParentWindow] invalidateRestorableState];
     [[_delegate realParentWindow] updateTabColors];
+    [_nameController setNeedsUpdate];
 }
 
 - (NSDictionary *)arrangement {
@@ -4574,7 +4572,6 @@ ITERM_WEAKLY_REFERENCEABLE
     [_keystrokeSubscriptions removeObjectForKey:notification.object];
     [_keyboardFilterSubscriptions removeObjectForKey:notification.object];
     [_updateSubscriptions removeObjectForKey:notification.object];
-    [_locationChangeSubscriptions removeObjectForKey:notification.object];
     [_customEscapeSequenceNotifications removeObjectForKey:notification.object];
 }
 
@@ -5536,7 +5533,8 @@ ITERM_WEAKLY_REFERENCEABLE
                 _tmuxStatusBarMonitor = [[iTermTmuxStatusBarMonitor alloc] initWithGateway:_tmuxController.gateway
                                                                                      scope:self.variablesScope];
                 _tmuxStatusBarMonitor.active = [iTermProfilePreferences boolForKey:KEY_SHOW_STATUS_BAR inProfile:self.profile];
-                if ([iTermStatusBarLayout shouldOverrideLayout:self.profile[KEY_STATUS_BAR_LAYOUT]]) {
+                if ([iTermAdvancedSettingsModel useTmuxStatusBar] ||
+                    [iTermStatusBarLayout shouldOverrideLayout:self.profile[KEY_STATUS_BAR_LAYOUT]]) {
                     [self setSessionSpecificProfileValues:@{ KEY_STATUS_BAR_LAYOUT: [[iTermStatusBarLayout tmuxLayoutWithController:_tmuxController scope:nil] dictionaryValue] }];
                 }
                 break;
@@ -7075,6 +7073,9 @@ ITERM_WEAKLY_REFERENCEABLE
         spacesPerTab = [_pasteHelper numberOfSpacesToConvertTabsTo:theString];
         if (spacesPerTab >= 0) {
             tabTransform = kTabTransformConvertToSpaces;
+        } else if (spacesPerTab == kNumberOfSpacesPerTabOpenAdvancedPaste) {
+            [_pasteHelper showAdvancedPasteWithFlags:flags];
+            return;
         } else if (spacesPerTab == kNumberOfSpacesPerTabCancel) {
             return;
         }
@@ -8511,7 +8512,9 @@ ITERM_WEAKLY_REFERENCEABLE
     // Reset this in case it's taking the "real" shell integration path.
     _fakePromptDetectedAbsLine = -1;
     _lastPromptLine = (long long)line + [_screen totalScrollbackOverflow];
-    [[self screenAddMarkOnLine:line] setIsPrompt:YES];
+    VT100ScreenMark *mark = [self screenAddMarkOnLine:line];
+    [mark setIsPrompt:YES];
+    mark.promptRange = VT100GridAbsCoordRangeMake(0, _lastPromptLine, 0, _lastPromptLine);
     [_pasteHelper unblock];
 }
 
@@ -8551,6 +8554,14 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (void)screenPromptDidEndAtLine:(int)line {
+    VT100ScreenMark *mark = [_screen lastPromptMark];
+    const int x = _screen.cursorX - 1;
+    const long long y = (long long)line + [_screen totalScrollbackOverflow];
+    mark.promptRange = VT100GridAbsCoordRangeMake(mark.promptRange.start.x,
+                                                  mark.promptRange.end.y,
+                                                  x,
+                                                  y);
+    mark.commandRange = VT100GridAbsCoordRangeMake(x, y, x, y);
     [_promptSubscriptions enumerateKeysAndObjectsUsingBlock:^(id  _Nonnull key, ITMNotificationRequest * _Nonnull obj, BOOL * _Nonnull stop) {
         ITMNotification *notification = [[[ITMNotification alloc] init] autorelease];
         notification.promptNotification = [[[ITMPromptNotification alloc] init] autorelease];
@@ -8790,6 +8801,9 @@ ITERM_WEAKLY_REFERENCEABLE
         case VT100AttentionRequestTypeBounceOnceDockIcon:
             [NSApp requestUserAttention:NSInformationalRequest];
             break;
+        case VT100AttentionRequestTypeFlash:
+            [_textview.indicatorsHelper beginFlashingFullScreen];
+            break;
     }
 }
 
@@ -9000,16 +9014,6 @@ ITERM_WEAKLY_REFERENCEABLE
         [self maybeResetTerminalStateOnHostChange];
     }
     self.currentHost = host;
-
-    ITMNotification *notification = [[[ITMNotification alloc] init] autorelease];
-    notification.locationChangeNotification = [[[ITMLocationChangeNotification alloc] init] autorelease];
-    notification.locationChangeNotification.hostName = host.hostname;
-    notification.locationChangeNotification.userName = host.username;
-    notification.locationChangeNotification.session = self.guid;
-    [_locationChangeSubscriptions enumerateKeysAndObjectsUsingBlock:^(id  _Nonnull key, ITMNotificationRequest * _Nonnull obj, BOOL * _Nonnull stop) {
-        [[iTermAPIHelper sharedInstance] postAPINotification:notification
-                                             toConnectionKey:key];
-    }];
 }
 
 - (void)maybeResetTerminalStateOnHostChange {
@@ -9174,15 +9178,6 @@ ITERM_WEAKLY_REFERENCEABLE
                                   username:remoteHost.username
                                       path:newPath];
     [self.variablesScope setValue:newPath forVariableNamed:iTermVariableKeySessionPath];
-
-    ITMNotification *notification = [[[ITMNotification alloc] init] autorelease];
-    notification.locationChangeNotification = [[[ITMLocationChangeNotification alloc] init] autorelease];
-    notification.locationChangeNotification.session = self.guid;
-    notification.locationChangeNotification.directory = newPath;
-    [_locationChangeSubscriptions enumerateKeysAndObjectsUsingBlock:^(id  _Nonnull key, ITMNotificationRequest * _Nonnull obj, BOOL * _Nonnull stop) {
-        [[iTermAPIHelper sharedInstance] postAPINotification:notification
-                                             toConnectionKey:key];
-    }];
 }
 
 - (void)screenDidReceiveCustomEscapeSequenceWithParameters:(NSDictionary<NSString *, NSString *> *)parameters
@@ -10541,9 +10536,6 @@ ITERM_WEAKLY_REFERENCEABLE
         case ITMNotificationType_NotifyOnScreenUpdate:
             subscriptions = _updateSubscriptions;
             break;
-        case ITMNotificationType_NotifyOnLocationChange:
-            subscriptions = _locationChangeSubscriptions;
-            break;
         case ITMNotificationType_NotifyOnCustomEscapeSequence:
             subscriptions = _customEscapeSequenceNotifications;
             break;
@@ -10616,10 +10608,10 @@ ITERM_WEAKLY_REFERENCEABLE
 
 #pragma mark - iTermSessionNameControllerDelegate
 
-- (NSString *)sessionNameControllerInvocation {
+- (NSString *)sessionNameControllerUniqueIdentifier {
     iTermTitleComponents components = [iTermProfilePreferences unsignedIntegerForKey:KEY_TITLE_COMPONENTS inProfile:_profile];
     if (components != iTermTitleComponentsCustom) {
-        return @"iterm2.private.session_title(session: session.id)";
+        return iTermSessionNameControllerSystemTitleUniqueIdentifier;
     }
     
     iTermTuple<NSString *, NSString *> *tuple = [iTermTuple fromPlistValue:[iTermProfilePreferences stringForKey:KEY_TITLE_FUNC inProfile:_profile]];

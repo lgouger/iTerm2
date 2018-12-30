@@ -10,6 +10,8 @@
 @class iTermVariableScope;
 @class Profile;
 
+extern NSString *const iTermSessionNameControllerSystemTitleUniqueIdentifier;
+
 @interface iTermSessionFormattingDescriptor : NSObject
 @property (nonatomic) BOOL isTmuxGateway;
 @property (nonatomic, copy) NSString *tmuxClientName;
@@ -24,7 +26,7 @@
 - (void)sessionNameControllerDidChangeWindowTitle;
 - (iTermSessionFormattingDescriptor *)sessionNameControllerFormattingDescriptor;
 - (iTermVariableScope *)sessionNameControllerScope;
-- (NSString *)sessionNameControllerInvocation;
+- (NSString *)sessionNameControllerUniqueIdentifier;
 
 @end
 

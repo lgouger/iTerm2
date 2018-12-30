@@ -185,6 +185,14 @@ NSString *const iTermAPIServerConnectionClosed = @"iTermAPIServerConnectionClose
     });
 }
 
+- (NSString *)websocketKeyForConnectionKey:(NSString *)connectionKey {
+    __block NSString *result = nil;
+    dispatch_sync(_queue, ^{
+        result = self->_connections[connectionKey].key;
+    });
+    return result;
+
+}
 - (void)didAcceptConnectionOnFileDescriptor:(int)fd fromAddress:(iTermSocketAddress *)address {
     DLog(@"Accepted connection");
     dispatch_queue_t queue = _queue;
@@ -1069,7 +1077,7 @@ NSString *const iTermAPIServerConnectionClosed = @"iTermAPIServerConnectionClose
 - (void)webSocketConnection:(iTermWebSocketConnection *)webSocketConnection didReadFrame:(iTermWebSocketFrame *)frame {
     if (frame.opcode == iTermWebSocketOpcodeBinary) {
         ITMClientOriginatedMessage *request = [ITMClientOriginatedMessage parseFromData:frame.payload error:nil];
-        NSLog(@"Dispatch %@", request);
+        DLog(@"Dispatch %@", request);
         if (request) {
             DLog(@"Received request: %@", request);
             __weak __typeof(self) weakSelf = self;

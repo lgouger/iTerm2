@@ -123,6 +123,9 @@ NS_ASSUME_NONNULL_BEGIN
     NSMutableDictionary<NSString *, NSMenu *> *submenus = [NSMutableDictionary dictionary];
     NSSet<NSString *> *scriptExtensions = [NSSet setWithArray:@[ @"scpt", @"app", @"py" ]];
     for (NSString *file in directoryEnumerator) {
+        if ([file caseInsensitiveCompare:@".DS_Store"] == NSOrderedSame) {
+            continue;
+        }
         NSString *path = [root stringByAppendingPathComponent:file];
         BOOL isDirectory = NO;
         [[NSFileManager defaultManager] fileExistsAtPath:path isDirectory:&isDirectory];
@@ -131,13 +134,13 @@ NS_ASSUME_NONNULL_BEGIN
             if ([workspace isFilePackageAtPath:path] ||
                 [iTermAPIScriptLauncher environmentForScript:path checkForMain:NO]) {
                 [files addObject:file];
-            } else {
-                NSMenu *submenu = [[NSMenu alloc] initWithTitle:file];
-                submenus[file] = submenu;
-                [self addMenuItemsAt:path toMenu:submenu];
-                if (submenu.itemArray.count == 0) {
-                    [submenus removeObjectForKey:file];
-                }
+                continue;
+            }
+            NSMenu *submenu = [[NSMenu alloc] initWithTitle:file];
+            submenus[file] = submenu;
+            [self addMenuItemsAt:path toMenu:submenu];
+            if (submenu.itemArray.count == 0) {
+                [submenus removeObjectForKey:file];
             }
         } else if ([scriptExtensions containsObject:[file pathExtension]]) {
             [files addObject:file];
@@ -193,8 +196,11 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)chooseAndExportScript {
     [iTermScriptChooser chooseWithValidator:^BOOL(NSURL *url) {
         return [iTermScriptExporter urlIsScript:url];
-    } completion:^(NSURL *url) {
-        [iTermScriptExporter exportScriptAtURL:url completion:^(NSString *errorMessage, NSURL *zipURL) {
+    } completion:^(NSURL *url, SIGIdentity *signingIdentity) {
+        if (!url) {
+            return;
+        }
+        [iTermScriptExporter exportScriptAtURL:url signingIdentity:signingIdentity completion:^(NSString *errorMessage, NSURL *zipURL) {
             if (errorMessage || !zipURL) {
                 NSAlert *alert = [[NSAlert alloc] init];
                 alert.messageText = @"Export Failed";
@@ -210,7 +216,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (void)chooseAndImportScript {
     NSOpenPanel *panel = [[NSOpenPanel alloc] init];
-    panel.allowedFileTypes = @[ @"zip" ];
+    panel.allowedFileTypes = @[ @"zip", @"itermscript" ];
     if ([panel runModal] == NSModalResponseOK) {
         NSURL *url = panel.URL;
         dispatch_async(dispatch_get_main_queue(), ^{
@@ -221,6 +227,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (void)importFromURL:(NSURL *)url {
     [iTermScriptImporter importScriptFromURL:url
+                               userInitiated:YES
                                   completion:^(NSString * _Nullable errorMessage) {
                                       // Mojave deadlocks if you do this without the dispatch_async
                                       dispatch_async(dispatch_get_main_queue(), ^{
@@ -240,6 +247,43 @@ NS_ASSUME_NONNULL_BEGIN
         alert.messageText = @"Script Imported Successfully";
         [alert runModal];
     }
+}
+
+- (BOOL)scriptShouldAutoLaunchWithFullPath:(NSString *)fullPath {
+    return [fullPath hasPrefix:[[self autolaunchScriptPath] stringByAppendingString:@"/"]];
+}
+
+- (NSString *)autoLaunchPathIfFullPathWereMovedToAutoLaunch:(NSString *)fullPath {
+    return [[self autolaunchScriptPath] stringByAppendingPathComponent:fullPath.lastPathComponent];
+}
+
+- (BOOL)couldMoveScriptToAutoLaunch:(NSString *)fullPath {
+    if (![[NSFileManager defaultManager] fileExistsAtPath:fullPath]) {
+        return NO;
+    }
+    [[NSFileManager defaultManager] createDirectoryAtPath:[self autolaunchScriptPath]
+                              withIntermediateDirectories:YES
+                                               attributes:nil
+                                                    error:nil];
+    if (![[NSFileManager defaultManager] fileExistsAtPath:[self autolaunchScriptPath]]) {
+        return NO;
+    }
+
+    NSString *destination = [self autoLaunchPathIfFullPathWereMovedToAutoLaunch:fullPath];
+    if ([[NSFileManager defaultManager] fileExistsAtPath:destination]) {
+        return NO;
+    }
+    return YES;
+}
+
+- (void)moveScriptToAutoLaunch:(NSString *)fullPath {
+    [[NSFileManager defaultManager] createDirectoryAtPath:[self autolaunchScriptPath]
+                              withIntermediateDirectories:YES
+                                               attributes:nil
+                                                    error:nil];
+    NSString *destination = [self autoLaunchPathIfFullPathWereMovedToAutoLaunch:fullPath];
+    [[NSFileManager defaultManager] moveItemAtPath:fullPath
+                                            toPath:destination error:nil];
 }
 
 #pragma mark - Actions
@@ -266,12 +310,14 @@ NS_ASSUME_NONNULL_BEGIN
     [self launchScriptWithAbsolutePath:fullPath];
 }
 
+// NOTE: This logic needs to be kept in sync with -couldLaunchScriptWithAbsolutePath
 - (void)launchScriptWithAbsolutePath:(NSString *)fullPath {
     NSString *venv = [iTermAPIScriptLauncher environmentForScript:fullPath checkForMain:YES];
     if (venv) {
         NSString *name = fullPath.lastPathComponent;
         NSString *mainPyPath = [[[fullPath stringByAppendingPathComponent:name] stringByAppendingPathComponent:name] stringByAppendingPathExtension:@"py"];
         [iTermAPIScriptLauncher launchScript:mainPyPath
+                                    fullPath:fullPath
                               withVirtualEnv:venv
                                  setupPyPath:[[fullPath stringByAppendingPathComponent:name] stringByAppendingPathComponent:@"setup.py"]];
         return;
@@ -300,6 +346,34 @@ NS_ASSUME_NONNULL_BEGIN
         }
     } else {
         [[NSWorkspace sharedWorkspace] launchApplication:fullPath];
+    }
+}
+
+// NOTE: This logic needs to be kept in sync with -launchScriptWithAbsolutePath
+- (BOOL)couldLaunchScriptWithAbsolutePath:(NSString *)fullPath {
+    if (![[NSFileManager defaultManager] fileExistsAtPath:fullPath]) {
+        return NO;
+    }
+    NSString *venv = [iTermAPIScriptLauncher environmentForScript:fullPath checkForMain:YES];
+    if (venv) {
+        return YES;
+    }
+
+    if ([[fullPath pathExtension] isEqualToString:@"py"]) {
+        return YES;
+    }
+    if ([[fullPath pathExtension] isEqualToString:@"scpt"]) {
+        NSAppleScript *script;
+        NSDictionary *errorInfo = nil;
+        NSURL *aURL = [NSURL fileURLWithPath:fullPath];
+
+        // Make sure our script suite registry is loaded
+        [NSScriptSuiteRegistry sharedScriptSuiteRegistry];
+
+        script = [[NSAppleScript alloc] initWithContentsOfURL:aURL error:&errorInfo];
+        return script != nil;
+    } else {
+        return NO;
     }
 }
 
@@ -547,7 +621,7 @@ NS_ASSUME_NONNULL_BEGIN
     }
     return [self relativePathFrom:possibleSuper
                            toPath:[possibleSub stringByDeletingLastPathComponent]
-                         relative:[relative stringByAppendingPathComponent:possibleSub.lastPathComponent]];
+                         relative:[possibleSub.lastPathComponent stringByAppendingPathComponent:relative]];
 }
 
 - (NSString *)folderForFullEnvironmentSavePanelURL:(NSURL *)url {
@@ -654,8 +728,15 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (void)runModernAutoLaunchScripts {
     NSString *scriptsPath = [[NSFileManager defaultManager] autolaunchScriptPath];
-    for (NSString *file in [[NSFileManager defaultManager] enumeratorAtPath:scriptsPath]) {
+    NSDirectoryEnumerator *enumerator = [[NSFileManager defaultManager] enumeratorAtPath:scriptsPath];
+    for (NSString *file in enumerator) {
+        if ([file caseInsensitiveCompare:@".DS_Store"] == NSOrderedSame) {
+            continue;
+        }
         NSString *path = [scriptsPath stringByAppendingPathComponent:file];
+        if ([[NSFileManager defaultManager] itemIsDirectory:path]) {
+            [enumerator skipDescendants];
+        }
         [self runAutoLaunchScript:path];
     }
 }

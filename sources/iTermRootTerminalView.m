@@ -294,9 +294,7 @@ static const CGFloat kMaximumToolbeltSizeAsFractionOfWindow = 0.5;
 
 - (void)didChangeCompactness {
     id<PTYWindow> ptyWindow = self.window.ptyWindow;
-    const BOOL needCustomButtons = (ptyWindow.isCompact &&
-                                    !self.delegate.anyFullScreen &&
-                                    !self.delegate.enteringLionFullscreen);
+    const BOOL needCustomButtons = (ptyWindow.isCompact && [self.delegate rootTerminalViewShouldDrawStoplightButtons]);
     if (!needCustomButtons) {
         [_standardWindowButtonsView removeFromSuperview];
         _standardWindowButtonsView = nil;
@@ -340,6 +338,7 @@ static const CGFloat kMaximumToolbeltSizeAsFractionOfWindow = 0.5;
         
         [_standardWindowButtonsView setOptionModifier:optionKey];
     }
+    [super flagsChanged:event];
 }
 
 - (void)drawRect:(NSRect)dirtyRect {
@@ -425,7 +424,7 @@ static const CGFloat kMaximumToolbeltSizeAsFractionOfWindow = 0.5;
     NSDictionary *attributes = @{ NSFontAttributeName: _windowTitleLabel.font,
                                   NSForegroundColorAttributeName: _windowTitleLabel.textColor,
                                   NSParagraphStyleAttributeName: paragraphStyle };
-    NSAttributedString *attributedString = [[NSAttributedString alloc] initWithString:title
+    NSAttributedString *attributedString = [[NSAttributedString alloc] initWithString:title ?: @""
                                                                            attributes:attributes];
     if (icon) {
         NSTextAttachment *textAttachment = [[NSTextAttachment alloc] init];
@@ -442,7 +441,7 @@ static const CGFloat kMaximumToolbeltSizeAsFractionOfWindow = 0.5;
         [iconAttributedString appendAttributedString:attributedString];
         _windowTitleLabel.attributedStringValue = iconAttributedString;
     } else {
-        _windowTitleLabel.stringValue = title;
+        _windowTitleLabel.stringValue = title ?: @"";
     }
 }
 

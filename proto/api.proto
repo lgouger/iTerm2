@@ -720,6 +720,9 @@ message RPCRegistrationRequest {
   message SessionTitleAttributes {
     // Used by SESSION_TITLE to control name in Preferences menu
     optional string display_name = 1;
+    // Identifies this title provider uniquely. Must not conflict with other title providers.
+    // Use a backwards domain name identifying yourself and the feature, like "com.example.featurename"
+    optional string unique_identifier = 6;
   }
   message StatusBarComponentAttributes {
     // Used by STATUS_BAR_COMPONENT
@@ -772,7 +775,7 @@ enum NotificationType {
   NOTIFY_ON_KEYSTROKE = 1;
   NOTIFY_ON_SCREEN_UPDATE = 2;
   NOTIFY_ON_PROMPT = 3;
-  NOTIFY_ON_LOCATION_CHANGE = 4;
+  NOTIFY_ON_LOCATION_CHANGE = 4 [deprecated=true];
   NOTIFY_ON_CUSTOM_ESCAPE_SEQUENCE = 5;
   NOTIFY_ON_VARIABLE_CHANGE = 12;
   KEYSTROKE_FILTER = 14;  // Does not send a notification
@@ -879,7 +882,7 @@ message Notification {
   optional KeystrokeNotification keystroke_notification = 1;
   optional ScreenUpdateNotification screen_update_notification = 2;
   optional PromptNotification prompt_notification = 3;
-  optional LocationChangeNotification location_change_notification = 4;
+  optional LocationChangeNotification location_change_notification = 4 [deprecated=true];
   optional CustomEscapeSequenceNotification custom_escape_sequence_notification = 5;
   optional NewSessionNotification new_session_notification = 6;
   optional TerminateSessionNotification terminate_session_notification = 7;
@@ -954,7 +957,7 @@ message CustomEscapeSequenceNotification {
 
 // Sent when a new session is created or a closure is undone.
 message NewSessionNotification {
-  optional string uniqueIdentifier = 1;
+  optional string session_id = 1;
 }
 
 // Note this is sent when the app becomes/resigns active, the key window changes, the selected tab
@@ -993,9 +996,8 @@ message FocusChangedNotification {
   }
 }
 
-// Note this is sent when a session is removed from the screen but its closure remains undoable.
 message TerminateSessionNotification {
-  optional string uniqueIdentifier = 1;
+  optional string session_id = 1;
 }
 
 message LayoutChangedNotification {

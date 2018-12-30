@@ -2848,7 +2848,7 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
 }
 
 - (BOOL)showWebkitPopoverAtPoint:(NSPoint)pointInWindow url:(NSURL *)url {
-    WKWebView *webView = [[iTermWebViewFactory sharedInstance] webView];
+    WKWebView *webView = [[iTermWebViewFactory sharedInstance] webViewWithDelegate:nil];
     if (webView) {
         if ([[url.scheme lowercaseString] isEqualToString:@"http"]) {
             [webView loadHTMLString:@"This site cannot be displayed in QuickLook because of Application Transport Security. Only HTTPS URLs can be previewed." baseURL:nil];
@@ -3164,7 +3164,7 @@ static double EuclideanDistance(NSPoint p1, NSPoint p2) {
         case kiTermWarningSelection2:
             theCommand = @"curl -L https://iterm2.com/shell_integration/install_shell_integration.sh | bash\n";
             break;
-        case kItermWarningSelectionError:
+        default:
             assert(false);
     }
     if (theCommand) {

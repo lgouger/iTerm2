@@ -16,10 +16,12 @@
 #import "iTermScriptHistory.h"
 #import "iTermVariableReference.h"
 #import "iTermVariables.h"
+#import "NSArray+iTerm.h"
 #import "NSObject+iTerm.h"
 
 static NSString *const iTermSessionNameControllerStateKeyWindowTitleStack = @"window title stack";
 static NSString *const iTermSessionNameControllerStateKeyIconTitleStack = @"icon title stack";
+NSString *const iTermSessionNameControllerSystemTitleUniqueIdentifier = @"com.iterm2.system-title";
 
 @interface iTermSessionNameController()
 @end
@@ -88,7 +90,20 @@ static NSString *const iTermSessionNameControllerStateKeyIconTitleStack = @"icon
     } else {
         scope = self.delegate.sessionNameControllerScope;
     }
-    NSString *invocation = self.delegate.sessionNameControllerInvocation;
+    NSString *uniqueIdentifier = self.delegate.sessionNameControllerUniqueIdentifier;
+    if (!uniqueIdentifier) {
+        [self didEvaluateInvocationWithResult:@""];
+        completion(@"");
+        return;
+    }
+    NSString *invocation = [[iTermAPIHelper sessionTitleFunctions] objectPassingTest:^BOOL(iTermSessionTitleProvider *provider, NSUInteger index, BOOL *stop) {
+        return [provider.uniqueIdentifier isEqualToString:uniqueIdentifier];
+    }].invocation;
+    if (!invocation) {
+        if ([uniqueIdentifier isEqualToString:iTermSessionNameControllerSystemTitleUniqueIdentifier]) {
+            invocation = @"iterm2.private.session_title(session: session.id)";
+        }
+    }
     if (!invocation) {
         [self didEvaluateInvocationWithResult:@""];
         completion(@"");
@@ -124,7 +139,11 @@ static NSString *const iTermSessionNameControllerStateKeyIconTitleStack = @"icon
                  [error.domain isEqual:@"com.iterm2.api"]) {
                  // Waiting for the function to be registered
                  result = @"…";
+                 [self logMessage:[NSString stringWithFormat:@"Could not make a function call into a script. Either its signature changed (in which case you should update the session title setting) or the script is not running. The failed invocation was:\n%@", invocation]
+                       invocation:invocation];
              } else {
+                 [self logMessage:error.localizedDescription
+                       invocation:invocation];
                  result = @"🐞";
              }
          } else if (result.length == 0) {
@@ -151,6 +170,20 @@ static NSString *const iTermSessionNameControllerStateKeyIconTitleStack = @"icon
                 [weakSelf setNeedsReevaluation];
             };
         }
+    }
+}
+
+- (void)logMessage:(NSString *)message invocation:(NSString *)invocation {
+    NSError *invocationError = nil;
+    NSString *signature = [iTermScriptFunctionCall signatureForFunctionCallInvocation:invocation error:&invocationError];
+    if (signature) {
+        [[iTermAPIHelper sharedInstance] logToConnectionHostingFunctionWithSignature:signature
+                                                                              string:message];
+    } else {
+        [[iTermAPIHelper sharedInstance] logToConnectionHostingFunctionWithSignature:nil
+                                                                              format:@"Malformed invocation in session name controller. The invocation is:\n%@\nIt doesn't look like a function call! The parser said:\n",
+         invocation,
+         invocationError.localizedDescription];
     }
 }
 

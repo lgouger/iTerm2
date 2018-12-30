@@ -392,6 +392,11 @@ static NSRect iTermRectCenteredVerticallyWithinRect(NSRect frameToCenter, NSRect
     BOOL _windowIsMoving;
     NSInteger _screenBeforeMoving;
     BOOL _constrainFrameAfterDeminiaturization;
+
+    // Size of the last grid size shown in the transient window title, or 0,0 for never shown before.
+    VT100GridSize _previousGridSize;
+    // Have we started showing a transient title? If so, don't stop until time runs out.
+    BOOL _lockTransientTitle;
 }
 
 @synthesize scope = _scope;
@@ -408,7 +413,31 @@ static NSRect iTermRectCenteredVerticallyWithinRect(NSRect frameToCenter, NSRect
     [self updateWindowShadow:(NSWindow<PTYWindow> *)myWindow];
     // Chrome doesn't change titleVisibility so neither do we.
     // Some truly dreadful hacks are used instead. See PTYWindow.m.
-    const BOOL isCompact = (windowType == WINDOW_TYPE_COMPACT);
+    BOOL isCompact = NO;
+    switch (windowType) {
+        case WINDOW_TYPE_TOP:
+        case WINDOW_TYPE_BOTTOM:
+        case WINDOW_TYPE_LEFT:
+        case WINDOW_TYPE_RIGHT:
+        case WINDOW_TYPE_TOP_PARTIAL:
+        case WINDOW_TYPE_BOTTOM_PARTIAL:
+        case WINDOW_TYPE_LEFT_PARTIAL:
+        case WINDOW_TYPE_RIGHT_PARTIAL:
+        case WINDOW_TYPE_NO_TITLE_BAR:
+            if (@available(macOS 10.14, *)) {
+                isCompact = YES;
+            }
+            break;
+
+        case WINDOW_TYPE_TRADITIONAL_FULL_SCREEN:
+            break;
+
+        case WINDOW_TYPE_COMPACT:
+            isCompact = YES;
+
+        default:
+            break;
+    }
     myWindow.titlebarAppearsTransparent = isCompact;
 }
 
@@ -428,7 +457,16 @@ static NSRect iTermRectCenteredVerticallyWithinRect(NSRect frameToCenter, NSRect
         case WINDOW_TYPE_LEFT_PARTIAL:
         case WINDOW_TYPE_RIGHT_PARTIAL:
         case WINDOW_TYPE_NO_TITLE_BAR:
-            return mask | NSWindowStyleMaskBorderless | NSWindowStyleMaskResizable;
+            if (@available(macOS 10.14, *)) {
+                return (mask |
+                        NSWindowStyleMaskFullSizeContentView |
+                        NSWindowStyleMaskTitled |
+                        NSWindowStyleMaskClosable |
+                        NSWindowStyleMaskMiniaturizable |
+                        NSWindowStyleMaskResizable);
+            } else {
+                return mask | NSWindowStyleMaskBorderless | NSWindowStyleMaskResizable;
+            }
 
         case WINDOW_TYPE_TRADITIONAL_FULL_SCREEN:
             if (@available(macOS 10.13, *)) {
@@ -783,7 +821,7 @@ static NSRect iTermRectCenteredVerticallyWithinRect(NSRect frameToCenter, NSRect
                                                              object:nil];
     PtyLog(@"set window inited");
     self.windowInitialized = YES;
-    useTransparency_ = YES;
+    useTransparency_ = [iTermProfilePreferences boolForKey:KEY_INITIAL_USE_TRANSPARENCY inProfile:profile];
     number_ = [[iTermController sharedInstance] allocateWindowNumber];
     if (windowType == WINDOW_TYPE_TRADITIONAL_FULL_SCREEN) {
         [self hideMenuBar];
@@ -1426,16 +1464,7 @@ ITERM_WEAKLY_REFERENCEABLE
 
 - (BOOL)shouldUseMinimalStyle {
     iTermPreferencesTabStyle preferredStyle = [iTermPreferences intForKey:kPreferenceKeyTabStyle];
-    if (preferredStyle != TAB_STYLE_MINIMAL) {
-        return NO;
-    }
-    if (self.anyFullScreen) {
-        return YES;
-    }
-    if (togglingLionFullScreen_) {
-        return YES;
-    }
-    return self.windowType != WINDOW_TYPE_NORMAL;
+    return (preferredStyle == TAB_STYLE_MINIMAL);
 }
 
 - (BOOL)terminalWindowUseMinimalStyle {
@@ -1893,6 +1922,21 @@ ITERM_WEAKLY_REFERENCEABLE
     if (self.isShowingTransientTitle) {
         PTYSession *session = self.currentSession;
         NSString *aTitle;
+        VT100GridSize size = VT100GridSizeMake(session.columns, session.rows);
+        if (!_lockTransientTitle) {
+            if (VT100GridSizeEquals(_previousGridSize, VT100GridSizeMake(0, 0))) {
+                _previousGridSize = size;
+                DLog(@"NOT showing transient title because of no previous grid sizes");
+                return;
+            }
+            if (VT100GridSizeEquals(size, _previousGridSize)) {
+                DLog(@"NOT showing transient title because of equal grid sizes");
+                return;
+            }
+            _lockTransientTitle = YES;
+        }
+        _previousGridSize = size;
+        DLog(@"showing transient title %@", @(self.timeOfLastResize));
         if (self.window.frame.size.width < 250) {
             aTitle = [NSString stringWithFormat:@"%d✕%d", session.columns, session.rows];
         } else {
@@ -1903,6 +1947,7 @@ ITERM_WEAKLY_REFERENCEABLE
         }
         [self setWindowTitle:aTitle];
     } else {
+        _lockTransientTitle = NO;
         [self setWindowTitle:[self undecoratedWindowTitle]];
     }
 }
@@ -4026,14 +4071,44 @@ ITERM_WEAKLY_REFERENCEABLE
                       [iTermAdvancedSettingsModel terminalVMargin] * 2 + sessionSize.height * cellSize.height + decorationSize.height);
 }
 
++ (BOOL)windowType:(iTermWindowType)windowType shouldBeCompactWithSavedWindowType:(iTermWindowType)savedWindowType {
+    switch (windowType) {
+        case WINDOW_TYPE_TOP:
+        case WINDOW_TYPE_BOTTOM:
+        case WINDOW_TYPE_LEFT:
+        case WINDOW_TYPE_RIGHT:
+        case WINDOW_TYPE_TOP_PARTIAL:
+        case WINDOW_TYPE_BOTTOM_PARTIAL:
+        case WINDOW_TYPE_LEFT_PARTIAL:
+        case WINDOW_TYPE_RIGHT_PARTIAL:
+        case WINDOW_TYPE_NO_TITLE_BAR:
+            if (@available(macOS 10.14, *)) {
+                return YES;
+            }
+            return NO;
+
+        case WINDOW_TYPE_TRADITIONAL_FULL_SCREEN:
+        case WINDOW_TYPE_NORMAL:
+            return NO;
+            break;
+
+        case WINDOW_TYPE_COMPACT:
+            return YES;
+            break;
+
+        case WINDOW_TYPE_LION_FULL_SCREEN:
+            return savedWindowType == WINDOW_TYPE_COMPACT;
+    }
+    return NO;
+}
+
 - (NSWindow *)setWindowWithWindowType:(iTermWindowType)windowType
                       savedWindowType:(iTermWindowType)savedWindowType
                windowTypeForStyleMask:(iTermWindowType)windowTypeForStyleMask
                      hotkeyWindowType:(iTermHotkeyWindowType)hotkeyWindowType
                          initialFrame:(NSRect)initialFrame {
     const BOOL panel = (hotkeyWindowType == iTermHotkeyWindowTypeFloatingPanel);
-    const BOOL compact = ((windowType == WINDOW_TYPE_COMPACT) ||
-                          (windowType == WINDOW_TYPE_LION_FULL_SCREEN && savedWindowType == WINDOW_TYPE_COMPACT));
+    const BOOL compact = [PseudoTerminal windowType:windowType shouldBeCompactWithSavedWindowType:savedWindowType];
     Class windowClass;
     if (panel) {
         if (compact) {
@@ -4171,6 +4246,8 @@ ITERM_WEAKLY_REFERENCEABLE
     [self updateTransparencyBeforeTogglingTraditionalFullScreenMode];
     _fullScreen = !_fullScreen;
     [self didToggleTraditionalFullScreenModeWithSavedToolbeltWidth:savedToolbeltWidth];
+    iTermApplicationDelegate *itad = [iTermApplication.sharedApplication delegate];
+    [itad didToggleTraditionalFullScreenMode];
 }
 
 - (void)didExitTraditionalFullScreenMode {
@@ -4730,7 +4807,9 @@ ITERM_WEAKLY_REFERENCEABLE
         return;
     }
     NSString *newGuid = [session divorceAddressBookEntryFromPreferences];
-    [[PreferencePanel sessionsInstance] openToProfileWithGuid:newGuid selectGeneralTab:makeKey];
+    [[PreferencePanel sessionsInstance] openToProfileWithGuid:newGuid
+                                             selectGeneralTab:makeKey
+                                                         tmux:session.isTmuxClient];
     if (makeKey) {
         [[[PreferencePanel sessionsInstance] window] makeKeyAndOrderFront:nil];
     }
@@ -4860,7 +4939,8 @@ ITERM_WEAKLY_REFERENCEABLE
     if (self.autoCommandHistorySessionGuid) {
         [self hideAutoCommandHistory];
     }
-    for (PTYSession* aSession in [[tabViewItem identifier] sessions]) {
+    PTYTab *tab = [tabViewItem identifier];
+    for (PTYSession* aSession in [tab sessions]) {
         [aSession setNewOutput:NO];
 
         // Background tabs' timers run infrequently so make sure the display is
@@ -4870,6 +4950,7 @@ ITERM_WEAKLY_REFERENCEABLE
         aSession.active = YES;
         [self setDimmingForSession:aSession];
         [[aSession view] setBackgroundDimmed:![[self window] isKeyWindow]];
+        [[aSession view] didBecomeVisible];
     }
 
     for (PTYSession *session in [self allSessions]) {
@@ -4877,8 +4958,6 @@ ITERM_WEAKLY_REFERENCEABLE
             [[session textview] endFindCursor];
         }
     }
-    PTYSession* aSession = [[tabViewItem identifier] activeSession];
-    PTYTab *tab = [self tabForSession:aSession];
     if (!_fullScreen) {
         [tab updateLabelAttributes];
         [self setWindowTitle];
@@ -7389,6 +7468,13 @@ ITERM_WEAKLY_REFERENCEABLE
     return self.currentSession.shouldShowTabGraphic ? self.currentSession.tabGraphic : nil;
 }
 
+- (BOOL)rootTerminalViewShouldDrawStoplightButtons {
+    if (self.anyFullScreen || self.enteringLionFullscreen) {
+        return NO;
+    }
+    return windowType_ == WINDOW_TYPE_COMPACT;
+}
+
 - (void)updateTabBarStyle {
     id<PSMTabStyle> style;
     iTermPreferencesTabStyle preferredStyle = [iTermPreferences intForKey:kPreferenceKeyTabStyle];
@@ -7662,7 +7748,8 @@ ITERM_WEAKLY_REFERENCEABLE
 {
     float max=0;
     for (int i = 0; i < [_contentView.tabView numberOfTabViewItems]; ++i) {
-        for (PTYSession* session in [[[_contentView.tabView tabViewItemAtIndex:i] identifier] sessions]) {
+        PTYTab *tab = [[_contentView.tabView tabViewItemAtIndex:i] identifier];
+        for (PTYSession* session in [tab sessions]) {
             float w =[[session textview] charWidth];
             PtyLog(@"maxCharWidth - session %d has %dx%d, chars are %fx%f",
                    i, [session columns], [session rows], [[session textview] charWidth],
@@ -7684,7 +7771,8 @@ ITERM_WEAKLY_REFERENCEABLE
 {
     float max=0;
     for (int i = 0; i < [_contentView.tabView numberOfTabViewItems]; ++i) {
-        for (PTYSession* session in [[[_contentView.tabView tabViewItemAtIndex:i] identifier] sessions]) {
+        PTYTab *tab = [[_contentView.tabView tabViewItemAtIndex:i] identifier];
+        for (PTYSession* session in [tab sessions]) {
             float h =[[session textview] lineHeight];
             PtyLog(@"maxCharHeight - session %d has %dx%d, chars are %fx%f", i, [session columns],
                    [session rows], [[session textview] charWidth], [[session textview] lineHeight]);
@@ -7706,7 +7794,8 @@ ITERM_WEAKLY_REFERENCEABLE
     float max=0;
     float ch=0;
     for (int i = 0; i < [_contentView.tabView numberOfTabViewItems]; ++i) {
-        for (PTYSession* session in [[[_contentView.tabView tabViewItemAtIndex:i] identifier] sessions]) {
+        PTYTab *tab = [[_contentView.tabView tabViewItemAtIndex:i] identifier];
+        for (PTYSession* session in [tab sessions]) {
             float w = [[session textview] charWidth];
             PtyLog(@"widestSessionWidth - session %d has %dx%d, chars are %fx%f", i,
                    [session columns], [session rows], [[session textview] charWidth],
@@ -7728,7 +7817,8 @@ ITERM_WEAKLY_REFERENCEABLE
     float max=0;
     float ch=0;
     for (int i = 0; i < [_contentView.tabView numberOfTabViewItems]; ++i) {
-        for (PTYSession* session in [[[_contentView.tabView tabViewItemAtIndex:i] identifier] sessions]) {
+        PTYTab *tab = [[_contentView.tabView tabViewItemAtIndex:i] identifier];
+        for (PTYSession* session in [tab sessions]) {
             float h = [[session textview] lineHeight];
             PtyLog(@"tallestSessionheight - session %d has %dx%d, chars are %fx%f", i, [session columns], [session rows], [[session textview] charWidth], [[session textview] lineHeight]);
             if (h * [session rows] > max) {
@@ -8493,6 +8583,7 @@ ITERM_WEAKLY_REFERENCEABLE
     }
     for (PTYTab *tab in self.tabs) {
         [tab setDeferFontChanges:NO];
+        [tab updatePaneTitles];
     }
     if (self.isHotKeyWindow) {
         iTermProfileHotKey *profileHotKey = [[iTermHotKeyController sharedInstance] profileHotKeyForWindowController:self];
@@ -8524,7 +8615,8 @@ ITERM_WEAKLY_REFERENCEABLE
 {
     NSMutableArray* result = [NSMutableArray arrayWithCapacity:[_contentView.tabView numberOfTabViewItems]];
     for (NSTabViewItem* item in [_contentView.tabView tabViewItems]) {
-        [result addObjectsFromArray:[[item identifier] sessions]];
+        PTYTab *tab = [item identifier];
+        [result addObjectsFromArray:[tab sessions]];
     }
     return result;
 }
@@ -8897,8 +8989,7 @@ ITERM_WEAKLY_REFERENCEABLE
                  return @[];
              case kiTermWarningSelection1:
                  return okSessions;
-             case kiTermWarningSelection2:
-             case kItermWarningSelectionError:
+             default:
                  break;  // shouldn't happen
          }
          return @[];

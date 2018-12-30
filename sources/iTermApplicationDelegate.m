@@ -55,7 +55,7 @@
 #import "iTermModifierRemapper.h"
 #import "iTermPreferences.h"
 #import "iTermPythonRuntimeDownloader.h"
-#import "iTermRemotePreferences.h"
+#import "iTermScriptImporter.h"
 #import "iTermAdvancedSettingsModel.h"
 #import "iTermOpenQuicklyWindowController.h"
 #import "iTermOrphanServerAdopter.h"
@@ -72,6 +72,7 @@
 #import "iTermQuickLookController.h"
 #import "iTermRemotePreferences.h"
 #import "iTermRestorableSession.h"
+#import "iTermRemotePreferences.h"
 #import "iTermScriptsMenuController.h"
 #import "iTermSystemVersion.h"
 #import "iTermTipController.h"
@@ -213,6 +214,8 @@ static BOOL hasBecomeActive = NO;
         iTermUntitledFileOpenComplete,
         iTermUntitledFileOpenDisallowed
     } _untitledFileOpenStatus;
+    
+    BOOL _disableTermination;
 }
 
 - (instancetype)init {
@@ -543,6 +546,23 @@ static BOOL hasBecomeActive = NO;
  */
 - (BOOL)application:(NSApplication *)theApplication openFile:(NSString *)filename {
     DLog(@"application:%@ openFile:%@", theApplication, filename);
+    if ([[filename pathExtension] isEqualToString:@"itermscript"]) {
+        [iTermScriptImporter importScriptFromURL:[NSURL fileURLWithPath:filename]
+                                   userInitiated:NO
+                                      completion:^(NSString * _Nullable errorMessage) {
+                                          if (errorMessage) {
+                                              NSAlert *alert = [[NSAlert alloc] init];
+                                              alert.messageText = @"Script Not Installed";
+                                              alert.informativeText = errorMessage;
+                                              [alert runModal];
+                                          } else {
+                                              NSAlert *alert = [[NSAlert alloc] init];
+                                              alert.messageText = @"Script Imported Successfully";
+                                              [alert runModal];
+                                          }
+                                      }];
+        return YES;
+    }
     if ([filename hasSuffix:@".itermcolors"]) {
         DLog(@"Importing color presets from %@", filename);
         if ([iTermColorPresets importColorPresetFromFile:filename]) {
@@ -652,10 +672,28 @@ static BOOL hasBecomeActive = NO;
                afterDelay:[iTermAdvancedSettingsModel updateScreenParamsDelay]];
 }
 
+- (void)didToggleTraditionalFullScreenMode {
+    // LOL
+    // When you have only one window, and you do windowController.window = something new
+    // then it thinks you closed the only window and asks if you want to terminate the
+    // app. We run into this problem with compact windows, as other window types are
+    // able to simply change the window style without actually replacing the window.
+    // This awful hack catches that case. It takes two spins of the runloop because
+    // everything is terrible.
+    _disableTermination = YES;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        dispatch_async(dispatch_get_main_queue(), ^{
+            _disableTermination = NO;
+        });
+    });
+}
 - (NSApplicationTerminateReply)applicationShouldTerminate:(NSNotification *)theNotification {
     DLog(@"applicationShouldTerminate:");
     NSArray *terminals;
-
+    if (_disableTermination) {
+        return NSTerminateCancel;
+    }
+    
     terminals = [[iTermController sharedInstance] terminals];
     int numSessions = 0;
 
@@ -2091,7 +2129,7 @@ static BOOL hasBecomeActive = NO;
         }
         NSString *command = [[[[[iTermPythonRuntimeDownloader sharedInstance] pathToStandardPyenvPythonWithPythonVersion:nil] stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"apython"] stringWithEscapedShellCharactersIncludingNewlines:YES];
         NSURL *bannerURL = [[NSBundle mainBundle] URLForResource:@"repl_banner" withExtension:@"txt"];
-        command = [command stringByAppendingFormat:@" --banner=\"`cat %@`\"", bannerURL.path];
+        command = [command stringByAppendingFormat:@" --banner=\"`cat %@`\"", [bannerURL.path stringWithEscapedShellCharactersIncludingNewlines:YES]];
         NSString *cookie = [[iTermWebSocketCookieJar sharedInstance] newCookie];
         NSDictionary *environment = @{ @"ITERM2_COOKIE": cookie };
         [[iTermController sharedInstance] openSingleUseWindowWithCommand:command

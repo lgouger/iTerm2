@@ -64,7 +64,7 @@
 #define KEY_DEFAULT_BOOKMARK            @"Default Bookmark"  // deprecated
 #define KEY_ASK_ABOUT_OUTDATED_KEYMAPS  @"Ask About Outdated Keymaps"
 #define KEY_TITLE_COMPONENTS            @"Title Components"
-#define KEY_TITLE_FUNC                  @"Title Function"  // Value is iTermTuple.plistValue of (display name, invocation); e.g. ("Hello world", "hello_world()")
+#define KEY_TITLE_FUNC                  @"Title Function"  // Value is iTermTuple.plistValue of (display name, unique identifier); e.g. ("Hello world", "com.iterm2.example.title-provider")
 
 // Advanced working directory settings
 #define KEY_AWDS_WIN_OPTION             @"AWDS Window Option"
@@ -133,6 +133,7 @@
 #define KEY_THIN_STROKES           @"Thin Strokes"
 #define KEY_USE_ITALIC_FONT        @"Use Italic Font"
 #define KEY_TRANSPARENCY           @"Transparency"
+#define KEY_INITIAL_USE_TRANSPARENCY @"Initial Use Transparency"
 #define KEY_BLEND                  @"Blend"
 #define KEY_BLUR                   @"Blur"
 #define KEY_BLUR_RADIUS            @"Blur Radius"

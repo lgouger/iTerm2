@@ -12,6 +12,7 @@
 extern NSString *const iTermRemoveAPIServerSubscriptionsNotification;
 extern NSString *const iTermAPIRegisteredFunctionsDidChangeNotification;
 extern NSString *const iTermAPIDidRegisterSessionTitleFunctionNotification;
+extern NSString *const iTermAPIDidRegisterStatusBarComponentNotification;  // object is the unique id of the status bar component
 
 extern const NSInteger iTermAPIHelperFunctionCallUnregisteredErrorCode;
 extern const NSInteger iTermAPIHelperFunctionCallOtherErrorCode;
@@ -19,12 +20,19 @@ extern NSString *const iTermAPIHelperFunctionCallErrorUserInfoKeyConnection;
 
 typedef void (^iTermServerOriginatedRPCCompletionBlock)(id, NSError *);
 
+@interface iTermSessionTitleProvider : NSObject
+@property (nonatomic, readonly) NSString *displayName;
+@property (nonatomic, readonly) NSString *invocation;
+@property (nonatomic, readonly) NSString *uniqueIdentifier;
+@end
+
 @interface iTermAPIHelper : NSObject<iTermAPIServerDelegate>
 
 + (instancetype)sharedInstance;
 
 + (NSString *)invocationWithName:(NSString *)name
                         defaults:(NSArray<ITMRPCRegistrationRequest_RPCArgument*> *)defaultsArray;
++ (ITMRPCRegistrationRequest *)registrationRequestForStatusBarComponentWithUniqueIdentifier:(NSString *)uniqueIdentifier;
 
 - (instancetype)init NS_UNAVAILABLE;
 
@@ -37,10 +45,10 @@ typedef void (^iTermServerOriginatedRPCCompletionBlock)(id, NSError *);
 // function name -> [ arg1, arg2, ... ]
 + (NSDictionary<NSString *, NSArray<NSString *> *> *)registeredFunctionSignatureDictionary;
 
-// Tuple is (display name, invocation).
-+ (NSArray<iTermTuple<NSString *, NSString *> *> *)sessionTitleFunctions;
++ (NSArray<iTermSessionTitleProvider *> *)sessionTitleFunctions;
 
 + (NSArray<ITMRPCRegistrationRequest *> *)statusBarComponentProviderRegistrationRequests;
++ (NSString *)nameOfScriptVendingStatusBarComponentWithUniqueIdentifier:(NSString *)uniqueID;
 
 // Performs block either when the function becomes registered, immediately if it's already
 // registered, or after timeout (with an argument of YES) if it does not become registered
@@ -53,5 +61,14 @@ typedef void (^iTermServerOriginatedRPCCompletionBlock)(id, NSError *);
 // stringSignature is like func(arg1,arg2). Use iTermFunctionSignatureFromNameAndArguments to construct it safely.
 - (BOOL)haveRegisteredFunctionWithSignature:(NSString *)stringSignature;
 - (NSString *)connectionKeyForRPCWithSignature:(NSString *)signature;
+- (void)logToConnectionHostingFunctionWithSignature:(NSString *)signatureString
+                                             format:(NSString *)format, ...;
+- (void)logToConnectionHostingFunctionWithSignature:(NSString *)signatureString
+                                             string:(NSString *)string;
+@end
 
+@interface ITMRPCRegistrationRequest(Extensions)
+// This gives the string signature.
+@property (nonatomic, readonly) NSString *it_stringRepresentation;
+- (BOOL)it_rpcRegistrationRequestValidWithError:(out NSError **)error;
 @end
