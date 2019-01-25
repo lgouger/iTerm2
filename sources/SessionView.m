@@ -37,6 +37,8 @@ static const double kTitleHeight = 22;
 // Last time any window was resized TODO(georgen):it would be better to track per window.
 static NSDate* lastResizeDate_;
 
+NSString *const SessionViewWasSelectedForInspectionNotification = @"SessionViewWasSelectedForInspectionNotification";
+
 @interface iTermHoverContainerView : NSView
 @end
 
@@ -71,7 +73,8 @@ static NSDate* lastResizeDate_;
     iTermFindDriverDelegate,
     iTermGenericStatusBarContainer,
     NSDraggingSource,
-    PTYScrollerDelegate>
+    PTYScrollerDelegate,
+    SplitSelectionViewDelegate>
 @property(nonatomic, strong) PTYScrollView *scrollview;
 @end
 
@@ -603,6 +606,8 @@ static NSDate* lastResizeDate_;
 
     [self _dimShadeToDimmingAmount:amount];
     [_title setDimmingAmount:amount];
+    iTermStatusBarViewController *statusBar = self.delegate.sessionViewStatusBarViewController;
+    [statusBar updateColors];
 }
 
 - (void)updateColors {
@@ -753,15 +758,26 @@ static NSDate* lastResizeDate_;
     [self setFrameSize:_savedSize];
 }
 
-- (void)createSplitSelectionView:(BOOL)cancelOnly move:(BOOL)move session:(id)session {
-    _splitSelectionView = [[SplitSelectionView alloc] initAsCancelOnly:cancelOnly
-                                                             withFrame:NSMakeRect(0,
-                                                                                  0,
-                                                                                  [self frame].size.width,
-                                                                                  [self frame].size.height)
-                                                               session:session
-                                                              delegate:[MovePaneController sharedInstance]
-                                                                  move:move];
+- (void)createSplitSelectionViewWithMode:(SplitSelectionViewMode)mode session:(id)session {
+    id<SplitSelectionViewDelegate> delegate;
+    switch (mode) {
+        case SplitSelectionViewModeTargetSwap:
+        case SplitSelectionViewModeTargetMove:
+        case SplitSelectionViewModeSourceSwap:
+        case SplitSelectionViewModeSourceMove:
+            delegate = [MovePaneController sharedInstance];
+            break;
+        case SplitSelectionViewModeInspect:
+            delegate = self;
+            break;
+    }
+    _splitSelectionView = [[SplitSelectionView alloc] initWithMode:mode
+                                                         withFrame:NSMakeRect(0,
+                                                                              0,
+                                                                              [self frame].size.width,
+                                                                              [self frame].size.height)
+                                                           session:session
+                                                          delegate:delegate];
     _splitSelectionView.wantsLayer = [iTermPreferences boolForKey:kPreferenceKeyUseMetal];
     [_splitSelectionView setFrameOrigin:NSMakePoint(0, 0)];
     [_splitSelectionView setAutoresizingMask:NSViewWidthSizable|NSViewHeightSizable];
@@ -774,7 +790,11 @@ static NSDate* lastResizeDate_;
             if (_splitSelectionView) {
                 return;
             }
-            [self createSplitSelectionView:NO move:move session:session];
+            if (move) {
+                [self createSplitSelectionViewWithMode:SplitSelectionViewModeTargetMove session:session];
+            } else {
+                [self createSplitSelectionViewWithMode:SplitSelectionViewModeTargetSwap session:session];
+            }
             break;
 
         case kSplitSelectionModeOff:
@@ -783,7 +803,15 @@ static NSDate* lastResizeDate_;
             break;
 
         case kSplitSelectionModeCancel:
-            [self createSplitSelectionView:YES move:move session:session];
+            if (move) {
+                [self createSplitSelectionViewWithMode:SplitSelectionViewModeSourceMove session:session];
+            } else {
+                [self createSplitSelectionViewWithMode:SplitSelectionViewModeSourceSwap session:session];
+            }
+            break;
+
+        case kSplitSelectionModeInspect:
+            [self createSplitSelectionViewWithMode:SplitSelectionViewModeInspect session:session];
             break;
     }
 }
@@ -849,6 +877,9 @@ static NSDate* lastResizeDate_;
     iTermPreferencesTabStyle preferredStyle = [iTermPreferences intForKey:kPreferenceKeyTabStyle];
     if (self.window.ptyWindow.it_terminalWindowUseMinimalStyle) {
         NSColor *color = [_delegate sessionViewBackgroundColor];
+        if ([iTermPreferences boolForKey:kPreferenceKeyDimOnlyText]) {
+            return color;
+        }
         if (inactive) {
             return [color colorDimmedBy:[self adjustedDimmingAmount]
                        towardsGrayLevel:0.5];
@@ -1184,7 +1215,10 @@ static NSDate* lastResizeDate_;
 }
 
 - (void)invalidateStatusBar {
-    iTermStatusBarViewController *newVC = [self.delegate sessionViewStatusBarViewController];
+    iTermStatusBarViewController *newVC = nil;
+    if ([_delegate sessionViewUseSeparateStatusBarsPerPane]) {
+        newVC = [self.delegate sessionViewStatusBarViewController];
+    }
     BOOL statusBarChanged = NO;
     switch ((iTermStatusBarPosition)[iTermPreferences unsignedIntegerForKey:kPreferenceKeyStatusBarPosition]) {
         case iTermStatusBarPositionTop:
@@ -1202,15 +1236,20 @@ static NSDate* lastResizeDate_;
             break;
     }
     if (statusBarChanged) {
-        if (newVC.searchViewController) {
-            _findDriver = iTermSessionViewFindDriverPermanentStatusBar;
-            _permanentStatusBarFindDriver = [[iTermFindDriver alloc] initWithViewController:newVC.searchViewController];
-            _permanentStatusBarFindDriver.delegate = self.findDriverDelegate;
-        } else if (newVC) {
-            _findDriver = iTermSessionViewFindDriverTemporaryStatusBar;
-        } else {
-            _findDriver = iTermSessionViewFindDriverDropDown;
-        }
+        [self updateFindDriver];
+    }
+}
+
+- (void)updateFindDriver {
+    iTermStatusBarViewController *statusBarViewController = [self.delegate sessionViewStatusBarViewController];
+    if (statusBarViewController.searchViewController) {
+        _findDriver = iTermSessionViewFindDriverPermanentStatusBar;
+        _permanentStatusBarFindDriver = [[iTermFindDriver alloc] initWithViewController:statusBarViewController.searchViewController];
+        _permanentStatusBarFindDriver.delegate = self.findDriverDelegate;
+    } else if (statusBarViewController) {
+        _findDriver = iTermSessionViewFindDriverTemporaryStatusBar;
+    } else {
+        _findDriver = iTermSessionViewFindDriverDropDown;
     }
 }
 
@@ -1559,4 +1598,9 @@ static NSDate* lastResizeDate_;
     return _scrollview;
 }
 
+#pragma mark - SplitSelectionViewDelegate
+
+- (void)didSelectDestinationSession:(PTYSession *)session half:(SplitSessionHalf)half {
+    [[NSNotificationCenter defaultCenter] postNotificationName:SessionViewWasSelectedForInspectionNotification object:self];
+}
 @end

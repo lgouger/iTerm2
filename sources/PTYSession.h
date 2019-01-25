@@ -62,7 +62,8 @@ extern NSString *const PTYSessionRevivedNotification;
 typedef NS_ENUM(NSInteger, SplitSelectionMode) {
     kSplitSelectionModeOn,
     kSplitSelectionModeOff,
-    kSplitSelectionModeCancel
+    kSplitSelectionModeCancel,
+    kSplitSelectionModeInspect
 };
 
 typedef enum {
@@ -221,6 +222,11 @@ typedef enum {
 
 - (void)sessionDraggingEntered:(PTYSession *)session;
 - (void)sessionDraggingExited:(PTYSession *)session;
+
+- (BOOL)sessionShouldSendWindowSizeIOCTL:(PTYSession *)session;
+
+- (void)sessionDidInvalidateStatusBar:(PTYSession *)session;
+
 @end
 
 @class SessionView;
@@ -425,7 +431,6 @@ typedef enum {
 @property(nonatomic, readonly) NSMutableArray<NSString *> *directories;  // of NSString
 @property(nonatomic, readonly) NSMutableArray<VT100RemoteHost *> *hosts;  // of VT100RemoteHost
 
-// Has two children: session and user
 @property (nonatomic, readonly) iTermVariables *variables;
 @property (nonatomic, readonly) iTermVariableScope *variablesScope;
 
@@ -481,6 +486,7 @@ typedef enum {
 @property(nonatomic, readonly) NSData *backspaceData;
 @property(nonatomic, readonly) iTermEchoProbe *echoProbe;
 @property(nonatomic, readonly) BOOL canOpenPasswordManager;
+@property(nonatomic) BOOL shortLivedSingleUse;
 
 #pragma mark - methods
 

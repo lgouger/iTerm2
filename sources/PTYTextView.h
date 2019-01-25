@@ -1,9 +1,11 @@
 #import <Cocoa/Cocoa.h>
 #import "ITAddressBookMgr.h"
 #import "iTerm.h"
+#import "iTermBadgeLabel.h"
 #import "iTermColorMap.h"
 #import "iTermFindDriver.h"
 #import "iTermIndicatorsHelper.h"
+#import "iTermKeyboardHandler.h"
 #import "iTermSemanticHistoryController.h"
 #import "iTermTextDrawingHelper.h"
 #import "LineBuffer.h"
@@ -33,8 +35,6 @@
 @class VT100Screen;
 @class VT100Terminal;
 
-#define NSLeftAlternateKeyMask  (0x000020 | NSEventModifierFlagOption)
-#define NSRightAlternateKeyMask (0x000040 | NSEventModifierFlagOption)
 
 // Types of characters. Used when classifying characters for word selection.
 typedef NS_ENUM(NSInteger, PTYCharType) {
@@ -70,7 +70,7 @@ typedef NS_ENUM(NSInteger, PTYTextViewSelectionExtensionUnit) {
     kPTYTextViewSelectionExtensionUnitMark,
 };
 
-@protocol PTYTextViewDelegate <NSObject>
+@protocol PTYTextViewDelegate <NSObject, iTermBadgeLabelDelegate>
 
 @property (nonatomic, readonly) NSEdgeInsets textViewEdgeInsets;
 
@@ -79,6 +79,7 @@ typedef NS_ENUM(NSInteger, PTYTextViewSelectionExtensionUnit) {
 - (BOOL)isPasting;
 - (void)queueKeyDown:(NSEvent *)event;
 - (void)keyDown:(NSEvent *)event;
+- (void)keyUp:(NSEvent *)event;
 - (BOOL)hasActionableKeyMappingForEvent:(NSEvent *)event;
 - (int)optionKey;
 - (int)rightOptionKey;
@@ -207,6 +208,8 @@ typedef NS_ENUM(NSInteger, PTYTextViewSelectionExtensionUnit) {
 - (void)textViewResetTerminal;
 - (CGRect)textViewRelativeFrame;
 - (CGSize)textViewContainerSize;
+- (CGFloat)textViewBadgeTopMargin;
+- (CGFloat)textViewBadgeRightMargin;
 @end
 
 @interface iTermHighlightedRow : NSObject
@@ -374,6 +377,8 @@ typedef void (^PTYTextViewDrawingHookBlock)(iTermTextDrawingHelper *);
 @property (nonatomic) BOOL suppressDrawing;
 @property (nonatomic, readonly) long long firstVisibleAbsoluteLineNumber;
 @property (nonatomic) BOOL useNativePowerlineGlyphs;
+
+@property (nonatomic, readonly) iTermKeyboardHandler *keyboardHandler;
 
 // Returns the size of a cell for a given font. hspace and vspace are multipliers and the width
 // and height.

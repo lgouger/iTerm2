@@ -29,7 +29,8 @@
 #import "iTermAdvancedSettingsModel.h"
 #import "iTermSwiftyStringParser.h"
 #import "iTermTuple.h"
-#import "iTermVariables.h"
+#import "iTermVariableScope.h"
+#import "NSArray+iTerm.h"
 #import "NSData+iTerm.h"
 #import "NSLocale+iTerm.h"
 #import "NSMutableAttributedString+iTerm.h"
@@ -80,7 +81,16 @@
 
 + (NSString *)stringFromPasteboard {
     NSPasteboard *board;
-
+    if (gDebugLogging) {
+        DLog(@"--- begin list of items ---");
+        for (NSPasteboardItem *item in [[NSPasteboard generalPasteboard] pasteboardItems]) {
+            DLog(@"Item=%@", item);
+            for (NSPasteboardType type in item.types) {
+                DLog(@"  For type %@: plist=%@ data=%@ string=%@", type, [item propertyListForType:type], [item dataForType:type], [item stringForType:type]);
+            }
+        }
+        DLog(@"--- end list of items ---");
+    }
     board = [NSPasteboard generalPasteboard];
     if (!board) {
         DLog(@"Failed to get the general pasteboard!");
@@ -2058,6 +2068,23 @@ static TECObjectRef CreateTECConverterForUTF8Variants(TextEncodingVariant varian
         }
     }
     return numberOfLines;
+}
+
+- (BOOL)it_hasPrefix:(NSString *)prefix {
+    return prefix.length == 0 || [self hasPrefix:prefix];
+}
+
+- (NSString *)it_twoPartVersionNumber {
+    NSArray<NSString *> *parts = [self componentsSeparatedByString:@"."];
+    if (![parts allWithBlock:^BOOL(NSString *anObject) {
+        return anObject.isNumeric;
+    }]) {
+        return nil;
+    }
+    if (parts.count < 2) {
+        return nil;
+    }
+    return [[parts subarrayToIndex:2] componentsJoinedByString:@"."];
 }
 
 @end

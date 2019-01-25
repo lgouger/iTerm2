@@ -7,13 +7,15 @@
 
 #import "iTermStatusBarVariableBaseComponent.h"
 
-#import "iTermVariables.h"
+#import "iTermShellHistoryController.h"
+#import "iTermVariableScope.h"
 #import "iTermVariableReference.h"
 #import "NSArray+iTerm.h"
 #import "NSDictionary+iTerm.h"
 #import "NSImage+iTerm.h"
 #import "NSObject+iTerm.h"
 #import "NSStringITerm.h"
+#import "VT100RemoteHost.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -64,7 +66,8 @@ NS_ASSUME_NONNULL_BEGIN
     return @"";
 }
 
-- (id)statusBarComponentExemplar {
+- (id)statusBarComponentExemplarWithBackgroundColor:(NSColor *)backgroundColor
+                                          textColor:(NSColor *)textColor {
     [self doesNotRecognizeSelector:_cmd];
     return @"";
 }
@@ -115,7 +118,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (instancetype)initWithConfiguration:(NSDictionary<iTermStatusBarComponentConfigurationKey, id> *)configuration
                                 scope:(nullable iTermVariableScope *)scope {
-    return [super initWithPath:@"session.hostname" configuration:configuration scope:scope];
+    return [super initWithPath:@"hostname" configuration:configuration scope:scope];
 }
 
 - (NSImage *)statusBarComponentIcon {
@@ -130,7 +133,8 @@ NS_ASSUME_NONNULL_BEGIN
     return @"Current host name. Requires shell integration.";
 }
 
-- (id)statusBarComponentExemplar {
+- (id)statusBarComponentExemplarWithBackgroundColor:(NSColor *)backgroundColor
+                                          textColor:(NSColor *)textColor {
     return @"example.com";
 }
 
@@ -156,7 +160,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (instancetype)initWithConfiguration:(NSDictionary<iTermStatusBarComponentConfigurationKey, id> *)configuration
                                 scope:(nullable iTermVariableScope *)scope {
-    return [super initWithPath:@"session.username" configuration:configuration scope:scope];
+    return [super initWithPath:@"username" configuration:configuration scope:scope];
 }
 
 - (NSImage *)statusBarComponentIcon {
@@ -171,7 +175,8 @@ NS_ASSUME_NONNULL_BEGIN
     return @"Current user name. Requires shell integration.";
 }
 
-- (id)statusBarComponentExemplar {
+- (id)statusBarComponentExemplarWithBackgroundColor:(NSColor *)backgroundColor
+                                          textColor:(NSColor *)textColor {
     return NSUserName();
 }
 
@@ -200,7 +205,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (instancetype)initWithConfiguration:(NSDictionary<iTermStatusBarComponentConfigurationKey, id> *)configuration
                                 scope:(nullable iTermVariableScope *)scope {
     _home = [NSHomeDirectory() copy];
-    return [super initWithPath:@"session.path" configuration:configuration scope:scope];
+    return [super initWithPath:@"path" configuration:configuration scope:scope];
 }
 
 - (NSString *)transformedValue:(NSString *)value {
@@ -236,7 +241,8 @@ NS_ASSUME_NONNULL_BEGIN
     return @"Current directory. Best with shell integration.";
 }
 
-- (id)statusBarComponentExemplar {
+- (id)statusBarComponentExemplarWithBackgroundColor:(NSColor *)backgroundColor
+                                          textColor:(NSColor *)textColor {
     return NSHomeDirectory();
 }
 
@@ -252,6 +258,53 @@ NS_ASSUME_NONNULL_BEGIN
     }
     parts[index] = replacement;
     return [parts componentsJoinedByString:@"/"];
+}
+
+- (BOOL)statusBarComponentHandlesClicks {
+    return YES;
+}
+
+- (void)statusBarComponentDidClickWithView:(NSView *)view {
+    [self openMenuWithView:view];
+}
+
+- (void)statusBarComponentMouseDownWithView:(NSView *)view {
+    [self openMenuWithView:view];
+}
+
+- (void)openMenuWithView:(NSView *)view {
+    NSMenu *menu = [[NSMenu alloc] init];
+    NSView *containingView = view.superview;
+
+    VT100RemoteHost *remoteHost = [self remoteHost];
+    for (iTermRecentDirectoryMO *directory in [[[iTermShellHistoryController sharedInstance] directoriesSortedByScoreOnHost:remoteHost] it_arrayByKeepingFirstN:10]) {
+        NSString *title;
+        if (directory.starred.boolValue) {
+            title = [@"★ " stringByAppendingString:directory.path];
+        } else {
+            title = directory.path;
+        }
+        NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:title
+                                                      action:@selector(directorySelected:)
+                                               keyEquivalent:@""];
+        item.target = self;
+        item.representedObject = directory.path;
+        [menu addItem:item];
+    }
+    [menu popUpMenuPositioningItem:menu.itemArray.firstObject atLocation:NSMakePoint(0, 0) inView:containingView];
+}
+
+- (void)directorySelected:(NSMenuItem *)sender {
+    NSString *path = sender.representedObject;
+    [self.delegate statusBarComponent:self
+                          writeString:[NSString stringWithFormat:@"cd %@", [path stringWithEscapedShellCharactersIncludingNewlines:YES]]];
+}
+
+- (VT100RemoteHost *)remoteHost {
+    VT100RemoteHost *result = [[VT100RemoteHost alloc] init];
+    result.hostname = [self.scope valueForVariableName:iTermVariableKeySessionHostname];
+    result.username = [self.scope valueForVariableName:iTermVariableKeySessionUsername];
+    return result;
 }
 
 @end

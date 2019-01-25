@@ -12,7 +12,7 @@
 #import "iTermPasteSpecialViewController.h"
 #import "iTermPreferences.h"
 #import "iTermShortcutInputView.h"
-#import "iTermVariables.h"
+#import "iTermVariableScope.h"
 #import "iTermKeyBindingMgr.h"
 #import "NSPopUpButton+iTerm.h"
 #import "RegexKitLite.h"
@@ -234,9 +234,9 @@
             parameterHidden = NO;
             [[_parameter cell] setPlaceholderString:@"Function Call"];
             if (!_functionCallDelegate) {
-                _functionCallDelegate = [[iTermFunctionCallTextFieldDelegate alloc] initWithPaths:[iTermVariables recordedVariableNamesInContext:_suggestContext]
-                                                                                      passthrough:nil
-                                                                                    functionsOnly:YES];
+                _functionCallDelegate = [[iTermFunctionCallTextFieldDelegate alloc] initWithPathSource:[iTermVariableHistory pathSourceForContext:_suggestContext]
+                                                                                           passthrough:nil
+                                                                                         functionsOnly:YES];
             }
             parameterDelegate = _functionCallDelegate;
             break;

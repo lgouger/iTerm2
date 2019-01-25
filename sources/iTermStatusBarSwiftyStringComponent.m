@@ -8,7 +8,7 @@
 #import "iTermStatusBarSwiftyStringComponent.h"
 
 #import "iTermStatusBarComponentKnob.h"
-#import "iTermVariables.h"
+#import "iTermVariableScope.h"
 #import "NSDictionary+iTerm.h"
 
 NS_ASSUME_NONNULL_BEGIN
@@ -52,7 +52,8 @@ NSString *const iTermStatusBarSwiftyStringComponentExpressionKey = @"expression"
     return [fromSuper dictionaryByMergingDictionary:@{ iTermStatusBarSwiftyStringComponentExpressionKey: @"" }];
 }
 
-- (id)statusBarComponentExemplar {
+- (id)statusBarComponentExemplarWithBackgroundColor:(NSColor *)backgroundColor
+                                          textColor:(NSColor *)textColor {
     if (!_swiftyString.swiftyString.length) {
         return @"\\(expression)";
     } else {

@@ -7,11 +7,13 @@
 
 #import "iTermStatusBarJobComponent.h"
 
-#import "iTermVariables.h"
+#import "iTermVariableScope.h"
 #import "NSArray+iTerm.h"
 #import "NSDictionary+iTerm.h"
 #import "NSImage+iTerm.h"
 #import "NSObject+iTerm.h"
+#import "iTermJobTreeViewController.h"
+#import "iTermPreferences.h"
 #import "iTermProcessCache.h"
 #import "iTermVariableReference.h"
 
@@ -68,7 +70,8 @@ NS_ASSUME_NONNULL_BEGIN
     return @"Shows the currently running job. If space permits, parent process names are also shown.";
 }
 
-- (id)statusBarComponentExemplar {
+- (id)statusBarComponentExemplarWithBackgroundColor:(NSColor *)backgroundColor
+                                          textColor:(NSColor *)textColor {
     return @"vim ◂ bash";
 }
 
@@ -122,6 +125,41 @@ NS_ASSUME_NONNULL_BEGIN
         [temp addObject:joined];
     }
     return [temp copy];
+}
+
+- (BOOL)statusBarComponentHandlesClicks {
+    if (@available(macOS 10.14, *)) {
+        return YES;
+    }
+    // The outline view looks awful on 10.13 for no good reason.
+    return NO;
+}
+
+- (void)statusBarComponentMouseDownWithView:(NSView *)view {
+}
+
+- (void)statusBarComponentDidClickWithView:(NSView *)view {
+    NSPopover *popover = [[NSPopover alloc] init];
+    pid_t pid = [[self.scope valueForVariableName:iTermVariableKeySessionChildPid] integerValue];
+    NSViewController *viewController = [[iTermJobTreeViewController alloc] initWithProcessID:pid];
+    popover.contentViewController = viewController;
+    popover.contentSize = viewController.view.frame.size;
+    popover.behavior = NSPopoverBehaviorSemitransient;
+    NSRectEdge preferredEdge = NSRectEdgeMinY;
+    switch ([iTermPreferences unsignedIntegerForKey:kPreferenceKeyStatusBarPosition]) {
+        case iTermStatusBarPositionTop:
+            preferredEdge = NSRectEdgeMaxY;
+            break;
+        case iTermStatusBarPositionBottom:
+            preferredEdge = NSRectEdgeMinY;
+            break;
+    }
+    NSView *relativeView = view.subviews.firstObject ?: view;
+    NSRect rect = relativeView.bounds;
+    rect.size.width = [self statusBarComponentMinimumWidth];
+    [popover showRelativeToRect:rect
+                         ofView:relativeView
+                  preferredEdge:preferredEdge];
 }
 
 @end

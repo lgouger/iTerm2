@@ -18,6 +18,7 @@
     NSEdgeInsets _textFieldInsets;
     CGFloat _boxMinY;
     CGFloat _descriptionMinY;
+    NSColor *_backgroundColor;
 }
 
 - (void)awakeFromNib {
@@ -34,6 +35,16 @@
     _textFieldInsets.bottom = _textFieldInsets.top;
     _boxMinY = _box.frame.origin.y;
     _descriptionMinY = _description.frame.origin.y;
+    [self updateFillColor];
+}
+
+- (void)setBackgroundColor:(NSColor *)backgroundColor {
+    _backgroundColor = backgroundColor;
+    [self updateFillColor];
+}
+
+- (NSColor *)backgroundColor {
+    return _backgroundColor;
 }
 
 - (void)sizeToFit {
@@ -102,7 +113,7 @@
     } else {
         switch (self.highlightState) {
             case NSCollectionViewItemHighlightNone:
-                _box.fillColor = [NSColor controlColor];
+                _box.fillColor = _backgroundColor ?: [NSColor controlColor];
                 break;
 
             case NSCollectionViewItemHighlightAsDropTarget:

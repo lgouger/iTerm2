@@ -40,6 +40,8 @@
 @class SplitSelectionView;
 @class SessionTitleView;
 
+extern NSString *const SessionViewWasSelectedForInspectionNotification;
+
 @protocol iTermSessionViewDelegate<iTermFindDriverDelegate, NSObject>
 
 // Mouse entered the view.
@@ -135,6 +137,9 @@
 - (iTermStatusBarViewController *)sessionViewStatusBarViewController;
 
 - (iTermVariableScope *)sessionViewScope;
+
+- (BOOL)sessionViewUseSeparateStatusBarsPerPane;
+
 @end
 
 @interface SessionView : NSView <SessionTitleViewDelegate>
@@ -213,6 +218,7 @@
 - (BOOL)hasHoverURL;
 - (void)reallyUpdateMetalViewFrame;
 - (void)invalidateStatusBar;
+- (void)updateFindDriver;
 
 - (void)addSubviewBelowFindView:(NSView *)aView;
 

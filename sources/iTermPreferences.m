@@ -88,6 +88,7 @@ NSString *const kPreferenceKeyDisableFullscreenTransparencyByDefault = @"Disable
 NSString *const kPreferenceKeyEnableDivisionView = @"EnableDivisionView";
 NSString *const kPreferenceKeyEnableProxyIcon = @"EnableProxyIcon";
 NSString *const kPreferenceKeyDimBackgroundWindows = @"DimBackgroundWindows";
+NSString *const kPreferenceKeySeparateStatusBarsPerPane = @"SeparateStatusBarsPerPane";
 
 NSString *const kPreferenceKeyControlRemapping = @"Control";
 NSString *const kPreferenceKeyLeftOptionRemapping = @"LeftOption";
@@ -147,6 +148,10 @@ static NSString *sPreviousVersion;
 @implementation iTermPreferences
 
 + (NSString *)appVersionBeforeThisLaunch {
+    if (!sPreviousVersion) {
+        NSUserDefaults *userDefaults = [NSUserDefaults standardUserDefaults];
+        sPreviousVersion = [[userDefaults objectForKey:kPreferenceKeyAppVersion] copy];
+    }
     return sPreviousVersion;
 }
 
@@ -170,7 +175,8 @@ static NSString *sPreviousVersion;
 
     // Store the current app version in prefs
     NSDictionary *infoDictionary = [[NSBundle bundleForClass:[self class]] infoDictionary];
-    sPreviousVersion = [[userDefaults objectForKey:kPreferenceKeyAppVersion] copy];
+    // Force it to be lazy-loaded.
+    [self appVersionBeforeThisLaunch];
     [userDefaults setObject:infoDictionary[@"CFBundleVersion"] forKey:kPreferenceKeyAppVersion];
 
     // Disable under-titlebar mirror view.
@@ -271,6 +277,7 @@ static NSString *sPreviousVersion;
                   kPreferenceKeyEnableDivisionView: @YES,
                   kPreferenceKeyEnableProxyIcon: @NO,
                   kPreferenceKeyDimBackgroundWindows: @NO,
+                  kPreferenceKeySeparateStatusBarsPerPane: @NO,
 
                   kPreferenceKeyControlRemapping: @(kPreferencesModifierTagControl),
                   kPreferenceKeyLeftOptionRemapping: @(kPreferencesModifierTagLeftOption),
@@ -574,7 +581,7 @@ static NSString *sPreviousVersion;
     static iTermUserDefaultsObserver *instance;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        instance = [[iTermUserDefaultsObserver alloc]init];
+        instance = [[iTermUserDefaultsObserver alloc] init];
     });
     return instance;
 }
@@ -587,8 +594,8 @@ typedef struct {
     dispatch_once_t onceToken;
 } iTermPreferencesBoolCache;
 
-#define FAST_BOOL_ACCESSOR(userDefaultsKey) \
-+ (BOOL)hideTabActivityIndicator { \
+#define FAST_BOOL_ACCESSOR(accessorName, userDefaultsKey) \
++ (BOOL)accessorName { \
     static iTermPreferencesBoolCache cache = { \
         .key = userDefaultsKey, \
         .value = NO, \
@@ -609,6 +616,7 @@ typedef struct {
     return cache->value;
 }
 
-FAST_BOOL_ACCESSOR(kPreferenceKeyHideTabActivityIndicator)
+FAST_BOOL_ACCESSOR(hideTabActivityIndicator, kPreferenceKeyHideTabActivityIndicator)
+FAST_BOOL_ACCESSOR(maximizeMetalThroughput, kPreferenceKeyMetalMaximizeThroughput)
 
 @end

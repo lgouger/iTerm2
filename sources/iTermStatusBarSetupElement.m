@@ -31,8 +31,10 @@ NSString *const iTermStatusBarElementPasteboardType = @"com.iterm2.status-bar-el
 }
 
 - (instancetype)initWithComponentFactory:(id<iTermStatusBarComponentFactory>)factory
+                         layoutAlgorithm:(iTermStatusBarLayoutAlgorithmSetting)layoutAlgorithm
                                    knobs:(NSDictionary *)knobs {
     return [self initWithComponent:[factory newComponentWithKnobs:knobs
+                                                  layoutAlgorithm:layoutAlgorithm
                                                             scope:nil]];
 }
 
@@ -40,15 +42,36 @@ NSString *const iTermStatusBarElementPasteboardType = @"com.iterm2.status-bar-el
     return [NSString stringWithFormat:@"<%@: %p %@>", NSStringFromClass([self class]), self, NSStringFromClass(_component.class)];
 }
 
-- (id)exemplar {
-    return self.component.statusBarComponentExemplar;
+- (NSAttributedString *)exemplarWithBackgroundColor:(NSColor *)defaultBackgroundColor
+                                          textColor:(NSColor *)defaultTextColor
+                                        defaultFont:(NSFont *)defaultFont {
+    NSColor *backgroundColor = self.component.statusBarBackgroundColor ?: defaultBackgroundColor;
+    NSColor *textColor = self.component.statusBarTextColor;
+    if (textColor == [NSColor labelColor] || textColor == nil) {
+        textColor = defaultTextColor;
+    }
+    id object = [self.component statusBarComponentExemplarWithBackgroundColor:backgroundColor
+                                                                    textColor:textColor];
+    if ([object isKindOfClass:[NSAttributedString class]]) {
+        return object;
+    }
+
+    NSFont *font = defaultFont ?: [NSFont systemFontOfSize:[NSFont systemFontSize]];
+    NSDictionary *attributes = @{ NSFontAttributeName: font,
+                                  NSForegroundColorAttributeName: textColor ?: [NSColor labelColor],
+                                  NSBackgroundColorAttributeName: [NSColor clearColor] };
+    return [[NSAttributedString alloc] initWithString:object attributes:attributes];
 }
+
 
 #pragma mark - NSCopying
 
 - (id)copyWithZone:(nullable NSZone *)zone {
     NSDictionary *knobs = _component.configuration[iTermStatusBarComponentConfigurationKeyKnobValues];
+    NSDictionary *dict = _component.configuration[iTermStatusBarComponentConfigurationKeyLayoutAdvancedConfigurationDictionaryValue];
+    iTermStatusBarAdvancedConfiguration *advancedConfiguration = [iTermStatusBarAdvancedConfiguration advancedConfigurationFromDictionary:dict];
     return [[iTermStatusBarSetupElement alloc] initWithComponent:[_component.statusBarComponentFactory newComponentWithKnobs:knobs
+                                                                                                             layoutAlgorithm:advancedConfiguration.layoutAlgorithm
                                                                                                                        scope:nil]];
 }
 
@@ -60,7 +83,9 @@ NSString *const iTermStatusBarElementPasteboardType = @"com.iterm2.status-bar-el
         return nil;
     }
     NSDictionary *knobs = [aDecoder decodeObjectOfClass:[NSDictionary class] forKey:@"knobs"];
-    return [self initWithComponentFactory:factory knobs:knobs];
+    return [self initWithComponentFactory:factory
+                          layoutAlgorithm:[aDecoder decodeIntegerForKey:@"layoutAlgorithm"]
+                                    knobs:knobs];
 }
 
 
@@ -69,6 +94,9 @@ NSString *const iTermStatusBarElementPasteboardType = @"com.iterm2.status-bar-el
     NSDictionary *knobs = _component.configuration[iTermStatusBarComponentConfigurationKeyKnobValues] ?: @{};
     [aCoder encodeObject:knobs
                   forKey:@"knobs"];
+    NSDictionary *dict = _component.configuration[iTermStatusBarComponentConfigurationKeyLayoutAdvancedConfigurationDictionaryValue];
+    iTermStatusBarAdvancedConfiguration *advancedConfiguration = [iTermStatusBarAdvancedConfiguration advancedConfigurationFromDictionary:dict];
+    [aCoder encodeInteger:advancedConfiguration.layoutAlgorithm forKey:@"layoutAlgorithm"];
 }
 
 #pragma mark - NSPasteboardWriting
@@ -112,11 +140,26 @@ NSString *const iTermStatusBarElementPasteboardType = @"com.iterm2.status-bar-el
 }
 
 - (NSColor *)statusBarComponentDefaultTextColor {
-    return [NSColor blackColor];
+    return [NSColor labelColor];
 }
 
-- (void)statusBarComponent:(id<iTermStatusBarComponent>)component setHidden:(BOOL)hidden {
+- (BOOL)statusBarComponentIsVisible:(id<iTermStatusBarComponent>)component {
+    // Say no so that git components don't do work for no reason.
+    return NO;
 }
+
+- (NSFont *)statusBarComponentTerminalFont:(id<iTermStatusBarComponent>)component {
+    return [NSFont systemFontOfSize:[NSFont systemFontSize]];
+}
+
+- (void)statusBarComponent:(id<iTermStatusBarComponent>)component writeString:(NSString *)string {
+}
+
+
+- (BOOL)statusBarComponentTerminalBackgroundColorIsDark:(id<iTermStatusBarComponent>)component {
+    return NO;
+}
+
 
 @end
 

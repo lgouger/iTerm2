@@ -55,6 +55,13 @@
     [self doesNotRecognizeSelector:_cmd];
 }
 
+- (iTermCheapAttributedString *)copyWithAttributes:(NSDictionary *)attributes {
+    iTermCheapAttributedString *other = [[iTermCheapAttributedString alloc] init];
+    other.characterData = [[_characterData mutableCopy] autorelease];
+    other.attributes = attributes;
+    return other;
+}
+
 @end
 
 @implementation iTermMutableAttributedStringBuilder {
@@ -68,7 +75,7 @@
     self = [super init];
     if (self) {
 #if ENABLE_TEXT_DRAWING_FAST_PATH
-        _canUseFastPath = YES;
+    _canUseFastPath = [iTermAdvancedSettingsModel preferSpeedToFullLigatureSupport];
 #endif
     }
     return self;

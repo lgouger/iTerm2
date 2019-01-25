@@ -5,11 +5,12 @@
 //  Created by George Nachman on 5/20/18.
 //
 
-#import "iTermVariables.h"
+#import "iTermVariableScope.h"
 
 #import "DebugLogging.h"
 #import "iTermTuple.h"
 #import "iTermVariableReference.h"
+#import "iTermWeakVariables.h"
 #import "NSArray+iTerm.h"
 #import "NSDictionary+iTerm.h"
 #import "NSJSONSerialization+iTerm.h"
@@ -30,83 +31,42 @@ NSString *const iTermVariableKeyTabTitleOverride = @"titleOverride";
 NSString *const iTermVariableKeyTabCurrentSession = @"currentSession";
 NSString *const iTermVariableKeyTabTmuxWindow = @"tmuxWindow";
 
-NSString *const iTermVariableKeySessionAutoLogID = @"session.autoLogId";
-NSString *const iTermVariableKeySessionColumns = @"session.columns";
-NSString *const iTermVariableKeySessionCreationTimeString = @"session.creationTimeString";
-NSString *const iTermVariableKeySessionHostname = @"session.hostname";
-NSString *const iTermVariableKeySessionID = @"session.id";
-NSString *const iTermVariableKeySessionLastCommand = @"session.lastCommand";
-NSString *const iTermVariableKeySessionPath = @"session.path";
-NSString *const iTermVariableKeySessionName = @"session.name";
-NSString *const iTermVariableKeySessionRows = @"session.rows";
-NSString *const iTermVariableKeySessionTTY = @"session.tty";
-NSString *const iTermVariableKeySessionUsername = @"session.username";
-NSString *const iTermVariableKeySessionTermID = @"session.termid";
-NSString *const iTermVariableKeySessionProfileName = @"session.profileName";
-NSString *const iTermVariableKeySessionIconName = @"session.terminalIconName";
-NSString *const iTermVariableKeySessionTriggerName = @"session.triggerName";
-NSString *const iTermVariableKeySessionWindowName = @"session.terminalWindowName";
-NSString *const iTermVariableKeySessionJob = @"session.jobName";
-NSString *const iTermVariableKeySessionPresentationName = @"session.presentationName";
-NSString *const iTermVariableKeySessionTmuxWindowTitle = @"session.tmuxWindowTitle";
-NSString *const iTermVariableKeySessionTmuxRole = @"session.tmuxRole";
-NSString *const iTermVariableKeySessionTmuxClientName = @"session.tmuxClientName";
-NSString *const iTermVariableKeySessionAutoNameFormat = @"session.autoNameFormat";
-NSString *const iTermVariableKeySessionAutoName = @"session.autoName";
-NSString *const iTermVariableKeySessionTmuxWindowPane = @"session.tmuxWindowPane";
-NSString *const iTermVariableKeySessionJobPid = @"session.jobPid";
-NSString *const iTermVariableKeySessionChildPid = @"session.pid";
-NSString *const iTermVariableKeySessionTmuxStatusLeft = @"session.tmuxStatusLeft";
-NSString *const iTermVariableKeySessionTmuxStatusRight = @"session.tmuxStatusRight";
-NSString *const iTermVariableKeySessionMouseReportingMode = @"session.mouseReportingMode";
-NSString *const iTermVariableKeySessionBadge = @"session.badge";
-NSString *const iTermVariableKeySessionTab = @"session.tab";
+NSString *const iTermVariableKeySessionAutoLogID = @"autoLogId";
+NSString *const iTermVariableKeySessionColumns = @"columns";
+NSString *const iTermVariableKeySessionCreationTimeString = @"creationTimeString";
+NSString *const iTermVariableKeySessionHostname = @"hostname";
+NSString *const iTermVariableKeySessionID = @"id";
+NSString *const iTermVariableKeySessionLastCommand = @"lastCommand";
+NSString *const iTermVariableKeySessionPath = @"path";
+NSString *const iTermVariableKeySessionName = @"name";
+NSString *const iTermVariableKeySessionRows = @"rows";
+NSString *const iTermVariableKeySessionTTY = @"tty";
+NSString *const iTermVariableKeySessionUsername = @"username";
+NSString *const iTermVariableKeySessionTermID = @"termid";
+NSString *const iTermVariableKeySessionProfileName = @"profileName";
+NSString *const iTermVariableKeySessionIconName = @"terminalIconName";
+NSString *const iTermVariableKeySessionTriggerName = @"triggerName";
+NSString *const iTermVariableKeySessionWindowName = @"terminalWindowName";
+NSString *const iTermVariableKeySessionJob = @"jobName";
+NSString *const iTermVariableKeySessionPresentationName = @"presentationName";
+NSString *const iTermVariableKeySessionTmuxWindowTitle = @"tmuxWindowTitle";
+NSString *const iTermVariableKeySessionTmuxRole = @"tmuxRole";
+NSString *const iTermVariableKeySessionTmuxClientName = @"tmuxClientName";
+NSString *const iTermVariableKeySessionAutoNameFormat = @"autoNameFormat";
+NSString *const iTermVariableKeySessionAutoName = @"autoName";
+NSString *const iTermVariableKeySessionTmuxWindowPane = @"tmuxWindowPane";
+NSString *const iTermVariableKeySessionJobPid = @"jobPid";
+NSString *const iTermVariableKeySessionChildPid = @"pid";
+NSString *const iTermVariableKeySessionTmuxStatusLeft = @"tmuxStatusLeft";
+NSString *const iTermVariableKeySessionTmuxStatusRight = @"tmuxStatusRight";
+NSString *const iTermVariableKeySessionMouseReportingMode = @"mouseReportingMode";
+NSString *const iTermVariableKeySessionBadge = @"badge";
+NSString *const iTermVariableKeySessionTab = @"tab";
 
 NSString *const iTermVariableKeyWindowTitleOverride = @"titleOverride";
 NSString *const iTermVariableKeyWindowCurrentTab = @"currentTab";
 
 // NOTE: If you add here, also update +recordBuiltInVariables
-
-@interface iTermWeakVariables : NSObject<NSCopying, NSSecureCoding>
-@property (nonatomic, nullable, weak, readonly) iTermVariables *variables;
-
-- (instancetype)initWithVariables:(iTermVariables *)variables NS_DESIGNATED_INITIALIZER;
-- (nullable instancetype)initWithCoder:(NSCoder *)aDecoder NS_DESIGNATED_INITIALIZER;
-- (instancetype)init NS_UNAVAILABLE;
-
-@end
-
-@implementation iTermWeakVariables
-
-- (instancetype)initWithVariables:(iTermVariables *)variables {
-    self = [super init];
-    if (self) {
-        _variables = variables;
-    }
-    return self;
-}
-
-- (nullable instancetype)initWithCoder:(NSCoder *)aDecoder {
-    self = [super init];
-    if (self) {
-        _variables = nil;
-    }
-    return self;
-}
-
-- (void)encodeWithCoder:(NSCoder *)aCoder {
-}
-
-+ (BOOL)supportsSecureCoding {
-    return YES;
-}
-
-- (id)copyWithZone:(nullable NSZone *)zone {
-    return self;
-}
-
-@end
-
 @implementation iTermVariables {
     NSMutableDictionary<NSString *, id> *_values;
     __weak iTermVariables *_parent;
@@ -126,150 +86,6 @@ NSString *const iTermVariableKeyWindowCurrentTab = @"currentTab";
     return instance;
 }
 
-+ (void)recordBuiltInVariables {
-    // Session context
-    NSArray<NSString *> *names = @[ iTermVariableKeyGlobalScopeName,
-                                    iTermVariableKeySessionAutoLogID,
-                                    iTermVariableKeySessionColumns,
-                                    iTermVariableKeySessionCreationTimeString,
-                                    iTermVariableKeySessionHostname,
-                                    iTermVariableKeySessionID,
-                                    iTermVariableKeySessionLastCommand,
-                                    iTermVariableKeySessionPath,
-                                    iTermVariableKeySessionName,
-                                    iTermVariableKeySessionRows,
-                                    iTermVariableKeySessionTTY,
-                                    iTermVariableKeySessionUsername,
-                                    iTermVariableKeySessionTermID,
-                                    iTermVariableKeySessionProfileName,
-                                    iTermVariableKeySessionIconName,
-                                    iTermVariableKeySessionTriggerName,
-                                    iTermVariableKeySessionWindowName,
-                                    iTermVariableKeySessionJob,
-                                    iTermVariableKeySessionPresentationName,
-                                    iTermVariableKeySessionTmuxWindowTitle,
-                                    iTermVariableKeySessionTmuxRole,
-                                    iTermVariableKeySessionTmuxClientName,
-                                    iTermVariableKeySessionAutoNameFormat,
-                                    iTermVariableKeySessionAutoName,
-                                    iTermVariableKeySessionTmuxWindowPane,
-                                    iTermVariableKeySessionJobPid,
-                                    iTermVariableKeySessionChildPid,
-                                    iTermVariableKeySessionMouseReportingMode,
-                                    iTermVariableKeySessionBadge,
-                                    iTermVariableKeySessionTmuxStatusLeft,
-                                    iTermVariableKeySessionTmuxStatusRight,
-                                    iTermVariableKeySessionTab ];
-    [names enumerateObjectsUsingBlock:^(NSString * _Nonnull obj, NSUInteger idx, BOOL * _Nonnull stop) {
-        [self recordUseOfVariableNamed:obj inContext:iTermVariablesSuggestionContextSession];
-    }];
-
-    // Tab context
-    [self recordUseOfVariableNamed:iTermVariableKeyTabTitleOverride inContext:iTermVariablesSuggestionContextTab];
-    [self recordUseOfVariableNamed:iTermVariableKeyTabCurrentSession inContext:iTermVariablesSuggestionContextTab];
-    [self recordUseOfVariableNamed:iTermVariableKeyTabTmuxWindow inContext:iTermVariablesSuggestionContextTab];
-    [self recordUseOfVariableNamed:iTermVariableKeyGlobalScopeName inContext:iTermVariablesSuggestionContextTab];
-
-    // Window context
-    [self recordUseOfVariableNamed:iTermVariableKeyWindowTitleOverride inContext:iTermVariablesSuggestionContextWindow];
-    [self recordUseOfVariableNamed:iTermVariableKeyWindowCurrentTab inContext:iTermVariablesSuggestionContextWindow];
-    [self recordUseOfVariableNamed:iTermVariableKeyGlobalScopeName inContext:iTermVariablesSuggestionContextWindow];
-
-    // App context
-    [self recordUseOfVariableNamed:iTermVariableKeyApplicationPID inContext:iTermVariablesSuggestionContextApp];
-    [self recordUseOfVariableNamed:iTermVariableKeyApplicationLocalhostName inContext:iTermVariablesSuggestionContextApp];
-    [self recordUseOfVariableNamed:iTermVariableKeyApplicationEffectiveTheme inContext:iTermVariablesSuggestionContextApp];
-}
-
-+ (NSMutableDictionary<NSNumber *, NSMutableSet<NSString *> *> *)mutableRecordedNames {
-    static NSMutableDictionary<NSNumber *, NSMutableSet<NSString *> *> *records;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        NSDictionary *dict = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"NoSyncRecordedVariableNames"] ?: @{};
-        records = [NSMutableDictionary dictionary];
-        for (id key in dict) {
-            NSString *stringContext = [NSString castFrom:key];
-            if (!stringContext) {
-                continue;
-            }
-            NSNumber *context = @([stringContext integerValue]);
-            NSArray<NSString *> *names = [NSArray castFrom:dict[key]];
-            if (!names) {
-                continue;
-            }
-            records[context] = [NSMutableSet setWithArray:names];
-        }
-    });
-    return records;
-}
-
-+ (void)synchronizeRecordedNames {
-    NSDictionary *plist = [[self mutableRecordedNames] mapValuesWithBlock:^id(NSNumber *key, NSMutableSet<NSString *> *object) {
-        return object.allObjects;
-    }];
-    plist = [plist mapKeysWithBlock:^id(id key, id object) {
-        return [key stringValue];
-    }];
-    [[NSUserDefaults standardUserDefaults] setObject:plist forKey:@"NoSyncRecordedVariableNames"];
-}
-
-+ (NSMutableSet<NSString *> *)mutableRecordedVariableNamesInContext:(iTermVariablesSuggestionContext)context {
-    NSMutableSet<NSString *> *set = self.mutableRecordedNames[@(context)];
-    if (!set) {
-        set = [NSMutableSet set];
-        self.mutableRecordedNames[@(context)] = set;
-    }
-    return set;
-}
-
-+ (NSSet<NSString *> *)recordedVariableNamesInContext:(iTermVariablesSuggestionContext)context {
-    NSSet<NSString *> *result = [NSSet set];
-    for (int bit = 0; bit < 64; bit++) {
-        const NSUInteger one = 1;
-        NSUInteger mask = one << bit;
-        if (mask & context) {
-            result = [result setByAddingObjectsFromSet:self.mutableRecordedNames[@(mask)] ?: [NSSet set]];
-        }
-    }
-    if ((context & (iTermVariablesSuggestionContextSession | iTermVariablesSuggestionContextTab)) &&
-        !(context & iTermVariablesSuggestionContextApp)) {
-        NSSet<NSString *> *appVariables = [self recordedVariableNamesInContext:iTermVariablesSuggestionContextApp];
-        result = [NSSet setWithArray:[result.allObjects arrayByAddingObjectsFromArray:[appVariables.allObjects mapWithBlock:^id(NSString *appVariable) {
-            return [@"iterm2." stringByAppendingString:appVariable];
-        }]]];
-    }
-    return result;
-}
-
-+ (NSString *)stringForContext:(iTermVariablesSuggestionContext)context {
-    NSArray<NSString *> *parts = @[];
-    if (context & iTermVariablesSuggestionContextSession) {
-        parts = [parts arrayByAddingObject:@"Session"];
-    }
-    if (context & iTermVariablesSuggestionContextTab) {
-        parts = [parts arrayByAddingObject:@"Tab"];
-    }
-    if (context & iTermVariablesSuggestionContextWindow) {
-        parts = [parts arrayByAddingObject:@"Window"];
-    }
-    if (context & iTermVariablesSuggestionContextApp) {
-        parts = [parts arrayByAddingObject:@"App"];
-    }
-    if (context == iTermVariablesSuggestionContextNone) {
-        parts = [parts arrayByAddingObject:@"None"];
-    }
-    return [parts componentsJoinedByString:@"|"];
-}
-
-+ (void)recordUseOfVariableNamed:(NSString *)name
-                       inContext:(iTermVariablesSuggestionContext)context {
-    NSMutableSet<NSString *> *names = [self mutableRecordedVariableNamesInContext:context];
-    if (![names containsObject:name]) {
-        DLog(@"Record %@ in context %@", name, [self stringForContext:context]);
-        [names addObject:name];
-        [self synchronizeRecordedNames];
-    }
-}
 
 - (instancetype)initWithContext:(iTermVariablesSuggestionContext)context owner:(nonnull id)owner {
     self = [super init];
@@ -282,7 +98,7 @@ NSString *const iTermVariableKeyWindowCurrentTab = @"currentTab";
 
         static dispatch_once_t onceToken;
         dispatch_once(&onceToken, ^{
-            [iTermVariables recordBuiltInVariables];
+            [iTermVariableHistory recordBuiltInVariables];
         });
     }
     return self;
@@ -324,6 +140,10 @@ NSString *const iTermVariableKeyWindowCurrentTab = @"currentTab";
 
 - (id)discouragedValueForVariableName:(NSString *)name {
     return [self valueForVariableName:name];
+}
+
+- (id)rawValueForVariableName:(NSString *)name {
+    return _values[name];
 }
 
 - (id)valueByUnwrappingWeakVariables:(id)value {
@@ -401,6 +221,10 @@ NSString *const iTermVariableKeyWindowCurrentTab = @"currentTab";
                          path:(NSString *)path {
     [self removeWeakReferenceFromLinkTable:_resolvedLinks toObject:reference forKey:path];
     [self removeWeakReferenceFromLinkTable:_unresolvedLinks toObject:reference forKey:path];
+}
+
+- (NSArray<NSString *> *)allNames {
+    return _values.allKeys;
 }
 
 #pragma mark - Private
@@ -503,11 +327,13 @@ NSString *const iTermVariableKeyWindowCurrentTab = @"currentTab";
             } else {
                 _values[name] = value;
             }
+            DLog(@"Assigned %@ = %@ for %@", name, value, self);
             [self didChangeNonterminalValueWithPath:name];
         } else {
             DLog(@"Set variable %@ = %@ (%@)", name, value, self);
             const BOOL wasVariables = [[self valueByUnwrappingWeakVariables:_values[name]] isKindOfClass:[iTermVariables class]];
             _values[name] = [value copy];
+            DLog(@"Assigned %@ = %@ for %@", name, value, self);
             if (wasVariables) {
                 [self didChangeNonterminalValueWithPath:name];
             } else {
@@ -516,6 +342,7 @@ NSString *const iTermVariableKeyWindowCurrentTab = @"currentTab";
         }
     } else {
         DLog(@"Unset variable %@ (%@)", name, self);
+        DLog(@"Assigned %@ = %@ for %@", name, nil, self);
         const BOOL wasVariables = [[self valueByUnwrappingWeakVariables:_values[name]] isKindOfClass:[iTermVariables class]];
         [_values removeObjectForKey:name];
         if (wasVariables) {
@@ -525,6 +352,10 @@ NSString *const iTermVariableKeyWindowCurrentTab = @"currentTab";
         }
     }
 
+    if ([value isKindOfClass:[iTermVariables class]] || [value isKindOfClass:[iTermWeakVariables class]]) {
+        // Don't record the use of nonterminals.
+        return self;
+    }
     [self didReferenceVariables:@[ [iTermTriple tripleWithObject:@1 andObject:self object:name] ]];
     return self;
 }
@@ -580,17 +411,39 @@ NSString *const iTermVariableKeyWindowCurrentTab = @"currentTab";
     }];
 }
 
-- (void)recordUseOfVariables:(NSSet<NSString *> *)names {
++ (NSSet<NSString *> *)namesToRecordFromSet:(NSSet<NSString *> *)names inContext:(iTermVariablesSuggestionContext)context {
+    static NSMutableDictionary<NSNumber *, NSMutableSet *> *seen;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        seen = [NSMutableDictionary dictionary];
+        seen[@(iTermVariablesSuggestionContextSession)] = [NSMutableSet set];
+        seen[@(iTermVariablesSuggestionContextTab)] = [NSMutableSet set];
+        seen[@(iTermVariablesSuggestionContextWindow)] = [NSMutableSet set];
+        seen[@(iTermVariablesSuggestionContextApp)] = [NSMutableSet set];
+    });
+    NSMutableSet *set = seen[@(context)];
+    ITAssertWithMessage(set, @"Bogus context %@", @(context));
+    NSMutableSet<NSString *> *result = [names mutableCopy];
+    [result minusSet:set];
+    [set unionSet:result];
+    return result;
+}
+
+- (void)recordUseOfVariables:(NSSet<NSString *> *)allNames {
     if (_context != iTermVariablesSuggestionContextNone) {
+        NSSet<NSString *> *names = [iTermVariables namesToRecordFromSet:allNames inContext:_context];
+        if (names.count == 0) {
+            return;
+        }
         [names enumerateObjectsUsingBlock:^(NSString * _Nonnull name, BOOL * _Nonnull stop) {
             if (![[self valueByUnwrappingWeakVariables:self->_values[name]] isKindOfClass:[iTermVariables class]]) {
-                [iTermVariables recordUseOfVariableNamed:name inContext:self->_context];
+                [iTermVariableHistory recordUseOfVariableNamed:name inContext:self->_context];
             }
         }];
     }
 
     if (_parent && _parentName) {
-        [_parent recordUseOfVariables:[self namesByPrependingParentName:names]];
+        [_parent recordUseOfVariables:[self namesByPrependingParentName:allNames]];
     }
 }
 
@@ -664,217 +517,5 @@ NSString *const iTermVariableKeyWindowCurrentTab = @"currentTab";
 
 @end
 
-@implementation iTermVariableScope {
-    NSMutableArray<iTermTuple<NSString *, iTermVariables *> *> *_frames;
-    // References to paths without an owner. This normally only happens when a session is being
-    // shut down (e.g, tab.currentSession is assigned to nil)
-    NSPointerArray *_danglingReferences;
-}
-
-+ (instancetype)globalsScope {
-    iTermVariableScope *scope = [[iTermVariableScope alloc] init];
-    [scope addVariables:[iTermVariables globalInstance] toScopeNamed:nil];
-    return scope;
-}
-
-- (instancetype)init {
-    self = [super init];
-    if (self) {
-        _frames = [NSMutableArray array];
-        _danglingReferences = [NSPointerArray weakObjectsPointerArray];
-    }
-    return self;
-}
-
-- (void)addVariables:(iTermVariables *)variables toScopeNamed:(nullable NSString *)scopeName {
-    [_frames insertObject:[iTermTuple tupleWithObject:scopeName andObject:variables] atIndex:0];
-    [self resolveDanglingReferences];
-}
-
-- (void)enumerateVariables:(void (^)(NSString * _Nonnull, iTermVariables * _Nonnull))block {
-    [_frames enumerateObjectsUsingBlock:^(iTermTuple<NSString *,iTermVariables *> * _Nonnull obj, NSUInteger idx, BOOL * _Nonnull stop) {
-        block(obj.firstObject, obj.secondObject);
-    }];
-}
-
-- (NSDictionary<NSString *, NSString *> *)dictionaryWithStringValues {
-    NSMutableDictionary<NSString *, NSString *> *result = [NSMutableDictionary dictionary];
-    [self enumerateVariables:^(NSString * _Nonnull scopeName, iTermVariables * _Nonnull variables) {
-        [result it_mergeFrom:[variables stringValuedDictionaryInScope:scopeName]];
-    }];
-    return result;
-}
-
-- (id)valueForVariableName:(NSString *)name {
-    NSString *stripped = nil;
-    iTermVariables *owner = [self ownerForKey:name stripped:&stripped];
-    return [owner valueForVariableName:stripped];
-}
-
-- (NSString *)stringValueForVariableName:(NSString *)name {
-    NSString *stripped = nil;
-    iTermVariables *owner = [self ownerForKey:name stripped:&stripped];
-    return [owner stringValueForVariableName:name] ?: @"";
-}
-
-- (iTermVariables *)ownerForKey:(NSString *)key stripped:(out NSString **)stripped {
-    NSArray<NSString *> *parts = [key componentsSeparatedByString:@"."];
-    if (parts.count == 0) {
-        return nil;
-    }
-    if (parts.count == 1) {
-        *stripped = key;
-        return [_frames objectPassingTest:^BOOL(iTermTuple<NSString *,iTermVariables *> *element, NSUInteger index, BOOL *stop) {
-            return element.firstObject == nil;
-        }].secondObject;
-    }
-    __block NSString *strippedOut = nil;
-    iTermVariables *owner = [_frames objectPassingTest:^BOOL(iTermTuple<NSString *,iTermVariables *> *element, NSUInteger index, BOOL *stop) {
-        if (element.firstObject == nil && [element.secondObject valueForVariableName:parts[0]]) {
-            strippedOut = key;
-            return YES;
-        } else {
-            strippedOut = [[parts subarrayFromIndex:1] componentsJoinedByString:@"."];
-            return [element.firstObject isEqualToString:parts[0]];
-        }
-    }].secondObject;
-    *stripped = strippedOut;
-    return owner;
-}
-
-- (BOOL)variableNamed:(NSString *)name isReferencedBy:(iTermVariableReference *)reference {
-    NSString *tail;
-    iTermVariables *variables = [self ownerForKey:name stripped:&tail];
-    if (!variables) {
-        return NO;
-    }
-    return [variables hasLinkToReference:reference path:tail];
-}
-
-- (BOOL)setValuesFromDictionary:(NSDictionary<NSString *, id> *)dict {
-    // Transform dict from {name: object} to {owner: {stripped_name: object}}
-    NSMutableDictionary<NSValue *, NSMutableDictionary<NSString *, id> *> *valuesByOwner = [NSMutableDictionary dictionary];
-    for (NSString *key in dict) {
-        id object = dict[key];
-        NSString *stripped = nil;
-        iTermVariables *owner = [self ownerForKey:key stripped:&stripped];
-        NSValue *value = [NSValue valueWithNonretainedObject:owner];
-        NSMutableDictionary *inner = valuesByOwner[value];
-        if (!inner) {
-            inner = [NSMutableDictionary dictionary];
-            valuesByOwner[value] = inner;
-        }
-        inner[stripped] = object;
-    }
-    __block BOOL changed = NO;
-    [valuesByOwner enumerateKeysAndObjectsUsingBlock:^(NSValue * _Nonnull ownerValue, NSDictionary<NSString *,id> * _Nonnull setDict, BOOL * _Nonnull stop) {
-        iTermVariables *owner = [ownerValue nonretainedObjectValue];
-        if ([owner setValuesFromDictionary:setDict]) {
-            changed = YES;
-        }
-    }];
-    if ([dict.allValues anyWithBlock:^BOOL(id anObject) {
-        return [anObject isKindOfClass:[iTermVariables class]];
-    }]) {
-        [self resolveDanglingReferences];
-    }
-    return changed;
-}
-
-- (BOOL)setValue:(nullable id)value forVariableNamed:(NSString *)name {
-    return [self setValue:value forVariableNamed:name weak:NO];
-}
-
-- (BOOL)setValue:(nullable id)value forVariableNamed:(NSString *)name weak:(BOOL)weak {
-    NSString *stripped = nil;
-    iTermVariables *owner = [self ownerForKey:name stripped:&stripped];
-    if (!owner) {
-        return NO;
-    }
-    const BOOL result = [owner setValue:value forVariableNamed:stripped weak:weak];
-    if ([value isKindOfClass:[iTermVariables class]]) {
-        [self resolveDanglingReferences];
-    }
-    return result;
-}
-
-- (void)resolveDanglingReferences {
-    NSPointerArray *refs = _danglingReferences;
-    if (refs.count == 0) {
-        return;
-    }
-    _danglingReferences = [NSPointerArray weakObjectsPointerArray];
-    for (NSInteger i = 0; i < refs.count; i++) {
-        iTermVariableReference *ref = [refs pointerAtIndex:i];
-        if (ref) {
-            [self addLinksToReference:ref];
-            if (ref.value) {
-                [ref valueDidChange];
-            }
-        }
-    }
-}
-
-- (void)addLinksToReference:(iTermVariableReference *)reference {
-    NSString *tail;
-    iTermVariables *variables = [self ownerForKey:reference.path stripped:&tail];
-    if (!variables) {
-        [_danglingReferences addPointer:(__bridge void * _Nullable)(reference)];
-        return;
-    }
-    [variables addLinkToReference:reference path:tail];
-}
-
-- (iTermVariableRecordingScope *)recordingCopy {
-    iTermVariableRecordingScope *theCopy = [[iTermVariableRecordingScope alloc] initWithScope:self];
-    [_frames enumerateObjectsUsingBlock:^(iTermTuple<NSString *,iTermVariables *> * _Nonnull tuple, NSUInteger idx, BOOL * _Nonnull stop) {
-        [theCopy addVariables:tuple.secondObject toScopeNamed:tuple.firstObject];
-    }];
-    return theCopy;
-}
-
-- (id)copyWithZone:(nullable NSZone *)zone {
-    iTermVariableScope *theCopy = [[self.class alloc] init];
-    [_frames enumerateObjectsUsingBlock:^(iTermTuple<NSString *,iTermVariables *> * _Nonnull tuple, NSUInteger idx, BOOL * _Nonnull stop) {
-        [theCopy addVariables:tuple.secondObject toScopeNamed:tuple.firstObject];
-    }];
-    return theCopy;
-}
-
-@end
-
-@implementation iTermVariableRecordingScope {
-    NSMutableSet<NSString *> *_names;
-    iTermVariableScope *_scope;
-}
-
-- (instancetype)initWithScope:(iTermVariableScope *)scope {
-    self = [super init];
-    if (self) {
-        _scope = scope;
-    }
-    return self;
-}
-
-- (id)valueForVariableName:(NSString *)name {
-    if (!_names) {
-        _names = [NSMutableSet set];
-    }
-
-    [_names addObject:name];
-    id value = [super valueForVariableName:name];
-    if (self.neverReturnNil) {
-        return value ?: @"";
-    } else {
-        return value;
-    }
-}
-
-- (NSArray<iTermVariableReference *> *)recordedReferences {
-    return [_names.allObjects mapWithBlock:^id(NSString *path) {
-        return [[iTermVariableReference alloc] initWithPath:path scope:self->_scope];
-    }];
-}
-@end
 
 NS_ASSUME_NONNULL_END

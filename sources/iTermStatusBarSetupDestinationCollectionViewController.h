@@ -14,10 +14,12 @@
 @interface iTermStatusBarSetupDestinationCollectionViewController : NSViewController
 
 @property (nonatomic, copy) NSArray<iTermStatusBarSetupElement *> *elements;
+@property (nonatomic, strong) iTermStatusBarAdvancedConfiguration *advancedConfiguration;
 
 - (void)setLayout:(iTermStatusBarLayout *)layout;
-- (NSDictionary *)layoutDictionaryWithAdvancedConfiguration:(iTermStatusBarAdvancedConfiguration *)advancedConfiguration;
+- (NSDictionary *)layoutDictionary;
 
 - (void)deleteSelected;
+- (void)autoRainbowWithDarkBackground:(BOOL)darkBackground;
 
 @end

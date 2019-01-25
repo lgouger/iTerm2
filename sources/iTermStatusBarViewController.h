@@ -8,6 +8,7 @@
 #import <Cocoa/Cocoa.h>
 #import "iTermFindViewController.h"
 #import "iTermStatusBarComponent.h"
+#import "iTermStatusBarLayoutAlgorithm.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -21,6 +22,10 @@ extern const CGFloat iTermStatusBarHeight;
 - (NSColor *)statusBarDefaultTextColor;
 - (NSColor *)statusBarSeparatorColor;
 - (NSColor *)statusBarBackgroundColor;
+- (NSColor *)statusBarTerminalBackgroundColor;
+- (NSFont *)statusBarTerminalFont;
+- (void)statusBarWriteString:(NSString *)string;
+- (void)statusBarDidUpdate;
 @end
 
 @protocol iTermStatusBarContainer<NSObject>

@@ -9,6 +9,7 @@
 
 #import "iTermFindViewController.h"
 #import "iTermStatusBarComponentKnob.h"
+#import "iTermStatusBarLayoutAlgorithm.h"
 
 
 typedef NSString *iTermStatusBarComponentConfigurationKey NS_EXTENSIBLE_STRING_ENUM;
@@ -26,13 +27,17 @@ static NSString *const iTermStatusBarSharedTextColorKey = @"shared text color";
 - (void)statusBarComponentKnobsDidChange:(id<iTermStatusBarComponent>)component;
 - (BOOL)statusBarComponentIsInSetupUI:(id<iTermStatusBarComponent>)component;
 - (void)statusBarComponentPreferredSizeDidChange:(id<iTermStatusBarComponent>)component;
-- (void)statusBarComponent:(id<iTermStatusBarComponent>)component setHidden:(BOOL)hidden;
 - (NSColor *)statusBarComponentDefaultTextColor;
+- (BOOL)statusBarComponentIsVisible:(id<iTermStatusBarComponent>)component;
+- (NSFont *)statusBarComponentTerminalFont:(id<iTermStatusBarComponent>)component;
+- (BOOL)statusBarComponentTerminalBackgroundColorIsDark:(id<iTermStatusBarComponent>)component;
+- (void)statusBarComponent:(id<iTermStatusBarComponent>)component writeString:(NSString *)string;
 @end
 
 @protocol iTermStatusBarComponentFactory<NSCoding, NSCopying, NSObject>
 
 - (id<iTermStatusBarComponent>)newComponentWithKnobs:(NSDictionary *)knobs
+                                     layoutAlgorithm:(iTermStatusBarLayoutAlgorithmSetting)layoutAlgorithm
                                                scope:(iTermVariableScope *)scope;
 - (NSString *)componentDescription;
 - (NSDictionary *)defaultKnobs;
@@ -61,10 +66,11 @@ static NSString *const iTermStatusBarSharedTextColorKey = @"shared text color";
 - (NSString *)statusBarComponentDetailedDescription;
 
 // Value to show in setup UI
-- (id)statusBarComponentExemplar;
+- (id)statusBarComponentExemplarWithBackgroundColor:(NSColor *)backgroundColor
+                                          textColor:(NSColor *)textColor;
 
 // Returns a newly created view showing this component's content.
-- (NSView *)statusBarComponentCreateView;
+- (NSView *)statusBarComponentView;
 
 // Update the view's size.
 - (void)statusBarComponentSizeView:(NSView *)view toFitWidth:(CGFloat)width;
@@ -113,9 +119,17 @@ static NSString *const iTermStatusBarSharedTextColorKey = @"shared text color";
 
 // Update colors if needed
 - (void)statusBarDefaultTextColorDidChange;
+- (void)statusBarTerminalBackgroundColorDidChange;
 
 - (NSColor *)statusBarTextColor;
+- (NSColor *)statusBarBackgroundColor;
 
 - (void)statusBarComponentOpenPopoverWithHTML:(NSString *)html ofSize:(NSSize)size;
+
+- (void)statusBarComponentDidMoveToWindow;
+
+- (BOOL)statusBarComponentHandlesClicks;
+- (void)statusBarComponentDidClickWithView:(NSView *)view;
+- (void)statusBarComponentMouseDownWithView:(NSView *)view;
 
 @end

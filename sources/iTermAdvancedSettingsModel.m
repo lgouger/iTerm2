@@ -198,6 +198,7 @@ DEFINE_FLOAT(minimalTabStyleOutlineStrength, 0.2, SECTION_TABS @"In minimal tab 
 DEFINE_FLOAT(minimalSplitPaneDividerProminence, 0.15, SECTION_TABS @"In minimal tab style, how prominent should split pane dividers be?\nTakes a value in 0 to 1, where 0 is invisible and 1 is very prominent");
 DEFINE_FLOAT(coloredUnselectedTabTextProminence, 0.1, SECTION_TABS @"How prominent should the text in a non-selected tab be when there are colored tabs in a window?\nTakes a value in 0 to 0.5, the distance from middle gray.");
 DEFINE_FLOAT(compactMinimalTabBarHeight, 40, SECTION_TABS @"Tab bar height (points) for compact windows with minimal theme.");
+DEFINE_FLOAT(defaultTabBarHeight, 24, SECTION_TABS @"Default tab bar height")
 
 #pragma mark Mouse
 
@@ -311,6 +312,8 @@ DEFINE_STRING(fallbackLCCType, @"", SECTION_GENERAL @"Value to set LC_CTYPE to i
 // See issue 6994
 DEFINE_BOOL(useVirtualKeyCodesForDetectingDigits, NO, SECTION_GENERAL @"Treat the top row of keys like number keys on an English keyboard for the purposes of switching panes, tabs, and windows with modifier+number.\nFor example, AZERTY requires you to hold down Shift to enter a number. To switch tabs with ⌘+Number on an AZERTY keyboard, you must enable this setting. Then, for example, ⌘-& switches to tab 1. When this setting is enabled, some user-defined shortcuts may become unavailable because the tab/window/pane switching behavior takes precedence.");
 DEFINE_BOOL(hotkeyWindowsExcludedFromCycling, NO, SECTION_GENERAL @"Hotkey windows are excluded from Cycle Through Windows.");
+DEFINE_BOOL(swapFindNextPrevious, YES, SECTION_GENERAL @"Swap Find Next and Find Previous.\nIf enabled, Find Next will search up and Find Previous will search down (iTerm2's traditional behavior, which is a departure from macOS's standard). When disabled, search behaves like a normal macOS app.");
+DEFINE_BOOL(pinEditSession, NO, SECTION_GENERAL @"Pin Edit Session window to the session it originally edited.\nIf not set, it will affect the most recently active session.");
 
 #pragma mark - Drawing
 
@@ -330,6 +333,7 @@ DEFINE_BOOL(drawOutlineAroundCursor, NO, SECTION_DRAWING @"Draw outline around u
 DEFINE_BOOL(disableCustomBoxDrawing, NO, SECTION_DRAWING @"Use your typeface’s box-drawing characters instead of iTerm2’s custom drawing code.\nYou must restart iTerm2 after changing this setting.");
 DEFINE_INT(minimumWeightDifferenceForBoldFont, 4, SECTION_DRAWING @"Minimum weight difference between regular and bold font.\nThis affects selection of the bold version of a font. Font weights go from 0 to 9. If no font can be found that has a high enough weight then the regular font will be double-struck with a small offset.");
 DEFINE_FLOAT(underlineCursorHeight, 2, SECTION_DRAWING @"Thickness of underline cursor.");
+DEFINE_BOOL(preferSpeedToFullLigatureSupport, YES, SECTION_DRAWING @"Improves drawing performance at the expense of disallowing alphanumeric characters to belong to ligatures.");
 
 #if ENABLE_LOW_POWER_GPU_DETECTION
 DEFINE_BOOL(useLowPowerGPUWhenUnplugged, NO, SECTION_DRAWING @"Metal renderer uses integrated GPU when not connected to power?\nFor this to be effective you must disable “Disable Metal renderer when not connected to power”.");
@@ -465,8 +469,8 @@ DEFINE_STRING(badgeFont, @"Helvetica", SECTION_BADGE @"Font to use for the badge
 DEFINE_BOOL(badgeFontIsBold, YES, SECTION_BADGE @"Should the badge render in bold type?");
 DEFINE_FLOAT(badgeMaxWidthFraction, 0.5, SECTION_BADGE @"Maximum width of the badge\nAs a fraction of the width of the terminal, between 0 and 1.0.");
 DEFINE_FLOAT(badgeMaxHeightFraction, 0.2, SECTION_BADGE @"Maximum height of the badge\nAs a fraction of the height of the terminal, between 0 and 1.0.");
-DEFINE_INT(badgeRightMargin, 10, SECTION_BADGE @"Right Margin for the badge\nHow much space to leave between the right edge of the badge and the right edge of the terminal.");
-DEFINE_INT(badgeTopMargin, 10, SECTION_BADGE @"Top Margin for the badge\nHow much space to leave between the top edge of the badge and the top edge of the terminal.");
+DEFINE_INT(badgeRightMargin, 10, SECTION_BADGE @"Default value for right margin for the badge\nHow much space to leave between the right edge of the badge and the right edge of the terminal. Can be overridden by a profile setting.");
+DEFINE_INT(badgeTopMargin, 10, SECTION_BADGE @"Default value for the top margin for the badge\nHow much space to leave between the top edge of the badge and the top edge of the terminal. Can be overridden by a profile setting.");
 
 #pragma mark - Experimental Features
 

@@ -13,7 +13,7 @@
 #import "iTermPromptOnCloseReason.h"
 #import "iTermProfilePreferences.h"
 #import "iTermSwiftyString.h"
-#import "iTermVariables.h"
+#import "iTermVariableScope.h"
 #import "MovePaneController.h"
 #import "NSAppearance+iTerm.h"
 #import "NSArray+iTerm.h"
@@ -378,6 +378,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     _userVariables = [[iTermVariables alloc] initWithContext:iTermVariablesSuggestionContextTab
                                                        owner:self];
     [self.variablesScope setValue:_userVariables forVariableNamed:@"user"];
+    [self.variablesScope setValue:[iTermVariables globalInstance] forVariableNamed:iTermVariableKeyGlobalScopeName];
 
     self.tmuxWindow = -1;
     _sessionsWithDeferredFontChanges = [[NSMutableArray alloc] init];
@@ -446,17 +447,30 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 
 #pragma mark - Everything else
 
+- (BOOL)useSeparateStatusbarsPerPane {
+    if (![iTermPreferences boolForKey:kPreferenceKeySeparateStatusBarsPerPane]) {
+        return NO;
+    }
+    if (self.tmuxTab) {
+        return NO;
+    }
+    return YES;
+}
+
 - (BOOL)updatePaneTitles {
     BOOL anyChange = NO;
     const BOOL showTitles = [iTermPreferences boolForKey:kPreferenceKeyShowPaneTitles];
     NSArray *sessions = [self sessions];
-    const BOOL statusBarsOnTop = ([iTermPreferences unsignedIntegerForKey:kPreferenceKeyStatusBarPosition] == iTermStatusBarPositionTop);
+    const BOOL perPaneStatusBars = [self useSeparateStatusbarsPerPane];
+    const BOOL statusBarsOnTop = (([iTermPreferences unsignedIntegerForKey:kPreferenceKeyStatusBarPosition] == iTermStatusBarPositionTop) &&
+                                  perPaneStatusBars);
     const BOOL anySessionHasTopStatusBar = statusBarsOnTop && [sessions anyWithBlock:^BOOL(PTYSession *session) {
         return [iTermProfilePreferences boolForKey:KEY_SHOW_STATUS_BAR inProfile:session.profile];
     }];
     const BOOL shouldShowTitles = (showTitles && [sessions count] > 1) || anySessionHasTopStatusBar;
     for (PTYSession *aSession in sessions) {
-        const BOOL shouldShowBottomStatusBar = (!statusBarsOnTop &&
+        const BOOL shouldShowBottomStatusBar = (perPaneStatusBars &&
+                                                !statusBarsOnTop &&
                                                 [iTermProfilePreferences boolForKey:KEY_SHOW_STATUS_BAR
                                                                           inProfile:aSession.profile]);
         const BOOL changedTitle = [[aSession view] setShowTitle:shouldShowTitles
@@ -745,6 +759,24 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
             PTYSession *session2 = obj2;
             return [session1.activityCounter compare:session2.activityCounter];
         }];
+    }
+}
+
+- (void)setActiveSessionPreservingMaximization:(PTYSession *)session {
+    DLog(@"%@", session);
+    BOOL maximize = NO;
+    if (isMaximized_ && self.activeSession.isTmuxClient) {
+        DLog(@"Set maximize to YES");
+        maximize = YES;
+        [self.activeSession toggleTmuxZoom];
+    }
+    if (isMaximized_) {
+        [root_ replaceSubview:[[root_ subviews] objectAtIndex:0]
+                         with:[session view]];
+    }
+    [self setActiveSession:session updateActivityCounter:NO];
+    if (maximize) {
+        [self.activeSession toggleTmuxZoom];
     }
 }
 
@@ -3058,18 +3090,12 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     const BOOL perPaneTitleBarEnabled = [iTermPreferences boolForKey:kPreferenceKeyShowPaneTitles];
     // TODO: I'm not sure why zoomed is taken into account here but not in
     // other places like this that decide if titles should be shown.
-    const BOOL sessionHasStatusBar = [iTermProfilePreferences boolForKey:KEY_SHOW_STATUS_BAR inProfile:profile];
-    const BOOL statusBarsOnTop = ([iTermPreferences unsignedIntegerForKey:kPreferenceKeyStatusBarPosition] == iTermStatusBarPositionTop);
-    BOOL showTitles = perPaneTitleBarEnabled && (zoomed || haveMultipleSessions);
-    if (sessionHasStatusBar && statusBarsOnTop) {
-        showTitles = YES;
-    }
-    const BOOL showBottomStatusBar = (sessionHasStatusBar && !statusBarsOnTop);
-    
+    const BOOL showTitles = perPaneTitleBarEnabled && (zoomed || haveMultipleSessions);
+
     // Begin by decorating the tree with pixel sizes.
     [PTYTab _recursiveSetSizesInTmuxParseTree:parseTree
                                    showTitles:showTitles
-                          showBottomStatusBar:showBottomStatusBar
+                          showBottomStatusBar:NO
                                      bookmark:profile
                                    inTerminal:term];
 }
@@ -3128,25 +3154,14 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 
     NSArray *theChildren = [parseTree objectForKey:kLayoutDictChildrenKey];
     BOOL haveMultipleSessions = ([theChildren count] > 1);
-    const BOOL statusBarsOnTop = ([iTermPreferences unsignedIntegerForKey:kPreferenceKeyStatusBarPosition] == iTermStatusBarPositionTop);
-    const BOOL shouldShowStatusBar = [iTermProfilePreferences boolForKey:KEY_SHOW_STATUS_BAR inProfile:tmuxController.profile];
     const BOOL titlesEnabled = [iTermPreferences boolForKey:kPreferenceKeyShowPaneTitles];
-    const BOOL shouldShowTitles = ((titlesEnabled && haveMultipleSessions) ||
-                                   (shouldShowStatusBar && statusBarsOnTop));
+    const BOOL shouldShowTitles = (titlesEnabled && haveMultipleSessions);
     if (shouldShowTitles) {
         // Set the showTitle flag so recompact does not make the views too small.
         for (PTYSession *aSession in [theTab sessions]) {
             [aSession.view setShowTitle:YES adjustScrollView:NO];
         }
     }
-
-    const BOOL shouldShowBottomStatusBars = !statusBarsOnTop && shouldShowStatusBar;
-    if (shouldShowBottomStatusBars) {
-        for (PTYSession *aSession in [theTab sessions]) {
-            [aSession.view setShowBottomStatusBar:YES adjustScrollView:NO];
-        }
-    }
-    
 
     theTab.tmuxWindow = tmuxWindow;
     theTab->parseTree_ = parseTree;
@@ -3551,14 +3566,10 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
         }
     }
 
-    const BOOL statusBarEnabled = [iTermProfilePreferences boolForKey:KEY_SHOW_STATUS_BAR inProfile:self.tmuxController.profile];
-    const BOOL statusBarsOnTop = ([iTermPreferences unsignedIntegerForKey:kPreferenceKeyStatusBarPosition] == iTermStatusBarPositionTop);
     const BOOL perPaneTitleBarEnabled = [iTermPreferences boolForKey:kPreferenceKeyShowPaneTitles];
     const BOOL haveMultipleSessions = self.sessions.count > 1;
-    const BOOL showTitles = ((perPaneTitleBarEnabled && haveMultipleSessions) ||
-                             (statusBarEnabled && statusBarsOnTop));
-    const BOOL showBottomStatusBars = (statusBarEnabled && !statusBarsOnTop);
-    
+    const BOOL showTitles = (perPaneTitleBarEnabled && haveMultipleSessions);
+
     for (PTYSession *aSession in [self sessions]) {
         NSNumber *n = [NSNumber numberWithInt:[aSession tmuxPane]];
         if (![preexistingPanes containsObject:n]) {
@@ -3569,7 +3580,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
             [aSession setTmuxController:tmuxController_];
         }
         [aSession.view setShowTitle:showTitles adjustScrollView:NO];
-        [aSession.view setShowBottomStatusBar:showBottomStatusBars adjustScrollView:NO];
+        [aSession.view setShowBottomStatusBar:NO adjustScrollView:NO];
     }
     [self fitSubviewsToRoot];
     [self numberOfSessionsDidChange];
@@ -3749,14 +3760,11 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 - (void)resizeMaximizedTmuxSessionView:(SessionView *)sessionView toGridSize:(VT100GridSize)gridSize {
     DLog(@"resize view %@ to grid size %@", sessionView, VT100GridSizeDescription(gridSize));
     const BOOL perPanelTitleBarsEnabled = [iTermPreferences boolForKey:kPreferenceKeyShowPaneTitles];
-    const BOOL sessionHasStatusBar = [iTermProfilePreferences boolForKey:KEY_SHOW_STATUS_BAR inProfile:self.tmuxController.profile];
-    const BOOL statusBarsOnTop = ([iTermPreferences unsignedIntegerForKey:kPreferenceKeyStatusBarPosition] == iTermStatusBarPositionTop);
-    const BOOL showTitles = (perPanelTitleBarsEnabled || (sessionHasStatusBar && statusBarsOnTop));
-    const BOOL showBottomStatusBar = (sessionHasStatusBar && !statusBarsOnTop);
+    const BOOL showTitles = perPanelTitleBarsEnabled;
     NSSize size = [PTYTab _sessionSizeWithCellSize:[PTYTab cellSizeForBookmark:self.tmuxController.profile]
                                         dimensions:NSMakeSize(gridSize.width, gridSize.height)
                                         showTitles:showTitles
-                               showBottomStatusBar:showBottomStatusBar
+                               showBottomStatusBar:NO
                                         inTerminal:self.realParentWindow];
     NSRect frame = {
         .origin = sessionView.frame.origin,
@@ -4068,7 +4076,6 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 - (iTermVariableScope *)variablesScope {
     iTermVariableScope *scope = [[iTermVariableScope alloc] init];
     [scope addVariables:_variables toScopeNamed:nil];
-    [scope addVariables:[iTermVariables globalInstance] toScopeNamed:iTermVariableKeyGlobalScopeName];
     return scope;
 }
 
@@ -5012,7 +5019,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     const BOOL powerOK = [[iTermPowerManager sharedInstance] metalAllowed];
     __block iTermMetalUnavailableReason sessionReason = iTermMetalUnavailableReasonNone;
     NSArray<PTYSession *> *nonHiddenSessions = [self.sessions filteredArrayUsingBlock:^BOOL(PTYSession *session) {
-        if (!isMaximized_) {
+        if (!self->isMaximized_) {
             // Invisible sessions in a maximized tab aren't in the view hierarchy and so will always
             // say Metal is disallowed.
             return YES;
@@ -5082,7 +5089,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
         }
     }
     [self.sessions enumerateObjectsUsingBlock:^(PTYSession * _Nonnull obj, NSUInteger idx, BOOL * _Nonnull stop) {
-        if (isMaximized_) {
+        if (self->isMaximized_) {
             obj.useMetal = useMetal && (obj == self.activeSession);
             return;
         }
@@ -5267,15 +5274,19 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     }
 }
 
+- (PTYSession *)sessionWithGUID:(NSString *)guid {
+    return [self.sessions objectPassingTest:^BOOL(PTYSession *session, NSUInteger index, BOOL *stop) {
+        return [session.guid isEqualToString:guid];
+    }];
+}
+
 - (NSView *)sessionContainerView:(PTYSession *)session {
     return root_;
 }
 
 - (void)sessionDraggingExited:(PTYSession *)session {
     if (_temporarilyUnmaximizedSessionGUID) {
-        PTYSession *session = [self.sessions objectPassingTest:^BOOL(PTYSession *session, NSUInteger index, BOOL *stop) {
-            return [session.guid isEqualToString:self->_temporarilyUnmaximizedSessionGUID];
-        }];
+        PTYSession *session = [self sessionWithGUID:_temporarilyUnmaximizedSessionGUID];
         if (session && !self.hasMaximizedPane) {
             [self setActiveSession:session];
             [self maximize];
@@ -5288,6 +5299,16 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     if (self.hasMaximizedPane) {
         _temporarilyUnmaximizedSessionGUID = [[session guid] copy];
         [self unmaximize];
+    }
+}
+
+- (BOOL)sessionShouldSendWindowSizeIOCTL:(PTYSession *)session {
+    return _temporarilyUnmaximizedSessionGUID == nil;
+}
+
+- (void)sessionDidInvalidateStatusBar:(PTYSession *)session {
+    if (session == self.activeSession) {
+        [_delegate tabDidInvalidateStatusBar:self];
     }
 }
 

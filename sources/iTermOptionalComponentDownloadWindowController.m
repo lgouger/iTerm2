@@ -311,8 +311,8 @@ didCompleteWithError:(nullable NSError *)error {
         _progressLabel.stringValue = @"Canceled";
         _titleLabel.stringValue = @"";
     } else {
-        _progressLabel.stringValue = @"";
-        _titleLabel.stringValue = error.localizedDescription;
+        _progressLabel.stringValue = error.localizedDescription;
+        _titleLabel.stringValue = @"Download Failed";
     }
     _progressIndicator.doubleValue = 0;
     iTermOptionalComponentDownloadPhase *phase = _currentPhase;
@@ -335,8 +335,9 @@ didCompleteWithError:(nullable NSError *)error {
             self.completion(phase);
         }
     } else {
+        _titleLabel.stringValue = @"Download Finished";
         _button.enabled = NO;
-        _progressLabel.stringValue = @"Finished";
+        _progressLabel.stringValue = @"Installing…";
         iTermOptionalComponentDownloadPhase *phase = _currentPhase;
         _currentPhase = nil;
         self.completion(phase);

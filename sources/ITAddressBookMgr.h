@@ -65,6 +65,11 @@
 #define KEY_ASK_ABOUT_OUTDATED_KEYMAPS  @"Ask About Outdated Keymaps"
 #define KEY_TITLE_COMPONENTS            @"Title Components"
 #define KEY_TITLE_FUNC                  @"Title Function"  // Value is iTermTuple.plistValue of (display name, unique identifier); e.g. ("Hello world", "com.iterm2.example.title-provider")
+#define KEY_BADGE_TOP_MARGIN            @"Badge Top Margin"
+#define KEY_BADGE_RIGHT_MARGIN          @"Badge Right Margin"
+#define KEY_BADGE_MAX_WIDTH             @"Badge Max Width"
+#define KEY_BADGE_MAX_HEIGHT            @"Badge Max Height"
+#define KEY_BADGE_FONT                  @"Badge Font"
 
 // Advanced working directory settings
 #define KEY_AWDS_WIN_OPTION             @"AWDS Window Option"
@@ -222,6 +227,7 @@
 #define KEY_HOTKEY_ACTIVATE_WITH_MODIFIER     @"HotKey Activated By Modifier"
 #define KEY_HOTKEY_MODIFIER_ACTIVATION        @"HotKey Modifier Activation"
 #define KEY_HOTKEY_ALTERNATE_SHORTCUTS        @"HotKey Alternate Shortcuts"
+#define KEY_USE_LIBTICKIT_PROTOCOL            @"Use libtickit protocol"
 
 // Advanced
 #define KEY_TRIGGERS                         @"Triggers"  // NSArray of NSDictionary
@@ -246,6 +252,12 @@ extern const NSTimeInterval kMinimumAntiIdlePeriod;
 typedef NS_ENUM(NSInteger, iTermProfileSpaceSetting) {
     iTermProfileJoinsAllSpaces = -1,
     iTermProfileOpenInCurrentSpace = 0
+};
+
+typedef NS_ENUM(int, iTermOptionKeyBehavior) {
+    OPT_NORMAL = 0,
+    OPT_META = 1,
+    OPT_ESC = 2
 };
 
 // The numerical values for each enum matter because they are used in
@@ -274,7 +286,8 @@ typedef enum {
     WINDOW_TYPE_RIGHT_PARTIAL = 11,
 
     WINDOW_TYPE_NO_TITLE_BAR = 12,
-    WINDOW_TYPE_COMPACT = 13
+    WINDOW_TYPE_COMPACT = 13,
+    WINDOW_TYPE_ACCESSORY = 14
 } iTermWindowType;
 
 typedef NS_ENUM(NSInteger, iTermObjectType) {

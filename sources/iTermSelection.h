@@ -64,7 +64,8 @@ typedef NS_ENUM(NSInteger, iTermSelectionMode) {
 @property(nonatomic, assign) BOOL connected;  // If connected, no newline occurs before the next sub
 
 + (instancetype)subSelectionWithRange:(VT100GridWindowedRange)range
-                                 mode:(iTermSelectionMode)mode;
+                                 mode:(iTermSelectionMode)mode
+                                width:(int)width;
 - (BOOL)containsCoord:(VT100GridCoord)coord;
 
 @end
@@ -136,7 +137,7 @@ typedef NS_ENUM(NSInteger, iTermSelectionMode) {
 - (void)beginExtendingSelectionAt:(VT100GridCoord)coord;
 
 // During live selection, adjust the endpoint.
-- (void)moveSelectionEndpointTo:(VT100GridCoord)coord;
+- (BOOL)moveSelectionEndpointTo:(VT100GridCoord)coord;
 
 // End live selection.
 - (void)endLiveSelection;
@@ -175,7 +176,7 @@ typedef NS_ENUM(NSInteger, iTermSelectionMode) {
 - (NSIndexSet *)selectedIndexesIncludingTabFillersInLine:(int)y;
 
 // Load selection from serialized dict
-- (void)setFromDictionaryValue:(NSDictionary *)dict;
+- (void)setFromDictionaryValue:(NSDictionary *)dict width:(int)width;
 
 // Serialized.
 - (NSDictionary *)dictionaryValueWithYOffset:(int)yOffset;

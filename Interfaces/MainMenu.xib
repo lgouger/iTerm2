@@ -27,11 +27,6 @@
                                     <action selector="showTipOfTheDay:" target="201" id="mc2-ec-uGY"/>
                                 </connections>
                             </menuItem>
-                            <menuItem title="Check for Incompatible Software" identifier="Check for Incompatible Software" id="SsR-0r-ksL">
-                                <connections>
-                                    <action selector="checkForIncompatibleSoftware:" target="201" id="0ur-zZ-jKd"/>
-                                </connections>
-                            </menuItem>
                             <menuItem isSeparatorItem="YES" id="Dxk-DH-qzi">
                                 <modifierMask key="keyEquivalentModifierMask" command="YES"/>
                             </menuItem>
@@ -39,6 +34,9 @@
                                 <connections>
                                     <action selector="checkForUpdatesFromMenu:" target="201" id="vmh-LD-TwW"/>
                                 </connections>
+                            </menuItem>
+                            <menuItem isSeparatorItem="YES" id="Dpc-y9-dq3">
+                                <modifierMask key="keyEquivalentModifierMask" command="YES"/>
                             </menuItem>
                             <menuItem title="Toggle Debug Logging" enabled="NO" identifier="Toggle Debug Logging" id="950">
                                 <modifierMask key="keyEquivalentModifierMask"/>
@@ -49,6 +47,14 @@
                             <menuItem title="Copy Performance Stats" identifier="Copy Performance Stats" id="cYu-lQ-5GD">
                                 <connections>
                                     <action selector="copyPerformanceStats:" target="201" id="Q9K-AS-x9Q"/>
+                                </connections>
+                            </menuItem>
+                            <menuItem title="Profile CPU Usage" identifier="Profile CPU Usage" id="BHe-4M-lqd">
+                                <string key="keyEquivalent" base64-UTF8="YES">
+CQ
+</string>
+                                <connections>
+                                    <action selector="createCPUProfile:" target="201" id="kex-OS-LzO"/>
                                 </connections>
                             </menuItem>
                             <menuItem title="Capture GPU Frame" identifier="Capture Metal Frame" id="8KO-hG-xdC">
@@ -925,6 +931,7 @@ DQ
                                                 <action selector="newPythonScript:" target="201" id="v2b-iE-k7t"/>
                                             </connections>
                                         </menuItem>
+                                        <menuItem isSeparatorItem="YES" id="2O5-I1-S86"/>
                                         <menuItem title="Open Python REPL" identifier="Open Interactive Window" id="jXH-0I-Wtc">
                                             <modifierMask key="keyEquivalentModifierMask"/>
                                             <connections>
@@ -932,10 +939,16 @@ DQ
                                             </connections>
                                         </menuItem>
                                         <menuItem isSeparatorItem="YES" id="iQa-T4-8Bh"/>
-                                        <menuItem title="Install Python Runtime" identifier="Install Python Runtime" id="wHh-8e-oU2">
+                                        <menuItem title="Manage Dependencies…" identifier="Manage Dependencies" id="wHh-8e-oU2">
                                             <modifierMask key="keyEquivalentModifierMask"/>
                                             <connections>
-                                                <action selector="installPythonRuntime:" target="201" id="r4H-5W-hCN"/>
+                                                <action selector="openDependencyEditor:" target="201" id="4J6-lc-cWr"/>
+                                            </connections>
+                                        </menuItem>
+                                        <menuItem title="Install Python Runtime" identifier="Install Python Runtime" id="0D0-tt-wlA">
+                                            <modifierMask key="keyEquivalentModifierMask"/>
+                                            <connections>
+                                                <action selector="installPythonRuntime:" target="201" id="uxc-3n-hZc"/>
                                             </connections>
                                         </menuItem>
                                         <menuItem title="Reveal Scripts in Finder" identifier="Reveal in Finder" id="eeH-ly-45H">
@@ -1288,7 +1301,7 @@ DQ
         <customObject id="201" userLabel="iTermApplicationDelegate" customClass="iTermApplicationDelegate">
             <connections>
                 <outlet property="_buriedSessions" destination="PTu-aD-qbz" id="Fl9-Gn-jv2"/>
-                <outlet property="_installPythonRuntime" destination="wHh-8e-oU2" id="qv8-po-q7I"/>
+                <outlet property="_installPythonRuntime" destination="0D0-tt-wlA" id="nad-Fp-mh8"/>
                 <outlet property="_scriptsMenu" destination="CZD-7u-bch" id="2Q5-aI-74T"/>
                 <outlet property="_showTipOfTheDay" destination="ft3-BP-igZ" id="WZt-qp-iuC"/>
                 <outlet property="bookmarkMenu" destination="592" id="874"/>

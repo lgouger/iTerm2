@@ -8,10 +8,12 @@
 #import "iTermStatusBarComposerComponent.h"
 
 #import "iTermController.h"
+#import "iTermPreferences.h"
 #import "iTermShellHistoryController.h"
 #import "iTermsStatusBarComposerViewController.h"
-#import "iTermVariables.h"
+#import "iTermVariableScope.h"
 #import "NSArray+iTerm.h"
+#import "NSDictionary+iTerm.h"
 #import "NSImage+iTerm.h"
 #import "PTYSession.h"
 
@@ -20,6 +22,23 @@
 
 @implementation iTermStatusBarComposerComponent {
     iTermsStatusBarComposerViewController *_viewController;
+}
+
+- (NSArray<iTermStatusBarComponentKnob *> *)statusBarComponentKnobs {
+    iTermStatusBarComponentKnob *textColorKnob =
+    [[iTermStatusBarComponentKnob alloc] initWithLabelText:@"Icon Color:"
+                                                      type:iTermStatusBarComponentKnobTypeColor
+                                               placeholder:nil
+                                              defaultValue:nil
+                                                       key:iTermStatusBarSharedTextColorKey];
+    iTermStatusBarComponentKnob *backgroundColorKnob =
+    [[iTermStatusBarComponentKnob alloc] initWithLabelText:@"Background Color:"
+                                                      type:iTermStatusBarComponentKnobTypeColor
+                                               placeholder:nil
+                                              defaultValue:nil
+                                                       key:iTermStatusBarSharedBackgroundColorKey];
+
+    return [@[ textColorKnob, backgroundColorKnob ] arrayByAddingObjectsFromArray:[super statusBarComponentKnobs]];
 }
 
 - (CGFloat)statusBarComponentPreferredWidth {
@@ -44,8 +63,9 @@
     return @"Adds a text field for composing command lines.";
 }
 
-- (id)statusBarComponentExemplar {
-    return @"ls -l -R";
+- (id)statusBarComponentExemplarWithBackgroundColor:(NSColor *)backgroundColor
+                                          textColor:(NSColor *)textColor {
+    return @">_ [Command] 💬";
 }
 
 - (iTermsStatusBarComposerViewController *)viewController {
@@ -79,8 +99,35 @@
     return [NSImage it_imageNamed:@"StatusBarIconComposer" forClass:[self class]];
 }
 
-- (NSView *)statusBarComponentCreateView {
+- (NSView *)statusBarComponentView {
+    [self updateForTerminalBackgroundColor];
     return self.viewController.view;
+}
+
+- (void)statusBarTerminalBackgroundColorDidChange {
+    [self updateForTerminalBackgroundColor];
+}
+
+- (void)updateForTerminalBackgroundColor {
+    NSView *view = self.viewController.view;
+    const iTermPreferencesTabStyle tabStyle = [iTermPreferences intForKey:kPreferenceKeyTabStyle];
+    if (@available(macOS 10.14, *)) {
+        if (tabStyle == TAB_STYLE_MINIMAL &&
+            [self.delegate statusBarComponentTerminalBackgroundColorIsDark:self]) {
+            view.appearance = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
+        } else {
+            view.appearance = [NSAppearance appearanceNamed:NSAppearanceNameAqua];
+        }
+    }
+}
+
+- (NSColor *)statusBarTextColor {
+    NSDictionary *knobValues = self.configuration[iTermStatusBarComponentConfigurationKeyKnobValues];
+    return [knobValues[iTermStatusBarSharedTextColorKey] colorValue] ?: ([self defaultTextColor] ?: [self.delegate statusBarComponentDefaultTextColor]);
+}
+
+- (void)statusBarDefaultTextColorDidChange {
+    _viewController.tintColor = [self statusBarTextColor];
 }
 
 #pragma mark - iTermsStatusBarComposerViewControllerDelegate
@@ -95,6 +142,14 @@
         return anObject.command;
     }] reverseObjectEnumerator] allObjects];
     return commands;
+}
+
+- (NSFont *)statusBarComposerFont:(iTermsStatusBarComposerViewController *)composer {
+    return [self.delegate statusBarComponentTerminalFont:self];
+}
+
+- (BOOL)statusBarComposerShouldForceDarkAppearance:(iTermsStatusBarComposerViewController *)composer {
+    return [self.delegate statusBarComponentTerminalBackgroundColorIsDark:self];
 }
 
 #pragma mark - Notifications

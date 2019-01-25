@@ -36,8 +36,10 @@
 #import "iTermAppHotKeyProvider.h"
 #import "iTermAdvancedSettingsModel.h"
 #import "iTermBuriedSessions.h"
+#import "iTermCPUProfilerUI.h"
 #import "iTermColorPresets.h"
 #import "iTermController.h"
+#import "iTermDependencyEditorWindowController.h"
 #import "iTermDisclosableView.h"
 #import "iTermExpose.h"
 #import "iTermFileDescriptorSocketPath.h"
@@ -47,12 +49,14 @@
 #import "iTermHotKeyController.h"
 #import "iTermHotKeyProfileBindingController.h"
 #import "iTermIntegerNumberFormatter.h"
+#import "iTermLaunchExperienceController.h"
 #import "iTermLaunchServices.h"
 #import "iTermLocalHostNameGuesser.h"
 #import "iTermLSOF.h"
 #import "iTermMenuBarObserver.h"
 #import "iTermMigrationHelper.h"
 #import "iTermModifierRemapper.h"
+#import "iTermOnboardingWindowController.h"
 #import "iTermPreferences.h"
 #import "iTermPythonRuntimeDownloader.h"
 #import "iTermScriptImporter.h"
@@ -79,7 +83,7 @@
 #import "iTermTipWindowController.h"
 #import "iTermToolbeltView.h"
 #import "iTermURLStore.h"
-#import "iTermVariables.h"
+#import "iTermVariableScope.h"
 #import "iTermWarning.h"
 #import "iTermWebSocketCookieJar.h"
 #import "MovePaneController.h"
@@ -94,7 +98,6 @@
 #import "NSUserDefaults+iTerm.h"
 #import "NSWindow+iTerm.h"
 #import "NSView+RecursiveDescription.h"
-#import "PFMoveApplication.h"
 #import "PreferencePanel.h"
 #import "PseudoTerminal.h"
 #import "PseudoTerminalRestorer.h"
@@ -133,7 +136,7 @@ static NSString *const kHotkeyWindowRestorableState = @"kHotkeyWindowRestorableS
 static NSString *const kHotkeyWindowsRestorableStates = @"kHotkeyWindowsRestorableState";  // deprecated
 static NSString *const iTermBuriedSessionState = @"iTermBuriedSessionState";
 
-static NSString *const kHaveWarnedAboutIncompatibleSoftware = @"NoSyncHaveWarnedAboutIncompatibleSoftware";
+static NSString *const kHaveWarnedAboutIncompatibleSoftware = @"NoSyncHaveWarnedAboutIncompatibleSoftware";  // deprecated
 
 static NSString *const kRestoreDefaultWindowArrangementShortcut = @"R";
 NSString *const iTermApplicationWillTerminate = @"iTermApplicationWillTerminate";
@@ -336,8 +339,6 @@ static BOOL hasBecomeActive = NO;
         return YES;
     } else if ([menuItem action] == @selector(makeDefaultTerminal:)) {
         return ![[iTermLaunchServices sharedInstance] iTermIsDefaultTerminal];
-    } else if ([menuItem action] == @selector(checkForIncompatibleSoftware:)) {
-        return YES;
     } else if (menuItem == maximizePane) {
         if ([[[iTermController sharedInstance] currentTerminal] inInstantReplay]) {
             // Things get too complex if you allow this. It crashes.
@@ -374,7 +375,15 @@ static BOOL hasBecomeActive = NO;
     } else if ([menuItem action] == @selector(showTipOfTheDay:)) {
         return ![[iTermTipController sharedInstance] showingTip];
     } else if ([menuItem action] == @selector(toggleSecureInput:)) {
-        menuItem.state = IsSecureEventInputEnabled() ? NSOnState : NSOffState;
+        if (IsSecureEventInputEnabled()) {
+            if (secureInputDesired_) {
+                menuItem.state = NSControlStateValueOn;
+            } else {
+                menuItem.state = NSControlStateValueMixed;
+            }
+        } else {
+            menuItem.state = secureInputDesired_ ? NSOnState : NSOffState;
+        }
         return YES;
     } else if ([menuItem action] == @selector(togglePinHotkeyWindow:)) {
         iTermProfileHotKey *profileHotkey = self.currentProfileHotkey;
@@ -1109,9 +1118,7 @@ static BOOL hasBecomeActive = NO;
     // Cleanly crash on uncaught exceptions, such as during actions.
     [[NSUserDefaults standardUserDefaults] registerDefaults:@{ @"NSApplicationCrashOnExceptions": @YES }];
 
-#if !DEBUG
-    PFMoveToApplicationsFolderIfNecessary();
-#endif
+    [iTermLaunchExperienceController applicationWillFinishLaunching];
     // Start automatic debug logging if it's enabled.
     if ([iTermAdvancedSettingsModel startDebugLoggingAutomatically]) {
         TurnOnDebugLoggingSilently();
@@ -1169,25 +1176,19 @@ static BOOL hasBecomeActive = NO;
 
 
 - (void)applicationDidFinishLaunching:(NSNotification *)aNotification {
-    [self warnAboutChangeToDefaultPasteBehavior];
+    [iTermLaunchExperienceController applicationDidFinishLaunching];
     if (IsTouchBarAvailable()) {
         if (@available(macOS 10.12.2, *)) {
             NSApp.automaticCustomizeTouchBarMenuItemEnabled = YES;
         }
     }
 
-    if ([self shouldNotifyAboutIncompatibleSoftware]) {
-        [self notifyAboutIncompatibleSoftware];
-    }
     if ([iTermAdvancedSettingsModel disableAppNap]) {
         [[NSProcessInfo processInfo] setAutomaticTerminationSupportEnabled:YES];
         [[NSProcessInfo processInfo] disableAutomaticTermination:@"User Preference"];
         _appNapStoppingActivity =
                 [[[NSProcessInfo processInfo] beginActivityWithOptions:NSActivityUserInitiatedAllowingIdleSystemSleep
                                                                 reason:@"User Preference"] retain];
-    }
-    if (@available(macOS 10.14, *)) {
-        [iTermFullDiskAccessManager maybeRequestFullDiskAccess];
     }
     [iTermFontPanel makeDefault];
 
@@ -1510,7 +1511,7 @@ static BOOL hasBecomeActive = NO;
     [[iTermController sharedInstance] setStartingUp:NO];
     [PTYSession removeAllRegisteredSessions];
 
-    [[iTermTipController sharedInstance] applicationDidFinishLaunching];
+    [iTermLaunchExperienceController performStartupActivities];
 }
 
 - (void)createVersionFile {
@@ -1540,33 +1541,6 @@ static BOOL hasBecomeActive = NO;
     }
 }
 
-- (BOOL)shouldNotifyAboutIncompatibleSoftware {
-    // Pending discussions:
-    // Docker: https://github.com/docker/kitematic/pull/855
-    // LaunchBar: https://twitter.com/launchbar/status/620975715278790657?cn=cmVwbHk%3D&refsrc=email
-    // Pathfinder: https://twitter.com/gnachman/status/659409608642007041
-    // Tower: Filed a bug. Tracking with issue 4722 on my side
-
-    // This is disabled because it looks like everyone is there or almost there. I can remove this
-    // code soon.
-//#define SHOW_INCOMPATIBILITY_WARNING_AT_STARTUP
-
-#ifdef SHOW_INCOMPATIBILITY_WARNING_AT_STARTUP
-    static NSString *const kTimeOfFirstLaunchForIncompatibilityWarnings = @"NoSyncTimeOfFirstLaunchForIncompatibilityWarnings";
-    static const NSTimeInterval kMinimumDelayBeforeWarningAboutIncompatibility = 24 * 60 * 60;
-    NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
-    NSTimeInterval timeOfFirstLaunchForIncompatibilityWarnings =
-        [[NSUserDefaults standardUserDefaults] doubleForKey:kTimeOfFirstLaunchForIncompatibilityWarnings];
-    if (!timeOfFirstLaunchForIncompatibilityWarnings) {
-        [[NSUserDefaults standardUserDefaults] setDouble:now
-                                                  forKey:kTimeOfFirstLaunchForIncompatibilityWarnings];
-    } else if (now - timeOfFirstLaunchForIncompatibilityWarnings > kMinimumDelayBeforeWarningAboutIncompatibility) {
-        return ![[NSUserDefaults standardUserDefaults] boolForKey:kHaveWarnedAboutIncompatibleSoftware];
-    }
-#endif
-    return NO;
-}
-
 - (NSString *)shortVersionStringOfAppWithBundleId:(NSString *)bundleId {
     NSString *bundlePath =
             [[NSWorkspace sharedWorkspace] absolutePathForAppBundleWithIdentifier:bundleId];
@@ -1582,70 +1556,14 @@ static BOOL hasBecomeActive = NO;
     return result == NSOrderedDescending;
 }
 
-- (void)notifyAboutIncompatibleVersionOf:(NSString *)name url:(NSString *)urlString upgradeAvailable:(BOOL)upgradeAvailable {
-    NSAlert *alert = [[[NSAlert alloc] init] autorelease];
-    alert.messageText = @"Incompatible Software Detected";
-    [alert addButtonWithTitle:@"OK"];
-    if (upgradeAvailable) {
-        alert.informativeText = [NSString stringWithFormat:@"You need to upgrade %@ to use it with this version of iTerm2.", name];
-    } else {
-        alert.informativeText = [NSString stringWithFormat:@"You have a version of %@ installed which is not compatible with this version of iTerm2.", name];
-        [alert addButtonWithTitle:@"Learn More"];
-    }
-
-    if ([alert runModal] == NSAlertSecondButtonReturn) {
-        NSURL *url = [NSURL URLWithString:urlString];
-        [[NSWorkspace sharedWorkspace] openURL:url];
-    }
-}
-
-- (BOOL)notifyAboutIncompatibleSoftware {
-    BOOL found = NO;
-
-    NSString *dockerVersion = [self shortVersionStringOfAppWithBundleId:@"com.apple.ScriptEditor.id.dockerquickstartterminalapp"];
-    if (dockerVersion && ![self version:dockerVersion newerThan:@"1.3.0"]) {
-        [self notifyAboutIncompatibleVersionOf:@"Docker Quickstart Terminal"
-                                           url:@"https://gitlab.com/gnachman/iterm2/wikis/dockerquickstartincompatible"
-                              upgradeAvailable:NO];
-        found = YES;
-    }
-
-    NSString *launchBarVersion = [self shortVersionStringOfAppWithBundleId:@"at.obdev.LaunchBar"];
-    if (launchBarVersion && ![self version:launchBarVersion newerThan:@"6.6.2"]) {
-        [self notifyAboutIncompatibleVersionOf:@"LaunchBar"
-                                           url:@"https://gitlab.com/gnachman/iterm2/wikis/dockerquickstartincompatible"
-                              upgradeAvailable:NO];
-        found = YES;
-    }
-
-    NSString *pathfinderVersion = [self shortVersionStringOfAppWithBundleId:@"com.cocoatech.PathFinder"];
-    if (pathfinderVersion && ![self version:pathfinderVersion newerThan:@"7.3.3"]) {
-        [self notifyAboutIncompatibleVersionOf:@"Pathfinder"
-                                           url:@"https://gitlab.com/gnachman/iterm2/wikis/pathfinder7compatibility"
-                              upgradeAvailable:NO];
-        found = YES;
-    }
-
-    NSString *towerVersion = [self shortVersionStringOfAppWithBundleId:@"com.fournova.Tower2"];
-    if (towerVersion && ![self version:towerVersion newerThan:@"2.3.4"]) {
-        [self notifyAboutIncompatibleVersionOf:@"Tower"
-                                           url:@"https://gitlab.com/gnachman/iterm2/wikis/towercompatibility"
-                              upgradeAvailable:NO];
-        found = YES;
-    }
-
-    [[NSUserDefaults standardUserDefaults] setBool:YES forKey:kHaveWarnedAboutIncompatibleSoftware];
-    return found;
-}
-
-- (IBAction)checkForIncompatibleSoftware:(id)sender {
-    if (![self notifyAboutIncompatibleSoftware]) {
-        NSAlert *alert = [[[NSAlert alloc] init] autorelease];
-        alert.messageText = @"No Incompatible Software Detected";
-        alert.informativeText = @"No third-party software that is known to be incompatible with iTerm2’s new AppleScript interfaces was found.";
-        [alert addButtonWithTitle:@"OK"];
-        [alert runModal];
-    }
+- (IBAction)createCPUProfile:(id)sender {
+    [iTermCPUProfilerUI createProfileWithCompletion:^(iTermCPUProfile * _Nonnull profile) {
+        NSString *string = [profile stringTree];
+        NSString *path = [NSFileManager pathToSaveFileInFolder:[[NSFileManager defaultManager] desktopDirectory]
+                                                 preferredName:@"iTerm2Sample.txt"];
+        [string writeToURL:[NSURL fileURLWithPath:path] atomically:NO encoding:NSUTF8StringEncoding error:NULL];
+        [[NSWorkspace sharedWorkspace] openFile:path withApplication:@"Finder"];
+    }];
 }
 
 - (IBAction)copyPerformanceStats:(id)sender {
@@ -1658,31 +1576,6 @@ static BOOL hasBecomeActive = NO;
 - (IBAction)checkForUpdatesFromMenu:(id)sender {
     [suUpdater checkForUpdates:(sender)];
     [[iTermPythonRuntimeDownloader sharedInstance] upgradeIfPossible];
-}
-
-- (void)warnAboutChangeToDefaultPasteBehavior {
-    static NSString *const kHaveWarnedAboutPasteConfirmationChange = @"NoSyncHaveWarnedAboutPasteConfirmationChange";
-    if ([[NSUserDefaults standardUserDefaults] boolForKey:kHaveWarnedAboutPasteConfirmationChange]) {
-        // Safety check that we definitely don't show this twice.
-        return;
-    }
-    NSString *identifier = [iTermAdvancedSettingsModel noSyncDoNotWarnBeforeMultilinePasteUserDefaultsKey];
-    if ([iTermWarning identifierIsSilenced:identifier]) {
-        return;
-    }
-
-    NSArray *warningList = @[ @"3.0.0", @"3.0.1", @"3.0.2", @"3.0.3", @"3.0.4", @"3.0.5", @"3.0.6", @"3.0.7", @"3.0.8", @"3.0.9", @"3.0.10" ];
-    if ([warningList containsObject:[iTermPreferences appVersionBeforeThisLaunch]]) {
-        [iTermWarning showWarningWithTitle:@"iTerm2 no longer warns before a multi-line paste, unless you are at the shell prompt."
-                                   actions:@[ @"OK" ]
-                                 accessory:nil
-                                identifier:nil
-                               silenceable:kiTermWarningTypePersistent
-                                   heading:@"Important Change"
-                                    window:nil];
-    }
-
-    [[NSUserDefaults standardUserDefaults] setBool:YES forKey:kHaveWarnedAboutPasteConfirmationChange];
 }
 
 #pragma mark - Main Menu
@@ -2059,7 +1952,7 @@ static BOOL hasBecomeActive = NO;
 
 - (IBAction)toggleSecureInput:(id)sender {
     // Set secureInputDesired_ to the opposite of the current state.
-    secureInputDesired_ = !IsSecureEventInputEnabled();
+    secureInputDesired_ = !secureInputDesired_;
     DLog(@"toggleSecureInput called. Setting desired to %d", (int)secureInputDesired_);
 
     // Try to set the system's state of secure input to the desired state.
@@ -2071,7 +1964,7 @@ static BOOL hasBecomeActive = NO;
 }
 
 - (IBAction)debugLogging:(id)sender {
-  ToggleDebugLogging();
+    ToggleDebugLogging();
 }
 
 - (IBAction)openQuickly:(id)sender {
@@ -2136,6 +2029,10 @@ static BOOL hasBecomeActive = NO;
                                                                   inject:nil
                                                              environment:environment];
     }];
+}
+
+- (IBAction)openDependencyEditor:(id)sender {
+    [[iTermDependencyEditorWindowController sharedInstance] open];
 }
 
 - (IBAction)openScriptConsole:(id)sender {

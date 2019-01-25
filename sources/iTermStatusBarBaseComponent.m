@@ -24,6 +24,7 @@ static NSString *const iTermStatusBarCompressionResistanceKey = @"base: compress
 NSString *const iTermStatusBarPriorityKey = @"base: priority";
 NSString *const iTermStatusBarMaximumWidthKey = @"maxwidth";
 NSString *const iTermStatusBarMinimumWidthKey = @"minwidth";
+const double iTermStatusBarBaseComponentDefaultPriority = 5;
 
 @implementation iTermStatusBarBuiltInComponentFactory {
     Class _class;
@@ -50,9 +51,14 @@ NSString *const iTermStatusBarMinimumWidthKey = @"minwidth";
     }
     return self;
 }
+
 - (id<iTermStatusBarComponent>)newComponentWithKnobs:(NSDictionary *)knobs
+                                     layoutAlgorithm:(iTermStatusBarLayoutAlgorithmSetting)layoutAlgorithm
                                                scope:(iTermVariableScope *)scope {
-    return [[_class alloc] initWithConfiguration:@{iTermStatusBarComponentConfigurationKeyKnobValues: knobs}
+    iTermStatusBarAdvancedConfiguration *advancedConfiguration = [[iTermStatusBarAdvancedConfiguration alloc] init];
+    advancedConfiguration.layoutAlgorithm = layoutAlgorithm;
+    return [[_class alloc] initWithConfiguration:@{iTermStatusBarComponentConfigurationKeyKnobValues: knobs,
+                                                   iTermStatusBarComponentConfigurationKeyLayoutAdvancedConfigurationDictionaryValue: advancedConfiguration.dictionaryValue }
                                            scope:scope];
 }
 
@@ -117,7 +123,7 @@ NSString *const iTermStatusBarMinimumWidthKey = @"minwidth";
 }
 
 - (CGFloat)statusBarComponentMinimumWidth {
-    return self.statusBarComponentCreateView.frame.size.width;
+    return self.statusBarComponentView.frame.size.width;
 }
 
 - (void)statusBarComponentSizeView:(NSView *)view toFitWidth:(CGFloat)width {
@@ -190,22 +196,34 @@ NSString *const iTermStatusBarMinimumWidthKey = @"minwidth";
     return @"Base class! This should not be called!";
 }
 
+- (iTermStatusBarComponentKnob *)newPriorityKnob {
+    return [[iTermStatusBarComponentKnob alloc] initWithLabelText:@"Priority:"
+                                                             type:iTermStatusBarComponentKnobTypeDouble
+                                                      placeholder:@""
+                                                     defaultValue:self.class.statusBarComponentDefaultKnobs[iTermStatusBarPriorityKey]
+                                                              key:iTermStatusBarPriorityKey];
+}
+
 - (NSArray<iTermStatusBarComponentKnob *> *)statusBarComponentKnobs {
     iTermStatusBarComponentKnob *compressionResistanceKnob = nil;
     if ([self statusBarComponentCanStretch]) {
+        NSString *title;
+        switch (self.advancedConfiguration.layoutAlgorithm) {
+            case iTermStatusBarLayoutAlgorithmSettingTightlyPacked:
+                title = @"Compression Resistance:";
+                break;
+            case iTermStatusBarLayoutAlgorithmSettingStable:
+                title = @"Size Multiple:";
+                break;
+        }
         compressionResistanceKnob =
-        [[iTermStatusBarComponentKnob alloc] initWithLabelText:@"Compression Resistance:"
+        [[iTermStatusBarComponentKnob alloc] initWithLabelText:title
                                                           type:iTermStatusBarComponentKnobTypeDouble
                                                    placeholder:@""
                                                   defaultValue:self.class.statusBarComponentDefaultKnobs[iTermStatusBarCompressionResistanceKey]
                                                            key:iTermStatusBarCompressionResistanceKey];
     }
-    iTermStatusBarComponentKnob *priorityKnob =
-    [[iTermStatusBarComponentKnob alloc] initWithLabelText:@"Priority:"
-                                                      type:iTermStatusBarComponentKnobTypeDouble
-                                               placeholder:@""
-                                              defaultValue:self.class.statusBarComponentDefaultKnobs[iTermStatusBarPriorityKey]
-                                                       key:iTermStatusBarPriorityKey];
+    iTermStatusBarComponentKnob *priorityKnob = [self newPriorityKnob];
     if (compressionResistanceKnob) {
         return @[ compressionResistanceKnob, priorityKnob ];
     } else {
@@ -215,10 +233,11 @@ NSString *const iTermStatusBarMinimumWidthKey = @"minwidth";
 
 + (NSDictionary *)statusBarComponentDefaultKnobs {
     return @{ iTermStatusBarCompressionResistanceKey: @1,
-              iTermStatusBarPriorityKey: @5 };
+              iTermStatusBarPriorityKey: @(iTermStatusBarBaseComponentDefaultPriority) };
 }
 
-- (id)statusBarComponentExemplar {
+- (id)statusBarComponentExemplarWithBackgroundColor:(NSColor *)backgroundColor
+                                          textColor:(NSColor *)textColor {
     [self doesNotRecognizeSelector:_cmd];
     return @"BUG";
 }
@@ -230,7 +249,7 @@ NSString *const iTermStatusBarMinimumWidthKey = @"minwidth";
     [self.delegate statusBarComponentKnobsDidChange:self];
 }
 
-- (NSView *)statusBarComponentCreateView {
+- (NSView *)statusBarComponentView {
     [self doesNotRecognizeSelector:_cmd];
     return [[NSView alloc] init];
 }
@@ -273,6 +292,9 @@ NSString *const iTermStatusBarMinimumWidthKey = @"minwidth";
 - (void)statusBarDefaultTextColorDidChange {
 }
 
+- (void)statusBarTerminalBackgroundColorDidChange {
+}
+
 - (void)statusBarComponentOpenPopoverWithHTML:(NSString *)html ofSize:(NSSize)size {
     WKWebView *webView = [[iTermWebViewFactory sharedInstance] webViewWithDelegate:self];
     if (!webView) {
@@ -284,7 +306,7 @@ NSString *const iTermStatusBarMinimumWidthKey = @"minwidth";
                                                                                         backupURL:nil];
     popover.contentViewController = viewController;
     popover.contentSize = viewController.view.frame.size;
-    NSView *view = self.statusBarComponentCreateView;
+    NSView *view = self.statusBarComponentView;
     popover.behavior = NSPopoverBehaviorSemitransient;
     popover.delegate = self;
     NSRectEdge preferredEdge = NSRectEdgeMinY;
@@ -299,6 +321,22 @@ NSString *const iTermStatusBarMinimumWidthKey = @"minwidth";
     [popover showRelativeToRect:view.bounds
                          ofView:view
                   preferredEdge:preferredEdge];
+}
+
+- (BOOL)statusBarComponentHandlesClicks {
+    return NO;
+}
+
+- (void)statusBarComponentDidClickWithView:(NSView *)view {
+    // You should have overridden this.
+    assert(NO);
+}
+
+- (void)statusBarComponentMouseDownWithView:(NSView *)view {
+    // You should have overridden this.
+    assert(NO);
+}
+- (void)statusBarComponentDidMoveToWindow {
 }
 
 #pragma mark - NSSecureCoding

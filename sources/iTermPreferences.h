@@ -113,6 +113,7 @@ extern NSString *const kPreferenceKeyDisableFullscreenTransparencyByDefault;
 extern NSString *const kPreferenceKeyEnableDivisionView;
 extern NSString *const kPreferenceKeyEnableProxyIcon;
 extern NSString *const kPreferenceKeyDimBackgroundWindows;
+extern NSString *const kPreferenceKeySeparateStatusBarsPerPane;
 
 // Keys
 extern NSString *const kPreferenceKeyControlRemapping;
@@ -222,4 +223,5 @@ extern NSString *const kPreferenceKeyHotkeyMigratedFromSingleToMulti;
 
 @interface iTermPreferences (FastAccessors)
 + (BOOL)hideTabActivityIndicator;
++ (BOOL)maximizeMetalThroughput;
 @end

@@ -10,6 +10,7 @@
 #import "DebugLogging.h"
 #import "NSArray+iTerm.h"
 #import "NSDictionary+iTerm.h"
+#import "NSObject+iTerm.h"
 #import "ScreenChar.h"
 
 static NSString *const kSelectionSubSelectionsKey = @"Sub selections";
@@ -17,19 +18,47 @@ static NSString *const kSelectionSubSelectionsKey = @"Sub selections";
 static NSString *const kiTermSubSelectionRange = @"Range";
 static NSString *const kiTermSubSelectionMode = @"Mode";
 
+static VT100GridWindowedRange VT100GridWindowedRangeClampedToWidth(const VT100GridWindowedRange range,
+                                                                   const int width) {
+    if (width <= 0) {
+        return range;
+    }
+    VT100GridWindowedRange result = range;
+    result.coordRange.start.x = MAX(0, MIN(result.coordRange.start.x, width - 1));
+    result.coordRange.end.x = MIN(result.coordRange.end.x, width);
+
+    int left = result.columnWindow.location;
+    int right = range.columnWindow.location + range.columnWindow.length;
+    if (left <= 0 && right <= 0) {
+        return result;
+    }
+    if (left >= width) {
+        left = width - 1;
+    }
+    if (right > width) {
+        right = width;
+    }
+    result.columnWindow.location = left;
+    result.columnWindow.length = right - left;
+    return result;
+}
+
 @implementation iTermSubSelection
 
-+ (instancetype)subSelectionWithRange:(VT100GridWindowedRange)range
-                                 mode:(iTermSelectionMode)mode {
++ (instancetype)subSelectionWithRange:(VT100GridWindowedRange)unsafeRange
+                                 mode:(iTermSelectionMode)mode
+                                width:(int)width {
     iTermSubSelection *sub = [[[iTermSubSelection alloc] init] autorelease];
+    VT100GridWindowedRange range = VT100GridWindowedRangeClampedToWidth(unsafeRange, width);
     sub.range = range;
     sub.selectionMode = mode;
     return sub;
 }
 
-+ (instancetype)subSelectionWithDictionary:(NSDictionary *)dict {
++ (instancetype)subSelectionWithDictionary:(NSDictionary *)dict width:(int)width {
     return [self subSelectionWithRange:[dict[kiTermSubSelectionRange] gridWindowedRange]
-                                  mode:[dict[kiTermSubSelectionMode] intValue]];
+                                  mode:[dict[kiTermSubSelectionMode] intValue]
+                                 width:width];
 }
 
 - (NSDictionary *)dictionaryValueWithYOffset:(int)yOffset {
@@ -75,11 +104,12 @@ static NSString *const kiTermSubSelectionMode = @"Mode";
     iTermSubSelection *theCopy = [[iTermSubSelection alloc] init];
     theCopy.range = self.range;
     theCopy.selectionMode = self.selectionMode;
+    theCopy.connected = self.connected;
 
     return theCopy;
 }
 
-- (NSArray *)nonwindowedComponents {
+- (NSArray *)nonwindowedComponentsWithWidth:(int)width {
     if (self.selectionMode == kiTermSelectionModeBox ||
         self.range.columnWindow.length <= 0) {
         return @[ self ];
@@ -88,7 +118,8 @@ static NSString *const kiTermSubSelectionMode = @"Mode";
     [[self class] enumerateRangesInWindowedRange:self.range block:^(VT100GridCoordRange theRange) {
         iTermSubSelection *sub =
             [iTermSubSelection subSelectionWithRange:VT100GridWindowedRangeMake(theRange, 0, 0)
-                                                mode:_selectionMode];
+                                                mode:_selectionMode
+                                               width:width];
         sub.connected = YES;
         [result addObject:sub];
     }];
@@ -114,6 +145,15 @@ static NSString *const kiTermSubSelectionMode = @"Mode";
     }
 }
 
+- (BOOL)isEqual:(id)object {
+    iTermSubSelection *other = [iTermSubSelection castFrom:object];
+    if (!other) {
+        return NO;
+    }
+    return (VT100GridWindowsRangeEqualsWindowedRange(self.range, other.range) &&
+            self.selectionMode == other.selectionMode &&
+            self.connected == other.connected);
+}
 @end
 
 @implementation iTermSelection {
@@ -369,7 +409,8 @@ static NSString *const kiTermSubSelectionMode = @"Mode";
             theRange = [self rangeByExtendingRangePastNulls:theRange];
             iTermSubSelection *sub =
                 [iTermSubSelection subSelectionWithRange:theRange
-                                                    mode:kiTermSelectionModeCharacter];
+                                                    mode:kiTermSelectionModeCharacter
+                                                   width:self.width];
             [_subSelections addObject:sub];
         }
         _resumable = NO;
@@ -424,7 +465,8 @@ static NSString *const kiTermSubSelectionMode = @"Mode";
 
 - (BOOL)coord:(VT100GridCoord)coord isInRange:(VT100GridWindowedRange)range {
     iTermSubSelection *temp = [iTermSubSelection subSelectionWithRange:range
-                                                                  mode:_selectionMode];
+                                                                  mode:_selectionMode
+                                                                 width:self.width];
     return [temp containsCoord:coord];
 }
 
@@ -440,16 +482,17 @@ static NSString *const kiTermSubSelectionMode = @"Mode";
     return VT100GridCoordOrder(a, b) == NSOrderedSame;
 }
 
-- (void)moveSelectionEndpointTo:(VT100GridCoord)coord {
+- (BOOL)moveSelectionEndpointTo:(VT100GridCoord)coord {
     DLog(@"Move selection to %@", VT100GridCoordDescription(coord));
     if (coord.y < 0) {
         coord.x = coord.y = 0;
     }
+    NSArray<iTermSubSelection *> *subselectionsBefore = [[self.allSubSelections copy] autorelease] ?: @[];
     VT100GridWindowedRange range = [self rangeForCurrentModeAtCoord:coord
                                               includeParentheticals:NO
                                                  needAccurateWindow:NO];
-
-    if (!_live) {
+    const BOOL startLiveSelection = !_live;
+    if (startLiveSelection) {
         [self beginSelectionAt:coord mode:self.selectionMode resume:NO append:NO];
     }
     switch (_selectionMode) {
@@ -469,6 +512,10 @@ static NSString *const kiTermSubSelectionMode = @"Mode";
     _extend = YES;
     [self extendPastNulls];
     [_delegate selectionDidChange:[[self retain] autorelease]];
+    if (startLiveSelection) {
+        return YES;
+    }
+    return ![subselectionsBefore isEqualToArray:self.allSubSelections];
 }
 
 - (void)moveSelectionEndpointToRange:(VT100GridWindowedRange)range {
@@ -693,7 +740,8 @@ static NSString *const kiTermSubSelectionMode = @"Mode";
         NSMutableArray *subs = [NSMutableArray array];
         [subs addObjectsFromArray:_subSelections];
         iTermSubSelection *temp = [iTermSubSelection subSelectionWithRange:[self unflippedLiveRange]
-                                                                      mode:_selectionMode];
+                                                                      mode:_selectionMode
+                                                                     width:self.width];
         [subs addObject:temp];
         return subs;
     } else {
@@ -756,7 +804,8 @@ static NSString *const kiTermSubSelectionMode = @"Mode";
     } else {
         [_subSelections replaceObjectAtIndex:0
                                   withObject:[iTermSubSelection subSelectionWithRange:firstRange
-                                                                                 mode:mode]];
+                                                                                 mode:mode
+                                                                                width:self.width]];
     }
     [_delegate selectionDidChange:[[self retain] autorelease]];
 }
@@ -769,7 +818,8 @@ static NSString *const kiTermSubSelectionMode = @"Mode";
     } else if ([_subSelections count]) {
         [_subSelections removeLastObject];
         [_subSelections addObject:[iTermSubSelection subSelectionWithRange:lastRange
-                                                                      mode:mode]];
+                                                                      mode:mode
+                                                                     width:self.width]];
     }
     [_delegate selectionDidChange:[[self retain] autorelease]];
 }
@@ -803,7 +853,7 @@ static NSString *const kiTermSubSelectionMode = @"Mode";
             [newSubs addObject:sub];
         } else {
             // There is a nontrivial window
-            for (iTermSubSelection *subsub in [sub nonwindowedComponents]) {
+            for (iTermSubSelection *subsub in [sub nonwindowedComponentsWithWidth:self.width]) {
                 [newSubs addObject:subsub];
             }
         }
@@ -1057,12 +1107,12 @@ static NSString *const kiTermSubSelectionMode = @"Mode";
     return @{ kSelectionSubSelectionsKey: subs };
 }
 
-- (void)setFromDictionaryValue:(NSDictionary *)dict {
+- (void)setFromDictionaryValue:(NSDictionary *)dict width:(int)width {
     [self clearSelection];
     NSArray<NSDictionary *> *subs = dict[kSelectionSubSelectionsKey];
     NSMutableArray<iTermSubSelection *> *subSelectionsToAdd = [NSMutableArray array];
     for (NSDictionary *subDict in subs) {
-        iTermSubSelection *sub = [iTermSubSelection subSelectionWithDictionary:subDict];
+        iTermSubSelection *sub = [iTermSubSelection subSelectionWithDictionary:subDict width:width];
         if (sub) {
             [subSelectionsToAdd addObject:sub];
         }

@@ -10,13 +10,14 @@
 #import "AdvancedWorkingDirectoryWindowController.h"
 #import "ITAddressBookMgr.h"
 #import "iTermAPIHelper.h"
+#import "iTermBadgeConfigurationWindowController.h"
 #import "iTermFunctionCallTextFieldDelegate.h"
 #import "iTermImageWell.h"
 #import "iTermLaunchServices.h"
 #import "iTermProfilePreferences.h"
 #import "iTermSessionTitleBuiltInFunction.h"
 #import "iTermShortcutInputView.h"
-#import "iTermVariables.h"
+#import "iTermVariableScope.h"
 #import "NSObject+iTerm.h"
 #import "NSTextField+iTerm.h"
 #import "ProfileListView.h"
@@ -194,18 +195,18 @@ static NSString *const iTermProfilePreferencesUpdateSessionName = @"iTermProfile
                     key:KEY_BADGE_FORMAT
                    type:kPreferenceInfoTypeStringTextField];
     _badgeTextFieldDelegate =
-        [[iTermFunctionCallTextFieldDelegate alloc] initWithPaths:[iTermVariables recordedVariableNamesInContext:iTermVariablesSuggestionContextSession]
-                                                      passthrough:_badgeText.delegate
-                                                    functionsOnly:NO];
+        [[iTermFunctionCallTextFieldDelegate alloc] initWithPathSource:[iTermVariableHistory pathSourceForContext:iTermVariablesSuggestionContextSession]
+                                                           passthrough:_badgeText.delegate
+                                                         functionsOnly:NO];
     _badgeText.delegate = _badgeTextFieldDelegate;
 
     [self defineControl:_badgeTextForEditCurrentSession
                     key:KEY_BADGE_FORMAT
                    type:kPreferenceInfoTypeStringTextField];
     _badgeTextForEditCurrentSessionFieldDelegate =
-        [[iTermFunctionCallTextFieldDelegate alloc] initWithPaths:[iTermVariables recordedVariableNamesInContext:iTermVariablesSuggestionContextSession]
-                                                      passthrough:_badgeTextForEditCurrentSession.delegate
-                                                    functionsOnly:NO];
+        [[iTermFunctionCallTextFieldDelegate alloc] initWithPathSource:[iTermVariableHistory pathSourceForContext:iTermVariablesSuggestionContextSession]
+                                                           passthrough:_badgeTextForEditCurrentSession.delegate
+                                                         functionsOnly:NO];
     _badgeTextForEditCurrentSession.delegate = _badgeTextForEditCurrentSessionFieldDelegate;
 
     [self defineControl:_titleSettings
@@ -393,6 +394,29 @@ static NSString *const iTermProfilePreferencesUpdateSessionName = @"iTermProfile
         item.tag = -1;
         [titleSettings.menu addItem:item];
     }
+}
+
+#pragma mark - Badge
+
+- (IBAction)configureBadge:(id)sender {
+    iTermBadgeConfigurationWindowController *badgeConfigurationWindowController =
+    [[iTermBadgeConfigurationWindowController alloc] initWithProfile:[self.delegate profilePreferencesCurrentProfile]];
+    [badgeConfigurationWindowController window];  // force the window to load
+    __weak typeof(self) weakSelf = self;
+    [self.view.window beginSheet:badgeConfigurationWindowController.window completionHandler:^(NSModalResponse returnCode) {
+        __strong __typeof(weakSelf) strongSelf = self;
+        if (!strongSelf) {
+            return;
+        }
+        if (!badgeConfigurationWindowController.ok) {
+            return;
+        }
+        NSDictionary *mutations = badgeConfigurationWindowController.profileMutations;
+        [mutations enumerateKeysAndObjectsUsingBlock:^(id  _Nonnull key, id  _Nonnull value, BOOL * _Nonnull stop) {
+            [strongSelf setObject:value forKey:key];
+        }];
+        [badgeConfigurationWindowController.window close];
+    }];
 }
 
 #pragma mark - Copy current session to Profile

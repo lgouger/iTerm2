@@ -12,7 +12,7 @@
 #import "iTermStatusBarComponent.h"
 #import "iTermStatusBarSpringComponent.h"
 #import "iTermStatusBarSwiftyStringComponent.h"
-#import "iTermVariables.h"
+#import "iTermVariableScope.h"
 #import "NSArray+iTerm.h"
 #import "NSDictionary+iTerm.h"
 #import "TmuxController.h"
@@ -26,7 +26,7 @@
     NSArray *parts = [self.value ?: @"" componentsSeparatedByString:@" | "];
     NSMutableArray<NSString *> *variants = [NSMutableArray array];
     NSInteger count = parts.count;
-    for (NSInteger i = count - 1; i >= 0; i--) {
+    for (NSInteger i = count; i > 0; i--) {
         [variants addObject:[[parts subarrayToIndex:i] componentsJoinedByString:@" | "]];
     };
     return variants;

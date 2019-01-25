@@ -72,9 +72,13 @@
     return [self textColor];
 }
 
+- (NSColor *)statusBarBackgroundColor {
+    return [self backgroundColor];
+}
+
 - (NSArray<iTermStatusBarComponentKnob *> *)statusBarComponentKnobs {
     iTermStatusBarComponentKnob *backgroundColorKnob =
-        [[iTermStatusBarComponentKnob alloc] initWithLabelText:@"Background Color"
+        [[iTermStatusBarComponentKnob alloc] initWithLabelText:@"Background Color:"
                                                           type:iTermStatusBarComponentKnobTypeColor
                                                    placeholder:nil
                                                   defaultValue:nil
@@ -82,7 +86,7 @@
     NSArray<iTermStatusBarComponentKnob *> *knobs = [@[ backgroundColorKnob ] arrayByAddingObjectsFromArray:[super statusBarComponentKnobs]];
     if (self.shouldHaveTextColorKnob) {
         iTermStatusBarComponentKnob *textColorKnob =
-            [[iTermStatusBarComponentKnob alloc] initWithLabelText:@"Text Color"
+            [[iTermStatusBarComponentKnob alloc] initWithLabelText:@"Text Color:"
                                                               type:iTermStatusBarComponentKnobTypeColor
                                                        placeholder:nil
                                                       defaultValue:nil
@@ -105,7 +109,7 @@
 
 - (NSColor *)backgroundColor {
     NSDictionary *knobValues = self.configuration[iTermStatusBarComponentConfigurationKeyKnobValues];
-    return [knobValues[iTermStatusBarSharedBackgroundColorKey] colorValue] ?: [self statusBarBackgroundColor];
+    return [knobValues[iTermStatusBarSharedBackgroundColorKey] colorValue] ?: [super statusBarBackgroundColor];
 }
 
 - (BOOL)shouldUpdateValue:(NSObject *)proposed {
@@ -187,7 +191,7 @@
 
 #pragma mark - iTermStatusBarComponent
 
-- (NSView *)statusBarComponentCreateView {
+- (NSView *)statusBarComponentView {
     return self.view;
 }
 
@@ -196,6 +200,10 @@
 }
 
 - (void)statusBarComponentWidthDidChangeTo:(CGFloat)newWidth {
+    [self updateViewIfNeeded];
+}
+
+- (void)statusBarDefaultTextColorDidChange {
     [self updateViewIfNeeded];
 }
 
@@ -279,9 +287,9 @@ static const CGFloat iTermStatusBarSparklineBottomMargin = 2;
         [bezierPath stroke];
     } else if (self.numberOfTimeSeries == 2) {
         if (timeSeriesIndex == 0) {
-            [[[NSColor blueColor] colorWithAlphaComponent:0.5] set];
+            [[[NSColor blueColor] colorWithAlphaComponent:1] set];
         } else {
-            [[[NSColor redColor] colorWithAlphaComponent:0.5] set];
+            [[[NSColor redColor] colorWithAlphaComponent:1] set];
         }
         [bezierPath stroke];
     }

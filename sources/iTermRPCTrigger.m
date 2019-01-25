@@ -8,7 +8,7 @@
 #import "iTermRPCTrigger.h"
 #import "iTermFunctionCallTextFieldDelegate.h"
 #import "iTermScriptFunctionCall.h"
-#import "iTermVariables.h"
+#import "iTermVariableScope.h"
 #import "NSArray+iTerm.h"
 #import "PTYSession.h"
 
@@ -70,10 +70,10 @@ static NSString *const iTermRPCTriggerPathLineNumber = @"trigger.line_number";
 }
 
 - (id<NSTextFieldDelegate>)newParameterDelegateWithPassthrough:(id<NSTextFieldDelegate>)passthrough {
-    NSSet<NSString *> *paths = [[iTermVariables recordedVariableNamesInContext:iTermVariablesSuggestionContextSession] setByAddingObjectsFromArray:self.allPaths];
-    return [[iTermFunctionCallTextFieldDelegate alloc] initWithPaths:paths
-                                                         passthrough:passthrough
-                                                       functionsOnly:YES];
+    return [[iTermFunctionCallTextFieldDelegate alloc] initWithPathSource:[iTermVariableHistory pathSourceForContext:iTermVariablesSuggestionContextSession
+                                                                                                       augmentedWith:[NSSet setWithArray:self.allPaths]]
+                                                              passthrough:passthrough
+                                                            functionsOnly:YES];
 }
 
 @end

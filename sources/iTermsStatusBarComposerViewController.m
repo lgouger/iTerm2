@@ -8,8 +8,23 @@
 #import "iTermsStatusBarComposerViewController.h"
 
 #import "iTermStatusBarLargeComposerViewController.h"
+#import "NSImage+iTerm.h"
 
-@interface iTermsStatusBarComposerViewController ()<NSComboBoxDelegate, NSPopoverDelegate>
+static NSString *const iTermComposerComboBoxDidBecomeFirstResponder = @"iTermComposerComboBoxDidBecomeFirstResponder";
+
+@interface iTermsStatusBarComposerViewController ()<iTermComposerTextViewDelegate, NSComboBoxDelegate, NSPopoverDelegate>
+@end
+
+@interface iTermComposerComboBox : NSComboBox
+@end
+
+@implementation iTermComposerComboBox
+
+- (BOOL)becomeFirstResponder {
+    [[NSNotificationCenter defaultCenter] postNotificationName:iTermComposerComboBoxDidBecomeFirstResponder
+                                                        object:self];
+    return [super becomeFirstResponder];
+}
 
 @end
 
@@ -19,6 +34,7 @@
     IBOutlet NSComboBox *_comboBox;
     IBOutlet iTermStatusBarLargeComposerViewController *_popoverVC;
     IBOutlet NSPopover *_popover;
+    IBOutlet NSButton *_button;
 }
 
 - (void)setDelegate:(id)delegate {
@@ -34,7 +50,22 @@
     [self reallyReloadData];
 }
 
+- (void)setTintColor:(NSColor *)tintColor {
+    NSImage *image = [NSImage it_imageNamed:@"PopoverIcon" forClass:self.class];
+    _button.image = [image it_imageWithTintColor:tintColor];
+}
+
+- (void)awakeFromNib {
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(comboBoxDidBecomeFirstResponder:)
+                                                 name:iTermComposerComboBoxDidBecomeFirstResponder
+                                               object:_comboBox];
+}
 #pragma mark - Private
+
+- (void)comboBoxDidBecomeFirstResponder:(NSNotification *)notification {
+    [_popover close];
+}
 
 - (IBAction)send:(id)sender {
 }
@@ -42,6 +73,19 @@
 - (IBAction)showPopover:(id)sender {
     _popover.behavior = NSPopoverBehaviorSemitransient;
     _popover.delegate = self;
+    [_popoverVC view];
+    if ([self.delegate statusBarComposerShouldForceDarkAppearance:self]) {
+        if (@available(macOS 10.14, *)) {
+            _popoverVC.view.appearance = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
+        } else {
+            _popoverVC.view.appearance = [NSAppearance appearanceNamed:NSAppearanceNameVibrantDark];
+        }
+    } else {
+        _popoverVC.view.appearance = [NSAppearance appearanceNamed:NSAppearanceNameAqua];
+    }
+    _popoverVC.textView.string = _comboBox.stringValue;
+    _popoverVC.textView.font = [self.delegate statusBarComposerFont:self];
+    _popoverVC.textView.composerDelegate = self;
     [_popover showRelativeToRect:_comboBox.frame
                           ofView:self.view
                    preferredEdge:NSRectEdgeMaxY];
@@ -69,7 +113,7 @@
 #pragma mark - NSPopoverDelegate
 
 - (void)popoverDidClose:(NSNotification *)notification {
-    _comboBox.stringValue = _popoverVC.stringValue;
+    _comboBox.stringValue = _popoverVC.textView.string ?: @"";
 
 }
 
@@ -86,6 +130,14 @@ doCommandBySelector:(SEL)commandSelector {
     } else {
         return NO;
     }
+}
+
+#pragma mark - iTermComposerTextViewDelegate
+
+- (void)composerTextViewDidFinish {
+    _comboBox.stringValue = _popoverVC.textView.string ?: @"";
+    [self.delegate statusBarComposer:self sendCommand:_comboBox.stringValue];
+    _popoverVC.textView.string = @"";
 }
 
 @end

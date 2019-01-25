@@ -9,7 +9,7 @@
 
 #import "iTermAPIHelper.h"
 #import "iTermFunctionCallSuggester.h"
-#import "iTermVariables.h"
+#import "iTermVariableScope.h"
 #import "NSArray+iTerm.h"
 #import "NSObject+iTerm.h"
 
@@ -27,7 +27,7 @@
     __weak id _passthrough;
 }
 
-- (instancetype)initWithPaths:(NSSet<NSString *> *)paths
+- (instancetype)initWithPathSource:(NSSet<NSString *> *(^)(NSString *))pathSource
                   passthrough:(id)passthrough
                 functionsOnly:(BOOL)functionsOnly {
     self = [super init];
@@ -36,7 +36,7 @@
             [iTermAPIHelper registeredFunctionSignatureDictionary];
         Class suggesterClass = functionsOnly ? [iTermFunctionCallSuggester class] : [iTermSwiftyStringSuggester class];
         _suggester = [[suggesterClass alloc] initWithFunctionSignatures:signatures
-                                                                  paths:paths];
+                                                             pathSource:pathSource];
         _passthrough = passthrough;
     }
     return self;
@@ -60,9 +60,15 @@
 
 - (NSArray *)control:(NSControl *)control
             textView:(NSTextView *)textView
-         completions:(NSArray *)words
+         completions:(NSArray *)words  // Dictionary words
  forPartialWordRange:(NSRange)charRange
  indexOfSelectedItem:(NSInteger *)index {
+    NSArray<NSString *> *suggestions = [self suggestionsForRange:charRange];
+    *index = -1;  // Don't select anything. Doing so causes pathological behavior when you press period.
+    return suggestions;
+}
+
+- (NSArray<NSString *> *)suggestionsForRange:(NSRange)charRange {
     if (!self.lastEntry) {
         return nil;
     }
@@ -70,16 +76,23 @@
         // Can't deal with suggestions in the middle!
         return nil;
     }
-    NSArray<NSString *> *suggestions = [_suggester suggestionsForString:self.lastEntry];
+    NSArray<NSString *> *suggestions = [_suggester suggestionsForString:[self.lastEntry substringToIndex:NSMaxRange(charRange)]];
 
     if (!suggestions.count) {
         return nil;
     }
 
-    return [suggestions mapWithBlock:^id(NSString *s) {
+    suggestions = [suggestions mapWithBlock:^id(NSString *s) {
         return [s substringFromIndex:charRange.location];
     }];
 
+    suggestions = [suggestions sortedArrayUsingSelector:@selector(compare:)];
+    suggestions = [suggestions uniq];
+    if (suggestions.count == 0) {
+        return nil;
+    }
+
+    return suggestions;
 }
 
 - (BOOL)control:(NSControl *)control

@@ -562,7 +562,7 @@ static NSString *const kInlineFileInset = @"inset";  // NSValue of NSEdgeInsets
             assert(sub.range.coordRange.end.y >= 0);
             VT100GridWindowedRange theRange = VT100GridWindowedRangeMake(newSelection, 0, 0);
             iTermSubSelection *theSub =
-            [iTermSubSelection subSelectionWithRange:theRange mode:sub.selectionMode];
+            [iTermSubSelection subSelectionWithRange:theRange mode:sub.selectionMode width:newWidth];
             theSub.connected = sub.connected;
             [newSubSelections addObject:theSub];
         }
@@ -630,7 +630,8 @@ static NSString *const kInlineFileInset = @"inset";  // NSValue of NSEdgeInsets
             VT100GridWindowedRange theRange =
             VT100GridWindowedRangeMake(newSelection, 0, 0);
             iTermSubSelection *theSub = [iTermSubSelection subSelectionWithRange:theRange
-                                                                            mode:originalSub.selectionMode];
+                                                                            mode:originalSub.selectionMode
+                                                                           width:self.width];
             theSub.connected = originalSub.connected;
             [newSubSelections addObject:theSub];
         }
@@ -3977,6 +3978,10 @@ basedAtAbsoluteLineNumber:(long long)absoluteLineNumber
     [delegate_ screenRequestAttention:request];
 }
 
+- (void)terminalDisinterSession {
+    [delegate_ screenDisinterSession];
+}
+
 - (void)terminalSetBackgroundImageFile:(NSString *)filename {
     [delegate_ screenSetBackgroundImageFile:filename];
 }
@@ -4621,6 +4626,10 @@ basedAtAbsoluteLineNumber:(long long)absoluteLineNumber
 
 - (void)terminalSoftAlternateScreenModeDidChange {
     [self.delegate screenSoftAlternateScreenModeDidChange];
+}
+
+- (void)terminalReportKeyUpDidChange:(BOOL)reportKeyUp {
+    [self.delegate screenReportKeyUpDidChange:reportKeyUp];
 }
 
 #pragma mark - Private

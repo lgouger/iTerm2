@@ -17,7 +17,7 @@
 #import "iTermScriptHistory.h"
 #import "iTermScriptsMenuController.h"
 #import "iTermStatusBarComponentKnob.h"
-#import "iTermVariables.h"
+#import "iTermVariableScope.h"
 #import "iTermVariableReference.h"
 #import "iTermWarning.h"
 #import "NSArray+iTerm.h"
@@ -98,6 +98,7 @@ static NSString *const iTermStatusBarRPCRegistrationRequestKey = @"registration 
 }
 
 - (id<iTermStatusBarComponent>)newComponentWithKnobs:(NSDictionary *)knobs
+                                     layoutAlgorithm:(iTermStatusBarLayoutAlgorithmSetting)layoutAlgorithm
                                                scope:(iTermVariableScope *)scope {
     return [[iTermStatusBarRPCProvidedTextComponent alloc] initWithRegistrationRequest:_savedRegistrationRequest.latestStatusBarRequest
                                                                                  scope:scope
@@ -232,7 +233,8 @@ static NSString *const iTermStatusBarRPCRegistrationRequestKey = @"registration 
     return [knobs arrayByAddingObjectsFromArray:[super statusBarComponentKnobs]];
 }
 
-- (id)statusBarComponentExemplar {
+- (id)statusBarComponentExemplarWithBackgroundColor:(NSColor *)backgroundColor
+                                          textColor:(NSColor *)textColor {
     return _savedRegistrationRequest.latestStatusBarRequest.statusBarComponentAttributes.exemplar ?: @"";
 }
 

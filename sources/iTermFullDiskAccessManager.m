@@ -30,13 +30,21 @@
     if (d == NULL && errno == EPERM) {
         return YES;
     }
+    if (d != NULL) {
+        closedir(d);
+    }
+    return NO;
+}
 
-    closedir(d);
++ (BOOL)willRequestFullDiskAccess {
+    if (@available(macOS 10.14, *)) {
+        return ![self haveRequestedFullDiskAccess] && [self lacksFullDiskAccess];
+    }
     return NO;
 }
 
 + (void)maybeRequestFullDiskAccess NS_AVAILABLE_MAC(10_14) {
-    if (![self haveRequestedFullDiskAccess] && [self lacksFullDiskAccess]) {
+    if ([self willRequestFullDiskAccess]) {
         [self reallyRequestFullDiskAccess];
     }
 }
@@ -48,7 +56,8 @@
     @"To grant access:\n\n"
     @"1. Go to System Preferences > Security & Privacy.\n"
     @"2. Select Full Disk Access on the left.\n"
-    @"3. Add iTerm2 to the list of apps on the right.";
+    @"3. Click the padlock in the bottom to enable modifications.\n"
+    @"4. Add iTerm2 to the list of apps on the right.";
     [alert addButtonWithTitle:@"Open System Preferences"];
     [alert addButtonWithTitle:@"Learn More"];
     [alert addButtonWithTitle:@"Remind Me Later"];
@@ -57,11 +66,23 @@
     if (response == NSAlertFirstButtonReturn) {
         [[NSUserDefaults standardUserDefaults] setBool:YES forKey:@"NoSyncHaveRequestedFullDiskAccess"];
         [self openSystemPreferencesToSecurityAndPrivacy];
+        [self showReminder];
     } else if (response == NSAlertSecondButtonReturn) {
         [self openFullDiskAccessDocs];
     } else if (response == NSAlertFirstButtonReturn + 3) {
         return [[NSUserDefaults standardUserDefaults] setBool:YES forKey:@"NoSyncHaveRequestedFullDiskAccess"];
     }
+}
+
++ (void)showReminder {
+    NSAlert *alert = [[NSAlert alloc] init];
+    alert.messageText = @"To Grant Access";
+    alert.informativeText =
+        @"1. Go to System Preferences > Security & Privacy.\n"
+        @"2. Select Full Disk Access on the left.\n"
+        @"3. Click the padlock in the bottom to enable modifications.\n"
+        @"4. Add iTerm2 to the list of apps on the right.";
+    [alert runModal];
 }
 
 + (void)openSystemPreferencesToSecurityAndPrivacy NS_AVAILABLE_MAC(10_14) {

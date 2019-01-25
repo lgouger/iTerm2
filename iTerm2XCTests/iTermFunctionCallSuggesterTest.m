@@ -10,7 +10,7 @@
 #import "iTermFunctionCallParser.h"
 #import "iTermParsedExpression+Tests.h"
 #import "iTermScriptFunctionCall+Private.h"
-#import "iTermVariables.h"
+#import "iTermVariableScope.h"
 
 @interface iTermFunctionCallParser(Testing)
 - (instancetype)initPrivate;
@@ -33,7 +33,9 @@
     NSArray *paths = @[ @"path.first", @"path.second", @"third" ];
     _suggester =
         [[iTermFunctionCallSuggester alloc] initWithFunctionSignatures:signatures
-                                                                 paths:[NSSet setWithArray:paths]];
+                                                            pathSource:^NSSet<NSString *> *(NSString *prefix) {
+                                                                return paths;
+                                                            }];
 
     _parser = [[iTermFunctionCallParser alloc] initWithStart:@"expression"];
 }

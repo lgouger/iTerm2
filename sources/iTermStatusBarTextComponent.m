@@ -25,13 +25,13 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (NSArray<iTermStatusBarComponentKnob *> *)statusBarComponentKnobs {
     iTermStatusBarComponentKnob *textColorKnob =
-        [[iTermStatusBarComponentKnob alloc] initWithLabelText:@"Text Color"
+        [[iTermStatusBarComponentKnob alloc] initWithLabelText:@"Text Color:"
                                                           type:iTermStatusBarComponentKnobTypeColor
                                                    placeholder:nil
                                                   defaultValue:nil
                                                            key:iTermStatusBarSharedTextColorKey];
     iTermStatusBarComponentKnob *backgroundColorKnob =
-        [[iTermStatusBarComponentKnob alloc] initWithLabelText:@"Background Color"
+        [[iTermStatusBarComponentKnob alloc] initWithLabelText:@"Background Color:"
                                                           type:iTermStatusBarComponentKnobTypeColor
                                                    placeholder:nil
                                                   defaultValue:nil
@@ -67,7 +67,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (NSColor *)backgroundColor {
     NSDictionary *knobValues = self.configuration[iTermStatusBarComponentConfigurationKeyKnobValues];
-    return [knobValues[iTermStatusBarSharedBackgroundColorKey] colorValue] ?: [self statusBarBackgroundColor];
+    return [knobValues[iTermStatusBarSharedBackgroundColorKey] colorValue] ?: [super statusBarBackgroundColor];
 }
 
 - (BOOL)shouldUpdateValue:(NSString *)proposed inField:(NSTextField *)textField {
@@ -208,6 +208,10 @@ NS_ASSUME_NONNULL_BEGIN
     return [self textColor];
 }
 
+- (NSColor *)statusBarBackgroundColor {
+    return [self backgroundColor];
+}
+
 - (CGFloat)statusBarComponentVerticalOffset {
     const CGFloat containerHeight = _textField.superview.bounds.size.height;
     const CGFloat capHeight = _textField.font.capHeight;
@@ -219,7 +223,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 #pragma mark - iTermStatusBarComponent
 
-- (NSView *)statusBarComponentCreateView {
+- (NSView *)statusBarComponentView {
     return self.textField;
 }
 
@@ -228,6 +232,10 @@ NS_ASSUME_NONNULL_BEGIN
 }
 
 - (void)statusBarComponentWidthDidChangeTo:(CGFloat)newWidth {
+    [self updateTextFieldIfNeeded];
+}
+
+- (void)statusBarDefaultTextColorDidChange {
     [self updateTextFieldIfNeeded];
 }
 

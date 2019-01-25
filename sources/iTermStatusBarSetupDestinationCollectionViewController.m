@@ -15,6 +15,7 @@
 #import "iTermStatusBarTextComponent.h"
 
 #import "NSArray+iTerm.h"
+#import "NSColor+iTerm.h"
 #import "NSObject+iTerm.h"
 #import "NSView+iTerm.h"
 
@@ -112,6 +113,20 @@
      } completionHandler:^(BOOL finished) {}];
 }
 
+- (void)autoRainbowWithDarkBackground:(BOOL)darkBackground {
+    __block CGFloat h = 0;
+    const CGFloat s = darkBackground ? 0.3 : 0.5;
+    const CGFloat b = darkBackground ? 0.9 : 0.5;
+    const CGFloat stride = 1.0 / _elements.count;
+    [_elements enumerateObjectsUsingBlock:^(iTermStatusBarSetupElement * _Nonnull element, NSUInteger idx, BOOL * _Nonnull stop) {
+        id<iTermStatusBarComponent> component = element.component;
+        NSMutableDictionary *knobValues = [component.configuration[iTermStatusBarComponentConfigurationKeyKnobValues] mutableCopy];
+        knobValues[iTermStatusBarSharedTextColorKey] = [[NSColor colorWithHue:h saturation:s brightness:b alpha:1] dictionaryValue];
+        [component statusBarComponentSetKnobValues:knobValues];
+        h += stride;
+    }];
+}
+
 - (NSCollectionView *)collectionView {
     return [NSCollectionView castFrom:self.view];
 }
@@ -121,7 +136,14 @@
     [self.collectionView reloadData];
 }
 
-- (void)setLayout:(iTermStatusBarLayout *)layout {
+- (void)setAdvancedConfiguration:(iTermStatusBarAdvancedConfiguration *)advancedConfiguration {
+    _advancedConfiguration = advancedConfiguration;
+    iTermStatusBarLayout *temporaryLayout = [[iTermStatusBarLayout alloc] initWithDictionary:[self layoutDictionary] scope:nil];
+    [self loadElementsFromLayout:temporaryLayout];
+}
+
+- (void)loadElementsFromLayout:(iTermStatusBarLayout *)layout {
+    [self->_elements removeAllObjects];
     [layout.components enumerateObjectsUsingBlock:^(id<iTermStatusBarComponent>  _Nonnull component, NSUInteger idx, BOOL * _Nonnull stop) {
         iTermStatusBarSetupElement *element = [[iTermStatusBarSetupElement alloc] initWithComponent:component];
         element.delegate = self;
@@ -130,12 +152,17 @@
     [self.collectionView reloadData];
 }
 
-- (NSDictionary *)layoutDictionaryWithAdvancedConfiguration:(iTermStatusBarAdvancedConfiguration *)advancedConfiguration {
+- (void)setLayout:(iTermStatusBarLayout *)layout {
+    _advancedConfiguration = layout.advancedConfiguration;
+    [self loadElementsFromLayout:layout];
+}
+
+- (NSDictionary *)layoutDictionary {
     NSArray<id<iTermStatusBarComponent>> *components = [_elements mapWithBlock:^id(iTermStatusBarSetupElement *element) {
         return element.component;
     }];
     iTermStatusBarLayout *layout = [[iTermStatusBarLayout alloc] initWithComponents:components
-                                                              advancedConfiguration:advancedConfiguration];
+                                                              advancedConfiguration:_advancedConfiguration];
     return layout.dictionaryValue;
 }
 
@@ -158,16 +185,17 @@
     return item;
 }
 
-- (void)initializeItem:(iTermStatusBarSetupCollectionViewItem *)item atIndexPath:(NSIndexPath *)indexPath {
+- (void)initializeItem:(iTermStatusBarSetupCollectionViewItem *)item
+           atIndexPath:(NSIndexPath *)indexPath {
     const NSInteger index = [indexPath indexAtPosition:1];
-    id exemplar = _elements[index].exemplar;
-    if ([exemplar isKindOfClass:[NSString class]]) {
-        item.textField.stringValue = exemplar;
-    } else {
-        item.textField.attributedStringValue = exemplar;
-    }
+    item.textField.attributedStringValue = [_elements[index] exemplarWithBackgroundColor:_advancedConfiguration.backgroundColor
+                                                                               textColor:_advancedConfiguration.defaultTextColor
+                                                                             defaultFont:_advancedConfiguration.font];
+
     item.hideDetail = YES;
     item.textField.toolTip = _elements[index].detailedDescription;
+    item.backgroundColor = _elements[index].component.statusBarBackgroundColor ?: _advancedConfiguration.backgroundColor;
+
 }
 
 - (NSCollectionViewItem *)collectionView:(NSCollectionView *)collectionView

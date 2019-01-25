@@ -50,30 +50,53 @@ NSString *const iTermPythonRuntimeDownloaderDidInstallRuntimeNotification = @"iT
     return self;
 }
 
-- (NSString *)executableNamed:(NSString *)name atPyenvRoot:(NSString *)root {
+// Picks the largest 3-part version given a 2-part version. E.g., if you give it 3.7 and 3.7.0 and
+// 3.7.1 exist in `versionsPath` it will return 3.7.1. Returns nil if none found.
+- (NSString *)threePartVersionForTwoPartVersion:(NSString *)twoPartVersion
+                                             at:(NSString *)versionsPath {
+    SUStandardVersionComparator *comparator = [[SUStandardVersionComparator alloc] init];
+    return [[[iTermPythonRuntimeDownloader pythonVersionsAt:versionsPath] filteredArrayUsingBlock:^BOOL(NSString *anObject) {
+        return [anObject.it_twoPartVersionNumber isEqualToString:twoPartVersion];
+    }] maxWithComparator:^NSComparisonResult(NSString *a, NSString *b) {
+        return [comparator compareVersion:a toVersion:b];
+    }];
+}
+
+- (NSString *)executableNamed:(NSString *)name
+                  atPyenvRoot:(NSString *)root
+                pythonVersion:(NSString *)pythonVersion {
     NSString *path = [root stringByAppendingPathComponent:@"versions"];
-    for (NSString *version in [[NSFileManager defaultManager] enumeratorAtPath:path]) {
-        if ([version hasPrefix:@"3."]) {
-            path = [path stringByAppendingPathComponent:version];
-            path = [path stringByAppendingPathComponent:@"bin"];
-            path = [path stringByAppendingPathComponent:name];
-            return path;
+    NSString *bestVersion = nil;
+    if (pythonVersion) {
+        if (pythonVersion.it_twoPartVersionNumber) {
+            bestVersion = [self threePartVersionForTwoPartVersion:pythonVersion at:path];
+        } else {
+            bestVersion = pythonVersion;
         }
+    } else {
+        bestVersion = [iTermPythonRuntimeDownloader bestPythonVersionAt:path];
+    }
+    if ([[NSFileManager defaultManager] fileExistsAtPath:[path stringByAppendingPathComponent:bestVersion]]) {
+        path = [path stringByAppendingPathComponent:bestVersion];
+        path = [path stringByAppendingPathComponent:@"bin"];
+        path = [path stringByAppendingPathComponent:name];
+        return path;
     }
     return nil;
 }
 
-- (NSString *)pip3At:(NSString *)root {
-    return [self executableNamed:@"pip3" atPyenvRoot:root];
+- (NSString *)pip3At:(NSString *)root pythonVersion:(NSString *)pythonVersion {
+    return [self executableNamed:@"pip3" atPyenvRoot:root pythonVersion:pythonVersion];
 }
 
-- (NSString *)pyenvAt:(NSString *)root {
-    return [self executableNamed:@"python3" atPyenvRoot:root];
+- (NSString *)pyenvAt:(NSString *)root pythonVersion:(NSString *)pythonVersion {
+    return [self executableNamed:@"python3" atPyenvRoot:root pythonVersion:pythonVersion];
 }
 
 - (NSString *)pathToStandardPyenvPythonWithPythonVersion:(NSString *)pythonVersion {
     return [self pyenvAt:[self pathToStandardPyenvWithVersion:pythonVersion
-                                      creatingSymlinkIfNeeded:NO]];
+                                      creatingSymlinkIfNeeded:NO]
+           pythonVersion:pythonVersion];
 }
 
 - (NSString *)pathToStandardPyenvWithVersion:(NSString *)pythonVersion
@@ -244,10 +267,10 @@ NSString *const iTermPythonRuntimeDownloaderDidInstallRuntimeNotification = @"iT
                 NSAlert *alert = [[NSAlert alloc] init];
                 alert.messageText = @"Python Runtime Unavailable";
                 if (pythonVersion) {
-                    alert.informativeText = [NSString stringWithFormat:@"An iTerm2 Python Runtime with Python version %@ must be downloaded to proceed. The download failed: %@",
+                    alert.informativeText = [NSString stringWithFormat:@"An iTerm2 Python Runtime with Python version %@ must be downloaded to proceed.\n\nThe download failed: %@",
                                              pythonVersion, lastPhase.error.localizedDescription];
                 } else {
-                    alert.informativeText = [NSString stringWithFormat:@"An iTerm2 Python Runtime must be downloaded to proceed. The download failed: %@",
+                    alert.informativeText = [NSString stringWithFormat:@"An iTerm2 Python Runtime must be downloaded to proceed.\n\nThe download failed: %@",
                                              lastPhase.error.localizedDescription];
                 }
                 [alert runModal];
@@ -323,15 +346,12 @@ NSString *const iTermPythonRuntimeDownloaderDidInstallRuntimeNotification = @"iT
     }
 }
 
-+ (NSString *)bestPythonVersionAt:(NSString *)path {
-    // TODO: This is convenient but I'm not sure it's technically correct for all possible Python
-    // versions. But it'll do for three dotted numbers, which is the norm.
-    SUStandardVersionComparator *comparator = [[SUStandardVersionComparator alloc] init];
-    NSString *best = nil;
++ (NSArray<NSString *> *)pythonVersionsAt:(NSString *)path {
     NSDirectoryEnumerator *enumerator = [NSFileManager.defaultManager enumeratorAtURL:[NSURL fileURLWithPath:path]
                                                            includingPropertiesForKeys:nil
                                                                               options:NSDirectoryEnumerationSkipsSubdirectoryDescendants
                                                                          errorHandler:nil];
+    NSMutableArray<NSString *> *result = [NSMutableArray array];
     for (NSURL *url in enumerator) {
         NSString *file = url.path.lastPathComponent;
         NSArray<NSString *> *parts = [file componentsSeparatedByString:@"."];
@@ -339,12 +359,20 @@ NSString *const iTermPythonRuntimeDownloaderDidInstallRuntimeNotification = @"iT
             return [anObject isNumeric];
         }];
         if (allNumeric) {
-            if (!best || [comparator compareVersion:best toVersion:file] == NSOrderedAscending) {
-                best = file;
-            }
+            [result addObject:file];
         }
     }
-    return best;
+    return result;
+}
+
++ (NSString *)bestPythonVersionAt:(NSString *)path {
+    // TODO: This is convenient but I'm not sure it's technically correct for all possible Python
+    // versions. But it'll do for three dotted numbers, which is the norm.
+    SUStandardVersionComparator *comparator = [[SUStandardVersionComparator alloc] init];
+    NSArray<NSString *> *versions = [self pythonVersionsAt:path];
+    return [versions maxWithComparator:^NSComparisonResult(NSString *a, NSString *b) {
+        return [comparator compareVersion:a toVersion:b];
+    }];
 }
 
 + (NSString *)latestPythonVersion {
@@ -456,7 +484,13 @@ NSString *const iTermPythonRuntimeDownloaderDidInstallRuntimeNotification = @"iT
                 return;
             }
 
-            [self installDependencies:dependencies to:container completion:^(NSArray<NSString *> *failures, NSArray<NSData *> *outputs) {
+            // pip3 must use the python in this environment so it will install new dependencies to the right place.
+            NSString *const pathToEnvironment = [container.path stringByAppendingPathComponent:@"iterm2env"];
+            NSString *const pip3 = [self pip3At:pathToEnvironment pythonVersion:pythonVersion];
+            NSString *const pathToPython = [self pyenvAt:pathToEnvironment pythonVersion:pythonVersion];
+            [self replaceShebangInScriptAtPath:pip3 with:[NSString stringWithFormat:@"#!%@", pathToPython]];
+
+            [self installDependencies:dependencies to:container pythonVersion:pythonVersion completion:^(NSArray<NSString *> *failures, NSArray<NSData *> *outputs) {
                 if (failures.count) {
                     NSAlert *alert = [[NSAlert alloc] init];
                     alert.messageText = @"Dependency Installation Failed";
@@ -497,6 +531,7 @@ NSString *const iTermPythonRuntimeDownloaderDidInstallRuntimeNotification = @"iT
                     [iTermSetupPyParser writeSetupPyToFile:[container.path stringByAppendingPathComponent:@"setup.py"]
                                                       name:container.path.lastPathComponent
                                               dependencies:dependencies
+                                       ensureiTerm2Present:YES
                                              pythonVersion:pythonVersionToUse];
                 }
                 completion(YES);
@@ -505,8 +540,45 @@ NSString *const iTermPythonRuntimeDownloaderDidInstallRuntimeNotification = @"iT
     });
 }
 
+- (void)replaceShebangInScriptAtPath:(NSString *)scriptPath with:(NSString *)newShebang {
+    NSError *error = nil;
+    NSString *script = [NSString stringWithContentsOfFile:scriptPath encoding:NSUTF8StringEncoding error:&error];
+    if (!script) {
+        DLog(@"Failed to replace shebang in %@ because I couldn't read the file contents: %@", scriptPath, error);
+        return;
+    }
+    NSMutableArray<NSString *> *lines = [[script componentsSeparatedByString:@"\n"] mutableCopy];
+    if (lines.count == 0) {
+        DLog(@"Empty script at %@", scriptPath);
+        return;
+    }
+    if (![lines.firstObject hasPrefix:@"#!/"]) {
+        DLog(@"First line of %@ is not a shebang: %@", scriptPath, lines.firstObject);
+        return;
+    }
+    const BOOL unlinkedOk = [[NSFileManager defaultManager] removeItemAtPath:scriptPath error:&error];
+    if (!unlinkedOk) {
+        DLog(@"Failed to unlink %@: %@", scriptPath, error);
+        return;
+    }
+    lines[0] = newShebang;
+    NSString *fixedScript = [lines componentsJoinedByString:@"\n"];
+    const BOOL ok = [fixedScript writeToFile:scriptPath atomically:NO encoding:NSUTF8StringEncoding error:&error];
+    if (!ok) {
+        DLog(@"Write to %@ failed: %@", scriptPath, error);
+    }
+    const BOOL chmodOk = [[NSFileManager defaultManager] setAttributes:@{ NSFilePosixPermissions: @(0755) }
+                                                          ofItemAtPath:scriptPath
+                                                                 error:&error];
+    if (!chmodOk) {
+        DLog(@"Failed to chmod 0755 %@: %@", scriptPath, error);
+    }
+
+}
+
 - (void)installDependencies:(NSArray<NSString *> *)dependencies
                          to:(NSURL *)container
+              pythonVersion:(NSString *)pythonVersion
                  completion:(void (^)(NSArray<NSString *> *failures,
                                       NSArray<NSData *> *outputs))completion {
     if (dependencies.count == 0) {
@@ -514,10 +586,12 @@ NSString *const iTermPythonRuntimeDownloaderDidInstallRuntimeNotification = @"iT
         return;
     }
     [self runPip3InContainer:container
+               pythonVersion:pythonVersion
                withArguments:@[ @"install", dependencies.firstObject ]
                   completion:^(BOOL thisOK, NSData *output) {
                       [self installDependencies:[dependencies subarrayFromIndex:1]
                                              to:container
+                                  pythonVersion:pythonVersion
                                      completion:^(NSArray<NSString *> *failures,
                                                   NSArray<NSData *> *outputs) {
                                          if (!thisOK) {
@@ -530,18 +604,32 @@ NSString *const iTermPythonRuntimeDownloaderDidInstallRuntimeNotification = @"iT
                   }];
 }
 
-- (void)runPip3InContainer:(NSURL *)container withArguments:(NSArray<NSString *> *)arguments completion:(void (^)(BOOL ok, NSData *output))completion {
-    NSString *pip3 = [self pip3At:[container.path stringByAppendingPathComponent:@"iterm2env"]];
+- (void)runPip3InContainer:(NSURL *)container
+             pythonVersion:(NSString *)pythonVersion
+             withArguments:(NSArray<NSString *> *)arguments
+                completion:(void (^)(BOOL ok, NSData *output))completion {
+    NSString *pip3 = [self pip3At:[container.path stringByAppendingPathComponent:@"iterm2env"]
+                    pythonVersion:pythonVersion];
+    if (!pip3) {
+        completion(NO, [[NSString stringWithFormat:@"pip3 not found for python version %@ in %@", pythonVersion, container.path] dataUsingEncoding:NSUTF8StringEncoding]);
+        return;
+    }
     NSMutableData *output = [NSMutableData data];
     iTermCommandRunner *runner = [[iTermCommandRunner alloc] initWithCommand:pip3
                                                                withArguments:arguments
                                                                         path:container.path];
+    NSString *identifier = [runner description];
     runner.outputHandler = ^(NSData *data) {
+        DLog(@"Runner %@ recvd: %@", identifier, [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]);
         [output appendData:data];
     };
     runner.completion = ^(int status) {
+        if (status != 0) {
+            DLog(@"Runner %@ FAILED with %@", identifier, [[NSString alloc] initWithData:output encoding:NSUTF8StringEncoding]);
+        }
         completion(status == 0, output);
     };
+    DLog(@"Runner %@ running pip3 %@", runner, arguments);
     [runner run];
 }
 
