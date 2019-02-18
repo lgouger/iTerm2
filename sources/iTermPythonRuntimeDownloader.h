@@ -33,6 +33,7 @@ extern NSString *const iTermPythonRuntimeDownloaderDidInstallRuntimeNotification
 // This downloads only if the minimum version is not installed.
 - (void)downloadOptionalComponentsIfNeededWithConfirmation:(BOOL)confirm
                                              pythonVersion:(NSString *)pythonVersion
+                                        requiredToContinue:(BOOL)requiredToContinue
                                             withCompletion:(void (^)(BOOL))completion;
 
 // Returns the path of the python binary given a root directory having a pyenv.
@@ -41,6 +42,7 @@ extern NSString *const iTermPythonRuntimeDownloaderDidInstallRuntimeNotification
 
 // Install a copy of the current environment somewhere.
 - (void)installPythonEnvironmentTo:(NSURL *)container
+                  eventualLocation:(NSURL *)eventualLocation
                      pythonVersion:(NSString *)pythonVersion
                       dependencies:(NSArray<NSString *> *)dependencies
                      createSetupPy:(BOOL)createSetupPy

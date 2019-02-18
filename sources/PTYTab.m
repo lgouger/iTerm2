@@ -7,13 +7,16 @@
 #import "iTermApplicationDelegate.h"
 #import "iTermController.h"
 #import "iTermFlexibleView.h"
+#import "iTermMoveTabToWindowBuiltInFunction.h"
 #import "iTermNotificationController.h"
 #import "iTermPowerManager.h"
 #import "iTermPreferences.h"
 #import "iTermPromptOnCloseReason.h"
 #import "iTermProfilePreferences.h"
 #import "iTermSwiftyString.h"
+#import "iTermVariableReference.h"
 #import "iTermVariableScope.h"
+#import "iTermVariableScope+Tab.h"
 #import "MovePaneController.h"
 #import "NSAppearance+iTerm.h"
 #import "NSArray+iTerm.h"
@@ -195,6 +198,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 
     BOOL _resizingSplit;
     iTermSwiftyString *_tabTitleOverrideSwiftyString;
+    iTermVariableReference *_tabTitleOverrideFormatReference;
 
     NSInteger _numberOfSplitViewDragsInProgress;
 
@@ -270,6 +274,10 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 
 + (void)registerSessionsInArrangement:(NSDictionary *)arrangement {
     [self _recursiveRegisterSessionsInArrangement:arrangement[TAB_ARRANGEMENT_ROOT]];
+}
+
++ (void)registerBuiltInFunctions {
+    [iTermMoveTabToWindowBuiltInFunction registerBuiltInFunction];
 }
 
 + (NSSize)cellSizeForBookmark:(Profile *)bookmark {
@@ -379,6 +387,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
                                                        owner:self];
     [self.variablesScope setValue:_userVariables forVariableNamed:@"user"];
     [self.variablesScope setValue:[iTermVariables globalInstance] forVariableNamed:iTermVariableKeyGlobalScopeName];
+    [self.variablesScope setValue:[@(self.uniqueId) stringValue] forVariableNamed:iTermVariableKeyTabID];
 
     self.tmuxWindow = -1;
     _sessionsWithDeferredFontChanges = [[NSMutableArray alloc] init];
@@ -399,6 +408,12 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
                                              selector:@selector(screenParametersDidChange:)
                                                  name:NSApplicationDidChangeScreenParametersNotification
                                                object:nil];
+    _tabTitleOverrideFormatReference = [[iTermVariableReference alloc] initWithPath:iTermVariableKeyTabTitleOverrideFormat
+                                                                              scope:self.variablesScope];
+    __weak __typeof(self) weakSelf = self;
+    _tabTitleOverrideFormatReference.onChangeBlock = ^{
+        [weakSelf updateTitleOverrideFromFormatVariable];
+    };
 }
 
 - (void)dealloc {
@@ -446,6 +461,13 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 }
 
 #pragma mark - Everything else
+
+- (void)setDelegate:(id<PTYTabDelegate>)delegate {
+    _delegate = delegate;
+    [self.variablesScope setValue:[delegate tabWindowVariables:self]
+                 forVariableNamed:iTermVariableKeyTabWindow
+                             weak:YES];
+}
 
 - (BOOL)useSeparateStatusbarsPerPane {
     if (![iTermPreferences boolForKey:kPreferenceKeySeparateStatusBarsPerPane]) {
@@ -4015,7 +4037,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     }
 
     [session1Tab fitSessionToCurrentViewSize:session1];
-    [session2Tab fitSessionToCurrentViewSize:session1];
+    [session2Tab fitSessionToCurrentViewSize:session2];
 
     DLog(@"After swap, %@ has superview %@ and %@ has superview %@",
          session1.view, session1.view.superview,
@@ -4073,10 +4095,8 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     [self updateTabTitleForCurrentSessionName:sessionName];
 }
 
-- (iTermVariableScope *)variablesScope {
-    iTermVariableScope *scope = [[iTermVariableScope alloc] init];
-    [scope addVariables:_variables toScopeNamed:nil];
-    return scope;
+- (iTermVariableScope<iTermTabScope> *)variablesScope {
+    return [iTermVariableScope newTabScopeWithVariables:_variables];
 }
 
 - (id)valueForVariable:(NSString *)name {
@@ -4084,10 +4104,16 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 }
 
 - (void)setTitleOverride:(NSString *)titleOverride {
+    [self.variablesScope setValue:titleOverride forVariableNamed:iTermVariableKeyTabTitleOverrideFormat];
+}
+
+- (void)updateTitleOverrideFromFormatVariable {
+    NSString *titleOverride = [self.variablesScope valueForVariableName:iTermVariableKeyTabTitleOverrideFormat];
     [_tabTitleOverrideSwiftyString invalidate];
     if (!titleOverride) {
         _tabTitleOverrideSwiftyString = nil;
         [self.variablesScope setValue:nil forVariableNamed:iTermVariableKeyTabTitleOverride];
+        [self updateTabTitle];
         return;
     }
     __weak __typeof(self) weakSelf = self;
@@ -4099,6 +4125,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
              [weakSelf.variablesScope setValue:newValue forVariableNamed:iTermVariableKeyTabTitleOverride];
              [weakSelf updateTabTitle];
          }];
+
 }
 
 - (NSString *)titleOverride {
@@ -5225,7 +5252,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 }
 
 - (VT100GridSize)sessionTmuxSizeWithProfile:(Profile *)profile {
-    if ([iTermAdvancedSettingsModel tmuxUsesDedicatedProfile]) {
+    if ([iTermPreferences useTmuxProfile]) {
         return VT100GridSizeMake([[profile objectForKey:KEY_COLUMNS] intValue],
                                  [[profile objectForKey:KEY_ROWS] intValue]);
     } else {
@@ -5303,6 +5330,18 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 }
 
 - (BOOL)sessionShouldSendWindowSizeIOCTL:(PTYSession *)session {
+    if ([[MovePaneController sharedInstance] dropping]) {
+        return YES;
+    }
+    if ([[PSMTabDragAssistant sharedDragAssistant] dropping]) {
+        return YES;
+    }
+    if ([[MovePaneController sharedInstance] isDragInProgress]) {
+        return NO;
+    }
+    if ([[PSMTabDragAssistant sharedDragAssistant] isDragging]) {
+        return NO;
+    }
     return _temporarilyUnmaximizedSessionGUID == nil;
 }
 

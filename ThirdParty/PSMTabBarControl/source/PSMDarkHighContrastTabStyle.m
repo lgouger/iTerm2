@@ -15,7 +15,7 @@
   return @"Dark High Contrast";
 }
 
-- (NSColor *)textColorDefaultSelected:(BOOL)selected backgroundColor:(NSColor *)backgroundColor {
+- (NSColor *)textColorDefaultSelected:(BOOL)selected backgroundColor:(NSColor *)backgroundColor windowIsMainAndAppIsActive:(BOOL)mainAndActive {
   return [NSColor whiteColor];
 }
 

@@ -284,7 +284,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (void)chooseAndImportScript {
     NSOpenPanel *panel = [[NSOpenPanel alloc] init];
-    panel.allowedFileTypes = @[ @"zip", @"itermscript" ];
+    panel.allowedFileTypes = @[ @"zip", @"its" ];
     if ([panel runModal] == NSModalResponseOK) {
         NSURL *url = panel.URL;
         dispatch_async(dispatch_get_main_queue(), ^{
@@ -296,24 +296,41 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)importFromURL:(NSURL *)url {
     [iTermScriptImporter importScriptFromURL:url
                                userInitiated:YES
-                                  completion:^(NSString * _Nullable errorMessage) {
+                                  completion:^(NSString * _Nullable errorMessage, BOOL quiet, NSURL *location) {
                                       // Mojave deadlocks if you do this without the dispatch_async
                                       dispatch_async(dispatch_get_main_queue(), ^{
-                                          [self importDidFinishWithErrorMessage:errorMessage];
+                                          if (quiet) {
+                                              return;
+                                          }
+                                          [self importDidFinishWithErrorMessage:errorMessage
+                                                                       location:location
+                                                                    originalURL:url];
                                       });
                                   }];
 }
 
-- (void)importDidFinishWithErrorMessage:(NSString *)errorMessage {
+- (void)importDidFinishWithErrorMessage:(NSString *)errorMessage location:(NSURL *)location originalURL:(NSURL *)url {
     if (errorMessage) {
         NSAlert *alert = [[NSAlert alloc] init];
         alert.messageText = @"Could Not Install Script";
         alert.informativeText = errorMessage;
-        [alert runModal];
+        [alert addButtonWithTitle:@"OK"];
+        [alert addButtonWithTitle:@"Try Again"];
+        if ([alert runModal] ==  NSAlertSecondButtonReturn) {
+            [self importFromURL:url];
+        }
     } else {
         NSAlert *alert = [[NSAlert alloc] init];
         alert.messageText = @"Script Imported Successfully";
-        [alert runModal];
+        [alert addButtonWithTitle:@"OK"];
+        [alert addButtonWithTitle:@"Launch"];
+        const NSModalResponse response = [alert runModal];
+        if (response == NSAlertFirstButtonReturn) {
+            return;
+        }
+        if (response == NSAlertSecondButtonReturn) {
+            [self launchScriptWithAbsolutePath:location.path];
+        }
     }
 }
 
@@ -412,9 +429,23 @@ NS_ASSUME_NONNULL_BEGIN
         } else {
             [self showAlertForScript:fullPath error:errorInfo];
         }
-    } else {
-        [[NSWorkspace sharedWorkspace] launchApplication:fullPath];
+        return;
     }
+    if ([[NSFileManager defaultManager] itemIsDirectory:fullPath]) {
+        iTermWarningSelection selection = [iTermWarning showWarningWithTitle:[NSString stringWithFormat:@"The script “%@” is malformed.", fullPath.lastPathComponent]
+                                                                     actions:@[ @"OK", @"Reveal" ]
+                                                                   accessory:nil
+                                                                  identifier:@"NoSyncScriptMalformed"
+                                                                 silenceable:kiTermWarningTypeTemporarilySilenceable
+                                                                     heading:@"Cannot Run Script"
+                                                                      window:nil];
+        if (selection == kiTermWarningSelection1) {
+            [[NSWorkspace sharedWorkspace] activateFileViewerSelectingURLs:@[ [NSURL fileURLWithPath:fullPath] ]];
+            return;
+        }
+        return;
+    }
+    [[NSWorkspace sharedWorkspace] launchApplication:fullPath];
 }
 
 // NOTE: This logic needs to be kept in sync with -launchScriptWithAbsolutePath
@@ -466,16 +497,17 @@ NS_ASSUME_NONNULL_BEGIN
     }
 
     NSArray<NSString *> *dependencies = nil;
-    NSURL *url = [self runSavePanelForNewScriptWithPicker:picker dependencies:&dependencies];
+    NSString *pythonVersion = nil;
+    NSURL *url = [self runSavePanelForNewScriptWithPicker:picker dependencies:&dependencies pythonVersion:&pythonVersion];
     if (url) {
-#warning TODO: Make it possible to pick a python version
         [[iTermPythonRuntimeDownloader sharedInstance] downloadOptionalComponentsIfNeededWithConfirmation:YES
-                                                                                            pythonVersion:nil
+                                                                                            pythonVersion:pythonVersion
+                                                                                       requiredToContinue:YES
                                                                                            withCompletion:^(BOOL ok) {
             if (!ok) {
                 return;
             }
-            [self reallyCreateNewPythonScriptAtURL:url picker:picker dependencies:dependencies pythonVersion:nil];
+            [self reallyCreateNewPythonScriptAtURL:url picker:picker dependencies:dependencies pythonVersion:pythonVersion];
         }];
     }
 }
@@ -496,7 +528,7 @@ NS_ASSUME_NONNULL_BEGIN
                                                                      [pleaseWait.window makeKeyAndOrderFront:nil];
                                                                  }];
         _disablePathWatcher++;
-        [[iTermPythonRuntimeDownloader sharedInstance] installPythonEnvironmentTo:folder pythonVersion:pythonVersion dependencies:dependencies createSetupPy:YES completion:^(BOOL ok) {
+        [[iTermPythonRuntimeDownloader sharedInstance] installPythonEnvironmentTo:folder eventualLocation:folder pythonVersion:pythonVersion dependencies:dependencies createSetupPy:YES completion:^(BOOL ok) {
             [[NSNotificationCenter defaultCenter] removeObserver:token];
             [pleaseWait.window close];
             if (!ok) {
@@ -547,15 +579,39 @@ NS_ASSUME_NONNULL_BEGIN
     [[NSWorkspace sharedWorkspace] selectFile:destinationTemplatePath inFileViewerRootedAtPath:@""];
 }
 
+- (NSPopUpButton *)newPythonVersionPopup {
+    NSPopUpButton *popUpButton = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(10, 0, 50, 50)];
+
+    NSArray<NSString *> *components = @[ @"iterm2env", @"versions" ];
+    NSString *path = [[NSFileManager defaultManager] applicationSupportDirectoryWithoutSpaces];
+    for (NSString *part in components) {
+        path = [path stringByAppendingPathComponent:part];
+    }
+    NSString *best = [iTermPythonRuntimeDownloader bestPythonVersionAt:path];
+    NSMenuItem *defaultMenuItem = nil;
+    for (NSString *pythonVersion in [iTermPythonRuntimeDownloader pythonVersionsAt:path]) {
+        NSMenuItem *menuItem = [[NSMenuItem alloc] initWithTitle:pythonVersion action:NULL keyEquivalent:@""];
+        if ([pythonVersion isEqualToString:best]) {
+            defaultMenuItem = menuItem;
+        }
+        [popUpButton.menu addItem:menuItem];
+    }
+    if (defaultMenuItem) {
+        [popUpButton selectItem:defaultMenuItem];
+    }
+    return popUpButton;
+}
+
 - (NSTokenField *)newTokenFieldForDependencies {
     NSTokenField *tokenField = [[NSTokenField alloc] initWithFrame:NSMakeRect(0, 0, 100, 22)];
     tokenField.tokenizingCharacterSet = [NSCharacterSet whitespaceCharacterSet];
-    tokenField.placeholderString = @"Package names separated by spaces";
+    tokenField.placeholderString = @"Package names";
     tokenField.font = [NSFont systemFontOfSize:13];
     return tokenField;
 }
 
-- (NSView *)newAccessoryViewForSavePanelWithTokenField:(NSTokenField *)tokenField {
+- (NSView *)newAccessoryViewForSavePanelWithTokenField:(NSTokenField *)tokenField
+                                    pythonVersionPopup:(NSPopUpButton *)pythonVersionPopup {
     NSTextField *label = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 5, 60, 22)];
     [label setEditable:NO];
     [label setStringValue:@"PyPI Dependencies:"];
@@ -565,47 +621,75 @@ NS_ASSUME_NONNULL_BEGIN
     [label setDrawsBackground:NO];
     [label sizeToFit];
 
+    NSTextField *pythonVersionLabel = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 5, 60, 22)];
+    [pythonVersionLabel setEditable:NO];
+    [pythonVersionLabel setStringValue:@"Python Version:"];
+    pythonVersionLabel.font = [NSFont systemFontOfSize:13];
+    [pythonVersionLabel setBordered:NO];
+    [pythonVersionLabel setBezeled:NO];
+    [pythonVersionLabel setDrawsBackground:NO];
+    [pythonVersionLabel sizeToFit];
+
     const CGFloat tokenFieldWidth = 300;
     const CGFloat margin = 9;
     NSView  *accessoryView = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, NSMaxX(tokenField.frame) + margin + tokenFieldWidth, 32)];
     [accessoryView addSubview:label];
+    [accessoryView addSubview:pythonVersionLabel];
     [accessoryView addSubview:tokenField];
+    [accessoryView addSubview:pythonVersionPopup];
     tokenField.frame = NSMakeRect(NSMaxX(label.frame) + margin, 5, tokenFieldWidth, 22);
 
     accessoryView.translatesAutoresizingMaskIntoConstraints = NO;
     label.translatesAutoresizingMaskIntoConstraints = NO;
+    pythonVersionLabel.translatesAutoresizingMaskIntoConstraints = NO;
     tokenField.translatesAutoresizingMaskIntoConstraints = NO;
+    pythonVersionPopup.translatesAutoresizingMaskIntoConstraints = NO;
 
     const CGFloat sideMargin = 9;
     const CGFloat verticalMargin = 5;
-    [accessoryView addConstraint:[NSLayoutConstraint constraintWithItem:label
-                                                              attribute:NSLayoutAttributeLeading
-                                                              relatedBy:NSLayoutRelationEqual
-                                                                 toItem:accessoryView
-                                                              attribute:NSLayoutAttributeLeading
-                                                             multiplier:1
-                                                               constant:sideMargin]];
+    NSDictionary *views = @{ @"label": label,
+                             @"pythonVersionLabel": pythonVersionLabel,
+                             @"tokenField": tokenField,
+                             @"pythonVersionPopup": pythonVersionPopup };
+    NSDictionary *metrics = @{ @"sideMargin": @(sideMargin),
+                               @"verticalMargin": @(verticalMargin) };
+    [accessoryView addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|-sideMargin-[label]"
+                                                                          options:0
+                                                                          metrics:metrics
+                                                                            views:views]];
+    [accessoryView addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:[tokenField]-sideMargin-|"
+                                                                          options:0
+                                                                          metrics:metrics
+                                                                            views:views]];
+    [accessoryView addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|-sideMargin-[pythonVersionLabel]"
+                                                                          options:0
+                                                                          metrics:metrics
+                                                                            views:views]];
+    [accessoryView addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"V:|-verticalMargin-[label]-verticalMargin-[pythonVersionPopup]-verticalMargin-|"
+                                                                          options:0
+                                                                          metrics:metrics
+                                                                            views:views]];
+
+    // tokenField.leading >= label.trailing + 5
     [accessoryView addConstraint:[NSLayoutConstraint constraintWithItem:tokenField
                                                               attribute:NSLayoutAttributeLeading
-                                                              relatedBy:NSLayoutRelationEqual
+                                                              relatedBy:NSLayoutRelationGreaterThanOrEqual
                                                                  toItem:label
                                                               attribute:NSLayoutAttributeTrailing
                                                              multiplier:1
                                                                constant:5]];
-    [accessoryView addConstraint:[NSLayoutConstraint constraintWithItem:tokenField
-                                                              attribute:NSLayoutAttributeTrailing
-                                                              relatedBy:NSLayoutRelationEqual
-                                                                 toItem:accessoryView
+    // pythonVersionPopup.trailing >= pythonVersionLabel.trailing + 5
+    [accessoryView addConstraint:[NSLayoutConstraint constraintWithItem:pythonVersionPopup
+                                                              attribute:NSLayoutAttributeLeading
+                                                              relatedBy:NSLayoutRelationGreaterThanOrEqual
+                                                                 toItem:pythonVersionLabel
                                                               attribute:NSLayoutAttributeTrailing
                                                              multiplier:1
-                                                               constant:-sideMargin]];
-    [accessoryView addConstraint:[NSLayoutConstraint constraintWithItem:tokenField
-                                                              attribute:NSLayoutAttributeBottom
-                                                              relatedBy:NSLayoutRelationEqual
-                                                                 toItem:accessoryView
-                                                              attribute:NSLayoutAttributeBottom
-                                                             multiplier:1
-                                                               constant:-verticalMargin]];
+                                                               constant:5]];
+    [pythonVersionPopup setContentCompressionResistancePriority:NSLayoutPriorityRequired forOrientation:NSLayoutConstraintOrientationHorizontal];
+    [tokenField setContentCompressionResistancePriority:NSLayoutPriorityRequired forOrientation:NSLayoutConstraintOrientationHorizontal];
+
+    // tokenField.baseline = label.basline
     [accessoryView addConstraint:[NSLayoutConstraint constraintWithItem:tokenField
                                                               attribute:NSLayoutAttributeBaseline
                                                               relatedBy:NSLayoutRelationEqual
@@ -613,26 +697,41 @@ NS_ASSUME_NONNULL_BEGIN
                                                               attribute:NSLayoutAttributeBaseline
                                                              multiplier:1
                                                                constant:0]];
-    [accessoryView addConstraint:[NSLayoutConstraint constraintWithItem:tokenField
-                                                              attribute:NSLayoutAttributeTop
+    // pythonVersionPopup.leading = tokenField.leading
+    [accessoryView addConstraint:[NSLayoutConstraint constraintWithItem:pythonVersionPopup
+                                                              attribute:NSLayoutAttributeLeading
                                                               relatedBy:NSLayoutRelationEqual
-                                                                 toItem:accessoryView
-                                                              attribute:NSLayoutAttributeTop
+                                                                 toItem:tokenField
+                                                              attribute:NSLayoutAttributeLeading
                                                              multiplier:1
-                                                               constant:verticalMargin]];
+                                                               constant:0]];
 
+    // Make the token field want to be as wide as possible.
+    NSLayoutConstraint *constraint = [NSLayoutConstraint constraintWithItem:tokenField
+                                                                  attribute:NSLayoutAttributeWidth
+                                                                  relatedBy:NSLayoutRelationEqual
+                                                                     toItem:accessoryView
+                                                                  attribute:NSLayoutAttributeWidth
+                                                                 multiplier:1
+                                                                   constant:0];
+    constraint.priority = NSLayoutPriorityDefaultLow;
+    [accessoryView addConstraint:constraint];
     return accessoryView;
 }
 
 - (nullable NSURL *)runSavePanelForNewScriptWithPicker:(iTermScriptTemplatePickerWindowController *)picker
-                                          dependencies:(out NSArray<NSString *> **)dependencies {
+                                          dependencies:(out NSArray<NSString *> **)dependencies
+                                         pythonVersion:(out NSString **)pythonVersionOut {
     NSSavePanel *savePanel = [NSSavePanel savePanel];
     savePanel.delegate = self;
     NSTokenField *tokenField = nil;
+    NSPopUpButton *pythonVersionPopup = nil;
     if (picker.selectedEnvironment == iTermScriptEnvironmentPrivateEnvironment) {
         savePanel.allowedFileTypes = @[ @"" ];
         tokenField = [self newTokenFieldForDependencies];
-        savePanel.accessoryView = [self newAccessoryViewForSavePanelWithTokenField:tokenField];
+        pythonVersionPopup = [self newPythonVersionPopup];
+        savePanel.accessoryView = [self newAccessoryViewForSavePanelWithTokenField:tokenField
+                                                                pythonVersionPopup:pythonVersionPopup];
     } else {
         savePanel.allowedFileTypes = @[ @"py" ];
     }
@@ -644,6 +743,7 @@ NS_ASSUME_NONNULL_BEGIN
         NSString *safeFilename = [filename stringByReplacingOccurrencesOfString:@" " withString:@"_"];
         if ([filename isEqualToString:safeFilename]) {
             *dependencies = tokenField.objectValue;
+            *pythonVersionOut = pythonVersionPopup.selectedItem.title;
             return url;
         } else {
             NSAlert *alert = [[NSAlert alloc] init];
@@ -654,7 +754,9 @@ NS_ASSUME_NONNULL_BEGIN
             if ([alert runModal] == NSAlertFirstButtonReturn) {
                 return [[url URLByDeletingLastPathComponent] URLByAppendingPathComponent:safeFilename];
             } else {
-                return [self runSavePanelForNewScriptWithPicker:picker dependencies:dependencies];
+                return [self runSavePanelForNewScriptWithPicker:picker
+                                                   dependencies:dependencies
+                                                  pythonVersion:pythonVersionOut];
             }
         }
     } else {
@@ -680,7 +782,7 @@ NS_ASSUME_NONNULL_BEGIN
     return [self relativePathFrom:possibleSuper toPath:possibleSub relative:@""];
 }
 
-- (NSString *)relativePathFrom:(NSString *)possibleSuper toPath:(NSString *)possibleSub relative:(NSString *)relative {
+- (nullable NSString *)relativePathFrom:(NSString *)possibleSuper toPath:(NSString *)possibleSub relative:(NSString *)relative {
     if (possibleSub.length < possibleSuper.length) {
         return nil;
     }

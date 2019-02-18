@@ -103,11 +103,6 @@ NSString *const SessionViewWasSelectedForInspectionNotification = @"SessionViewW
     BOOL _useMetal;
     iTermMetalClipView *_metalClipView;
     iTermDropDownFindViewController *_dropDownFindViewController;
-    enum {
-        iTermSessionViewFindDriverDropDown,
-        iTermSessionViewFindDriverTemporaryStatusBar,
-        iTermSessionViewFindDriverPermanentStatusBar
-    } _findDriver;
     iTermFindDriver *_dropDownFindDriver;
     iTermFindDriver *_permanentStatusBarFindDriver;
     iTermFindDriver *_temporaryStatusBarFindDriver;
@@ -204,8 +199,16 @@ NSString *const SessionViewWasSelectedForInspectionNotification = @"SessionViewW
 }
 
 - (iTermDropDownFindViewController *)newDropDownFindView {
+    NSString *nibName;
+    if ([iTermAdvancedSettingsModel useOldStyleDropDownViews]) {
+        nibName = @"FindView";
+    } else {
+        nibName = @"MinimalFindView";
+    }
+
     iTermDropDownFindViewController *dropDownViewController =
-        [[iTermDropDownFindViewController alloc] initWithNibName:@"FindView" bundle:[NSBundle bundleForClass:self.class]];
+        [[iTermDropDownFindViewController alloc] initWithNibName:nibName
+                                                          bundle:[NSBundle bundleForClass:self.class]];
     [[dropDownViewController view] setHidden:YES];
     [super addSubview:dropDownViewController.view];
     NSRect aRect = [self frame];
@@ -216,7 +219,7 @@ NSString *const SessionViewWasSelectedForInspectionNotification = @"SessionViewW
 }
 
 - (BOOL)isDropDownSearchVisible {
-    return _findDriver == iTermSessionViewFindDriverDropDown && _dropDownFindDriver.isVisible;
+    return _findDriverType == iTermSessionViewFindDriverDropDown && _dropDownFindDriver.isVisible;
 }
 
 - (void)setFindDriverDelegate:(id<iTermFindDriverDelegate>)delegate {
@@ -230,7 +233,7 @@ NSString *const SessionViewWasSelectedForInspectionNotification = @"SessionViewW
 }
 
 - (BOOL)findViewHasKeyboardFocus {
-    switch (_findDriver) {
+    switch (_findDriverType) {
         case iTermSessionViewFindDriverDropDown:
             return !_dropDownFindDriver.isVisible;
         case iTermSessionViewFindDriverPermanentStatusBar:
@@ -244,7 +247,7 @@ NSString *const SessionViewWasSelectedForInspectionNotification = @"SessionViewW
 
 - (BOOL)findViewIsHidden {
 
-    switch (_findDriver) {
+    switch (_findDriverType) {
         case iTermSessionViewFindDriverDropDown:
             return !_dropDownFindDriver.isVisible;
         case iTermSessionViewFindDriverPermanentStatusBar:
@@ -257,7 +260,7 @@ NSString *const SessionViewWasSelectedForInspectionNotification = @"SessionViewW
 }
 
 - (iTermFindDriver *)findDriver {
-    switch (_findDriver) {
+    switch (_findDriverType) {
         case iTermSessionViewFindDriverDropDown:
             return _dropDownFindDriver;
         case iTermSessionViewFindDriverPermanentStatusBar:
@@ -282,10 +285,12 @@ NSString *const SessionViewWasSelectedForInspectionNotification = @"SessionViewW
 
 - (void)showFindUI {
     iTermStatusBarViewController *statusBarViewController = self.delegate.sessionViewStatusBarViewController;
-    if (self.findViewIsHidden) {
+    if (_findDriverType == iTermSessionViewFindDriverPermanentStatusBar) {
+        statusBarViewController.mustShowSearchComponent = YES;
+    } else if (self.findViewIsHidden) {
         if (statusBarViewController) {
             if (!statusBarViewController.temporaryLeftComponent) {
-                _findDriver = iTermSessionViewFindDriverTemporaryStatusBar;
+                _findDriverType = iTermSessionViewFindDriverTemporaryStatusBar;
                 NSDictionary *knobs = @{ iTermStatusBarPriorityKey: @(INFINITY),
                                          iTermStatusBarSearchComponentIsTemporaryKey: @YES };
                 NSDictionary *configuration = @{ iTermStatusBarComponentConfigurationKeyKnobValues: knobs};
@@ -296,9 +301,10 @@ NSString *const SessionViewWasSelectedForInspectionNotification = @"SessionViewW
                 _temporaryStatusBarFindDriver.delegate = _dropDownFindDriver.delegate;
                 component.statusBarComponentSearchViewController.driver = _temporaryStatusBarFindDriver;
                 statusBarViewController.temporaryLeftComponent = component;
+                [_temporaryStatusBarFindDriver open];
             }
         } else {
-            _findDriver = iTermSessionViewFindDriverDropDown;
+            _findDriverType = iTermSessionViewFindDriverDropDown;
             [_temporaryStatusBarFindDriver open];
         }
     }
@@ -306,6 +312,7 @@ NSString *const SessionViewWasSelectedForInspectionNotification = @"SessionViewW
 }
 
 - (void)findViewDidHide {
+    self.delegate.sessionViewStatusBarViewController.mustShowSearchComponent = NO;
     self.delegate.sessionViewStatusBarViewController.temporaryLeftComponent = nil;
 }
 
@@ -1242,14 +1249,14 @@ NSString *const SessionViewWasSelectedForInspectionNotification = @"SessionViewW
 
 - (void)updateFindDriver {
     iTermStatusBarViewController *statusBarViewController = [self.delegate sessionViewStatusBarViewController];
-    if (statusBarViewController.searchViewController) {
-        _findDriver = iTermSessionViewFindDriverPermanentStatusBar;
+    if (statusBarViewController.searchViewController && statusBarViewController.temporaryLeftComponent == nil) {
+        _findDriverType = iTermSessionViewFindDriverPermanentStatusBar;
         _permanentStatusBarFindDriver = [[iTermFindDriver alloc] initWithViewController:statusBarViewController.searchViewController];
         _permanentStatusBarFindDriver.delegate = self.findDriverDelegate;
     } else if (statusBarViewController) {
-        _findDriver = iTermSessionViewFindDriverTemporaryStatusBar;
+        _findDriverType = iTermSessionViewFindDriverTemporaryStatusBar;
     } else {
-        _findDriver = iTermSessionViewFindDriverDropDown;
+        _findDriverType = iTermSessionViewFindDriverDropDown;
     }
 }
 
@@ -1586,6 +1593,10 @@ NSString *const SessionViewWasSelectedForInspectionNotification = @"SessionViewW
 
 - (void)findViewControllerVisibilityDidChange:(id<iTermFindViewController>)sender {
     [self.delegate findViewControllerVisibilityDidChange:sender];
+}
+
+- (void)findViewControllerDidCeaseToBeMandatory:(id<iTermFindViewController>)sender {
+    [self.delegate findViewControllerDidCeaseToBeMandatory:sender];
 }
 
 #pragma mark - iTermGenericStatusBarContainer

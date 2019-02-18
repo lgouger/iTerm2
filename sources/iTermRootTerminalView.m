@@ -77,6 +77,7 @@ typedef struct {
     NSTextField *_windowTitleLabel;
     iTermTabBarBacking *_tabBarBacking NS_AVAILABLE_MAC(10_14);
     iTermGenericStatusBarContainer *_statusBarContainer;
+    NSDictionary *_desiredToolbeltProportions;
 }
 
 - (instancetype)initWithFrame:(NSRect)frameRect
@@ -164,10 +165,13 @@ typedef struct {
 
         // Create the toolbelt with its current default size.
         _toolbeltWidth = [iTermPreferences floatForKey:kPreferenceKeyDefaultToolbeltWidth];
-        [self constrainToolbeltWidth];
 
         self.toolbelt = [[iTermToolbeltView alloc] initWithFrame:self.toolbeltFrame
                                                         delegate:(id)_delegate];
+        // Wait until whoever is creating the window sets it to its proper size before laying out the toolbelt.
+        // The hope is that the window controller will call updateToolbeltProportionsIfNeeded during this spin
+        // of the runloop, but if not we'll get it next time 'round.
+        [self setToolbeltProportions:[iTermToolbeltView savedProportions]];
         _toolbelt.autoresizingMask = (NSViewMinXMargin | NSViewHeightSizable);
         [self addSubview:_toolbelt];
         [self updateToolbelt];
@@ -179,6 +183,7 @@ typedef struct {
         [self addSubview:_windowNumberLabel];
 
         _windowTitleLabel = [NSTextField newLabelStyledTextField];
+        _windowTitleLabel.alphaValue = 1;
         _windowTitleLabel.alignment = NSTextAlignmentCenter;
         _windowTitleLabel.hidden = YES;
         _windowTitleLabel.autoresizingMask = (NSViewMinYMargin | NSViewWidthSizable);
@@ -271,11 +276,12 @@ typedef struct {
     const CGFloat baselineOffset = -_windowTitleLabel.font.descender;
     const CGFloat capHeight = _windowTitleLabel.font.capHeight;
     const CGFloat myHeight = self.frame.size.height;
-    NSEdgeInsets insets = [self.delegate tabBarInsets];
-    return NSMakeRect(insets.left,
-                      myHeight - tabBarHeight + (tabBarHeight - capHeight) / 2.0 - baselineOffset,
-                      MAX(0, self.frame.size.width - insets.left - iTermRootTerminalViewWindowNumberLabelMargin),
-                      _windowTitleLabel.frame.size.height);
+    const NSEdgeInsets insets = [self.delegate tabBarInsets];
+    const CGFloat sideInset = MAX(MAX(insets.left, insets.right), iTermRootTerminalViewWindowNumberLabelMargin);
+    return NSMakeRect([self retinaRound:sideInset],
+                      [self retinaRound:myHeight - tabBarHeight + (tabBarHeight - capHeight) / 2.0 - baselineOffset],
+                      ceil(MAX(0, self.frame.size.width - sideInset * 2)),
+                      ceil(_windowTitleLabel.frame.size.height));
 }
 
 - (NSWindowButton *)windowButtonTypes {
@@ -507,6 +513,20 @@ typedef struct {
     [_tabBarControl setNeedsDisplay:YES];
 }
 
+- (void)setToolbeltProportions:(NSDictionary *)proportions {
+    _desiredToolbeltProportions = [proportions copy];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self updateToolbeltProportionsIfNeeded];
+    });
+}
+
+- (void)updateToolbeltProportionsIfNeeded {
+    if (_desiredToolbeltProportions) {
+        [self.toolbelt setProportions:_desiredToolbeltProportions];
+        _desiredToolbeltProportions = nil;
+    }
+}
+
 #pragma mark - Division View
 
 - (void)updateDivisionViewAndWindowNumberLabel {
@@ -570,11 +590,15 @@ typedef struct {
 }
 
 - (void)constrainToolbeltWidth {
+    _toolbeltWidth = [self maximumToolbeltWidthForViewWidth:self.frame.size.width];
+}
+
+- (CGFloat)maximumToolbeltWidthForViewWidth:(CGFloat)viewWidth {
     CGFloat minSize = MIN(kMinimumToolbeltSizeInPoints,
-                          self.frame.size.width * kMinimumToolbeltSizeAsFractionOfWindow);
-    _toolbeltWidth = MAX(MIN(_toolbeltWidth,
-                             self.frame.size.width * kMaximumToolbeltSizeAsFractionOfWindow),
-                         minSize);
+                          viewWidth * kMinimumToolbeltSizeAsFractionOfWindow);
+    return MAX(MIN(_toolbeltWidth,
+                   viewWidth * kMaximumToolbeltSizeAsFractionOfWindow),
+               minSize);
 }
 
 - (NSRect)toolbeltFrame {
@@ -599,9 +623,6 @@ typedef struct {
     }
     _shouldShowToolbelt = shouldShowToolbelt;
     _toolbelt.hidden = !shouldShowToolbelt;
-    if (shouldShowToolbelt) {
-        [self constrainToolbeltWidth];
-    }
 }
 
 - (void)updateToolbeltFrame {
@@ -624,6 +645,10 @@ typedef struct {
     if (_tabBarControlOnLoan) {
         return NO;
     }
+    return [self tabBarShouldBeVisibleEvenWhenOnLoan];
+}
+
+- (BOOL)tabBarShouldBeVisibleEvenWhenOnLoan {
     if (self.tabBarControl.flashing) {
         return YES;
     } else {
@@ -632,7 +657,7 @@ typedef struct {
 }
 
 - (BOOL)tabBarShouldBeVisibleWithAdditionalTabs:(int)numberOfAdditionalTabs {
-    if ([_delegate anyFullScreen] &&
+    if (([_delegate anyFullScreen] || [_delegate enteringLionFullscreen]) &&
         ![iTermPreferences boolForKey:kPreferenceKeyShowFullscreenTabBar]) {
         return NO;
     }
@@ -669,11 +694,10 @@ typedef struct {
 }
 
 - (void)updateWindowNumberFont {
-    const iTermPreferencesTabStyle preferredStyle = [iTermPreferences intForKey:kPreferenceKeyTabStyle];
-    if (preferredStyle == TAB_STYLE_MINIMAL) {
-        _windowNumberLabel.font = [NSFont systemFontOfSize:[NSFont systemFontSize]];
-    } else {
+    if ([self tabBarShouldBeVisible]) {
         _windowNumberLabel.font = [NSFont systemFontOfSize:[NSFont smallSystemFontSize]];
+    } else {
+        _windowNumberLabel.font = [NSFont systemFontOfSize:[NSFont systemFontSize]];
     }
 }
 
@@ -731,6 +755,10 @@ typedef struct {
                    decorationHeights.bottom,
                    [self tabviewWidth],
                    [[thisWindow contentView] frame].size.height - decorationHeights.top - decorationHeights.bottom);
+    if ([self tabBarShouldBeVisibleEvenWhenOnLoan]) {
+        tabViewFrame = [self tabViewFrameByShrinkingForFullScreenTabBar:tabViewFrame
+                                                                 window:thisWindow];
+    }
     DLog(@"repositionWidgets - Set tab view frame to %@", NSStringFromRect(tabViewFrame));
     [self.tabView setFrame:tabViewFrame];
     [self updateDivisionViewAndWindowNumberLabel];
@@ -768,6 +796,8 @@ typedef struct {
                                      temp.bottom,
                                      [self tabviewWidth],
                                      [[thisWindow contentView] frame].size.height - temp.bottom - temp.top);
+    tabViewFrame = [self tabViewFrameByShrinkingForFullScreenTabBar:tabViewFrame
+                                                             window:thisWindow];
     DLog(@"repositionWidgets - Set tab view frame to %@", NSStringFromRect(tabViewFrame));
     [self.tabView setFrame:tabViewFrame];
 
@@ -833,8 +863,34 @@ typedef struct {
                                      tabBarFrame.size.width,
                                      [thisWindow.contentView frame].size.height - decorationHeights.top - decorationHeights.bottom);
     DLog(@"repositionWidgets - Set tab view frame to %@", NSStringFromRect(tabViewFrame));
-    self.tabView.frame = tabViewFrame;
+    self.tabView.frame = [self tabViewFrameByShrinkingForFullScreenTabBar:tabViewFrame
+                                                                   window:thisWindow];
     [self updateDivisionViewAndWindowNumberLabel];
+}
+
+- (NSRect)tabViewFrameByShrinkingForFullScreenTabBar:(NSRect)frame
+                                              window:(NSWindow *)thisWindow {
+    if (@available(macOS 10.14, *)) {} else {
+        return frame;
+    }
+    if ((thisWindow.styleMask & NSWindowStyleMaskFullSizeContentView) != NSWindowStyleMaskFullSizeContentView) {
+        return frame;
+    }
+    if (![self.delegate enteringLionFullscreen] &&
+        !(thisWindow.styleMask & NSWindowStyleMaskFullScreen)) {
+        return frame;
+    }
+    switch ([iTermPreferences intForKey:kPreferenceKeyTabPosition]) {
+        case PSMTab_TopTab:
+            break;
+        case PSMTab_LeftTab:
+        case PSMTab_BottomTab:
+            return frame;
+    }
+    NSRect tabViewFrame = frame;
+    const CGFloat offset = _tabBarControl.height;
+    tabViewFrame.size.height -= offset;
+    return tabViewFrame;
 }
 
 - (void)setTabBarControlAutoresizingMask:(NSAutoresizingMaskOptions)mask {
@@ -874,10 +930,7 @@ typedef struct {
     [self setTabBarControlAutoresizingMask:(NSViewHeightSizable | NSViewMaxXMargin)];
 
     CGFloat widthAdjustment = 0;
-    if (_delegate.haveLeftBorder) {
-#warning TODO: Shouldn't this also increment xOffset by 1?
-        widthAdjustment += 1;
-    }
+    // Can't have a left border.
     if (_delegate.haveRightBorder) {
         widthAdjustment += 1;
     }
@@ -898,7 +951,8 @@ typedef struct {
     if (showToolbeltInline) {
         tabViewFrame.size.width -= self.toolbeltFrame.size.width;
     }
-    self.tabView.frame = tabViewFrame;
+    self.tabView.frame = [self tabViewFrameByShrinkingForFullScreenTabBar:tabViewFrame
+                                                                   window:thisWindow];
     [self updateDivisionViewAndWindowNumberLabel];
 
     const CGFloat dragHandleWidth = 3;
@@ -964,7 +1018,9 @@ typedef struct {
 
     // The tab view frame (calculated below) is based on the toolbelt's width. If the toolbelt is
     // too big for the current window size, you could end up with a negative-width tab view frame.
-    [self constrainToolbeltWidth];
+    if (_shouldShowToolbelt) {
+        [self constrainToolbeltWidth];
+    }
     _tabViewFrameReduced = NO;
     if (![self tabBarShouldBeVisible]) {
         [self layoutSubviewsWithHiddenTabBarForWindow:thisWindow];
@@ -1133,6 +1189,14 @@ typedef struct {
 
 - (BOOL)iTermTabBarCanDragWindow {
     return[ _delegate iTermTabBarCanDragWindow];
+}
+
+- (BOOL)iTermTabBarShouldHideBacking {
+    if (@available(macOS 10.14, *)) {
+        const iTermPreferencesTabStyle preferredStyle = [iTermPreferences intForKey:kPreferenceKeyTabStyle];
+        return (preferredStyle == TAB_STYLE_MINIMAL);
+    }
+    return YES;
 }
 
 #pragma mark - iTermDragHandleViewDelegate

@@ -137,7 +137,7 @@ NSString *const iTermScriptMetadataName = @"metadata.json";
     return (selection == kiTermWarningSelection0);
 }
 
-- (void)installTrusted:(BOOL)trusted withCompletion:(void (^)(NSError *))completion {
+- (void)installTrusted:(BOOL)trusted withCompletion:(void (^)(NSError *, NSURL *location))completion {
     if (self.fullEnvironment) {
         [self installFullEnvironmentTrusted:trusted completion:completion];
     } else {
@@ -145,7 +145,7 @@ NSString *const iTermScriptMetadataName = @"metadata.json";
     }
 }
 
-- (void)installBasicTrusted:(BOOL)trusted completion:(void (^)(NSError *))completion {
+- (void)installBasicTrusted:(BOOL)trusted completion:(void (^)(NSError *, NSURL *location))completion {
     NSString *from = [self.container stringByAppendingPathComponent:self.name];
     NSString *to;
     if (trusted && [self wantsAutoLaunch] && [self userAcceptsAutoLaunchInstall]) {
@@ -157,10 +157,10 @@ NSString *const iTermScriptMetadataName = @"metadata.json";
     [[NSFileManager defaultManager] moveItemAtPath:from
                                             toPath:to
                                              error:&error];
-    completion(error);
+    completion(error, [NSURL fileURLWithPath:to]);
 }
 
-- (void)installFullEnvironmentTrusted:(BOOL)trusted completion:(void (^)(NSError *))completion {
+- (void)installFullEnvironmentTrusted:(BOOL)trusted completion:(void (^)(NSError *, NSURL *location))completion {
     NSString *from = [self.container stringByAppendingPathComponent:self.name];
 
     NSString *setupPy = [from stringByAppendingPathComponent:iTermScriptSetupPyName];
@@ -168,13 +168,13 @@ NSString *const iTermScriptMetadataName = @"metadata.json";
     if (!setupParser) {
         NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Cannot find setup.py" };
         NSError *error = [NSError errorWithDomain:@"com.iterm2.scriptarchive" code:1 userInfo:userInfo];
-        completion(error);
+        completion(error, nil);
         return;
     }
 
     NSArray<NSString *> *dependencies = setupParser.dependencies;
     if (setupParser.dependenciesError) {
-        completion(setupParser.dependenciesError);
+        completion(setupParser.dependenciesError, nil);
         return;
     }
 
@@ -184,19 +184,22 @@ NSString *const iTermScriptMetadataName = @"metadata.json";
     if (trusted && [self wantsAutoLaunch] && [self userAcceptsAutoLaunchInstall]) {
         to = [[[NSFileManager defaultManager] autolaunchScriptPath] stringByAppendingPathComponent:self.name];
     } else {
-        to = [[[NSFileManager defaultManager] scriptsPath] stringByAppendingPathComponent:self.name];
+        to = [[[NSFileManager defaultManager] scriptsPathWithoutSpaces] stringByAppendingPathComponent:self.name];
     }
     [[iTermPythonRuntimeDownloader sharedInstance] downloadOptionalComponentsIfNeededWithConfirmation:YES
                                                                                         pythonVersion:setupParser.pythonVersion
+                                                                                   requiredToContinue:YES
                                                                                        withCompletion:
      ^(BOOL downloadedOk) {
          if (!downloadedOk) {
              NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: @"Python Runtime not downloaded" };
              NSError *error = [NSError errorWithDomain:@"com.iterm2.scriptarchive" code:3 userInfo:userInfo];
-             completion(error);
+             completion(error, nil);
              return;
          }
+         NSURL *toURL = [NSURL fileURLWithPath:to];
          [[iTermPythonRuntimeDownloader sharedInstance] installPythonEnvironmentTo:[NSURL fileURLWithPath:from]
+                                                                  eventualLocation:toURL
                                                                      pythonVersion:setupParser.pythonVersion
                                                                       dependencies:dependencies
                                                                      createSetupPy:NO
@@ -204,7 +207,11 @@ NSString *const iTermScriptMetadataName = @"metadata.json";
                                                                             [self didInstallPythonRuntime:ok
                                                                                                      from:from
                                                                                                        to:to
-                                                                                               completion:completion];
+                                                                                               completion:
+                                                                             ^(NSError *runtimeInstallError) {
+                                                                                 completion(runtimeInstallError,
+                                                                                            runtimeInstallError == nil ? toURL : nil);
+                                                                             }];
                                                                         }];
      }];
 }

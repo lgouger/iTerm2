@@ -1138,7 +1138,7 @@ static iTermController *gSharedInstance;
         } else if ([urlType compare:@"telnet" options:NSCaseInsensitiveSearch] == NSOrderedSame) {
             return [self profileByModifyingProfile:prototype toTelnetTo:urlRep];
         } else if (!aDict) {
-            return [prototype copy];
+            return [[prototype copy] autorelease];
         } else {
             return prototype;
         }
@@ -1350,6 +1350,26 @@ static iTermController *gSharedInstance;
     return nil;
 }
 
+- (PTYTab *)tabWithID:(NSString *)tabID {
+    if (tabID.length == 0) {
+        return nil;
+    }
+    NSCharacterSet *nonNumericCharacterSet = [[NSCharacterSet decimalDigitCharacterSet] invertedSet];
+    if ([tabID rangeOfCharacterFromSet:nonNumericCharacterSet].location != NSNotFound) {
+        return nil;
+    }
+
+    int numericID = tabID.intValue;
+    for (PseudoTerminal *term in [self terminals]) {
+        for (PTYTab *tab in term.tabs) {
+            if (tab.uniqueId == numericID) {
+                return tab;
+            }
+        }
+    }
+    return nil;
+}
+
 - (void)dumpViewHierarchy {
     for (PseudoTerminal *term in [self terminals]) {
         DebugLog([NSString stringWithFormat:@"Terminal %@ at %@", [term window], [NSValue valueWithRect:[[term window] frame]]]);
@@ -1521,8 +1541,8 @@ static iTermController *gSharedInstance;
 }
 
 - (void)workspaceWillPowerOff:(NSNotification *)notification {
-    _willPowerOff = YES;
     if ([iTermAdvancedSettingsModel killSessionsOnLogout] && [iTermAdvancedSettingsModel runJobsInServers]) {
+        _willPowerOff = YES;
         [self killRestorableSessions];
     }
 }

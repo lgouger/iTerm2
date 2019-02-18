@@ -61,6 +61,7 @@
     NSString *pythonVersion = [self inferredPythonVersionFromScriptAt:filename];
     [[iTermPythonRuntimeDownloader sharedInstance] downloadOptionalComponentsIfNeededWithConfirmation:YES
                                                                                         pythonVersion:pythonVersion
+                                                                                   requiredToContinue:YES
                                                                                        withCompletion:^(BOOL ok) {
         if (ok) {
             [self reallyLaunchScript:filename
@@ -161,7 +162,7 @@
 
     task.launchPath = shell;
     task.arguments = [self argumentsToRunScript:filename withVirtualEnv:virtualenv pythonVersion:pythonVersion];
-    NSString *cookie = [[iTermWebSocketCookieJar sharedInstance] newCookie];
+    NSString *cookie = [[iTermWebSocketCookieJar sharedInstance] randomStringForCooke];
     task.environment = [self environmentFromEnvironment:task.environment shell:shell cookie:cookie key:key];
 
     NSPipe *pipe = [[NSPipe alloc] init];

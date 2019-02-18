@@ -588,8 +588,6 @@ typedef struct iTermTextColorContext {
         MAX(0, [iTermAdvancedSettingsModel terminalVMargin] - NSMinY(_delegate.enclosingScrollView.documentVisibleRect));
 
     topMarginRect.size.height = [iTermAdvancedSettingsModel terminalVMargin];
-    [self.delegate drawingHelperDrawBackgroundImageInRect:topMarginRect
-                                   blendDefaultBackground:YES];
 
     if (_showStripes) {
         [self drawStripesInRect:topMarginRect];
@@ -1418,7 +1416,8 @@ typedef struct iTermTextColorContext {
          }
          NSMutableDictionary *attrs = [[cheapString.attributes mutableCopy] autorelease];
          CGFloat components[2] = { 0, 1 };
-         CGColorRef black = CGColorCreate(CGColorSpaceCreateDeviceGray(),
+         CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceGray();
+         CGColorRef black = CGColorCreate(colorSpace,
                                           components);
          attrs[(NSString *)kCTForegroundColorAttributeName] = (id)black;
 
@@ -1430,7 +1429,8 @@ typedef struct iTermTextColorContext {
                                         inContext:[[NSGraphicsContext currentContext] graphicsPort]
                                   backgroundColor:backgroundColor
                                      forUnderline:YES];
-
+         CFRelease(colorSpace);
+         CFRelease(black);
      }];
 
     if (underlineContext->maskGraphicsContext) {

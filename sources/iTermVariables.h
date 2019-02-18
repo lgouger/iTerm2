@@ -18,7 +18,10 @@ extern NSString *const iTermVariableKeyApplicationLocalhostName;
 extern NSString *const iTermVariableKeyApplicationEffectiveTheme;
 
 extern NSString *const iTermVariableKeyTabTitleOverride;
+extern NSString *const iTermVariableKeyTabTitleOverrideFormat;
 extern NSString *const iTermVariableKeyTabCurrentSession;
+extern NSString *const iTermVariableKeyTabID;
+extern NSString *const iTermVariableKeyTabWindow;
 
 // If this window is a tmux client, this is the window number defined by
 // the tmux server. -1 if not a tmux client.
@@ -55,7 +58,7 @@ extern NSString *const iTermVariableKeySessionTmuxStatusRight;  // String. Only 
 extern NSString *const iTermVariableKeySessionMouseReportingMode;  // NSNumber (MouseMode)
 extern NSString *const iTermVariableKeySessionBadge;  // NSString. Evaluated badge swifty string.
 extern NSString *const iTermVariableKeySessionTab;  // NString. Containing tab.
-extern NSString *const iTermVariableKeyWindowTitleOverride;
+extern NSString *const iTermVariableKeyWindowTitleOverrideFormat;
 extern NSString *const iTermVariableKeyWindowCurrentTab;
 
 @class iTermVariableReference;
@@ -78,10 +81,10 @@ extern NSString *const iTermVariableKeyWindowCurrentTab;
 
 // WARNING: You almost never want to use this. It is useful if you need to get a known child out, as
 // open quickly does to find the names of all user variables.
-- (id)discouragedValueForVariableName:(NSString *)name;
+- (nullable id)discouragedValueForVariableName:(NSString *)name;
 
 // Don't use this unless you really know what you're doing.
-- (id)rawValueForVariableName:(NSString *)name;
+- (nullable id)rawValueForVariableName:(NSString *)name;
 
 - (void)removeLinkToReference:(iTermVariableReference *)reference
                          path:(NSString *)path;

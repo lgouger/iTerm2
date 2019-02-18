@@ -159,6 +159,13 @@
     [super dealloc];
 }
 
+#pragma mark - Utility
+
+- (BOOL)windowIsMainAndAppIsActive {
+    return (self.tabBar.window.isMainWindow &&
+            [NSApp isActive]);
+}
+
 #pragma mark - Control Specific
 
 - (float)leftMarginForTabBarControl {
@@ -386,9 +393,9 @@
                autorelease];
 }
 
-- (NSColor *)textColorDefaultSelected:(BOOL)selected backgroundColor:(NSColor *)backgroundColor {
+- (NSColor *)textColorDefaultSelected:(BOOL)selected backgroundColor:(NSColor *)backgroundColor windowIsMainAndAppIsActive:(BOOL)mainAndActive {
     CGFloat value;
-    if (_tabBar.window.isKeyWindow && [NSApp isActive]) {
+    if (mainAndActive) {
         value = 0;
     } else {
         if (selected) {
@@ -410,7 +417,6 @@
 
 - (NSColor *)textColorForCell:(PSMTabBarCell *)cell {
     DLog(@"cell=%@", cell);
-    NSColor *textColor;
     const BOOL selected = (cell.state == NSOnState);
     if ([self anyTabHasColor]) {
         DLog(@"anyTabHasColor. computing tab color brightness.");
@@ -422,40 +428,48 @@
             if (cellBrightness > 0.5) {
                 DLog(@"is bright. USE BLACK TEXT COLOR");
                 // bright tab
-                textColor = [NSColor blackColor];
+                return [NSColor blackColor];
             } else {
                 DLog(@"is dark. Use white text");
                 // dark tab
-                textColor = [NSColor whiteColor];
+                return [NSColor whiteColor];
             }
         } else {
             DLog(@"Not selected");
             // Non-selected cell when any cell has a tab color
             CGFloat prominence = [[_tabBar.delegate tabView:_tabBar valueOfOption:PSMTabBarControlOptionColoredUnselectedTabTextProminence] doubleValue];
-            CGFloat delta = prominence ?: 0.1;
-            DLog(@"prominence=%@ delta=%@", @(prominence), @(delta));
-            if (cellBrightness > 0.5) {
-                DLog(@"Is light. use 0.5-delta");
-                // Light tab
-                return [NSColor colorWithWhite:0.5 - delta alpha:1];
+            if (@available(macOS 10.14, *)) {
+                if (cellBrightness > 0.5) {
+                    // Light tab
+                    return [NSColor colorWithWhite:0 alpha:prominence];
+                } else {
+                    // Dark tab
+                    return [NSColor colorWithWhite:1 alpha:prominence];
+                }
             } else {
-                DLog(@"Is dark. Use 0.5+delta");
-                // Dark tab
-                return [NSColor colorWithWhite:0.5 + delta alpha:1];
+                // 10.13 and earlier. Don't count on it blending competently.
+                CGFloat delta = prominence ?: 0.1;
+                if (cellBrightness > 0.5) {
+                    // Light tab
+                    return [NSColor colorWithWhite:cellBrightness - delta alpha:1];
+                } else {
+                    // Dark tab
+                    return [NSColor colorWithWhite:cellBrightness + delta alpha:1];
+                }
             }
         }
     } else {
         DLog(@"No tab has color");
         // No cell has a tab color
+        const BOOL mainAndActive = self.windowIsMainAndAppIsActive;
         if (selected) {
             DLog(@"selected");
-            return [self textColorDefaultSelected:YES backgroundColor:nil];
+            return [self textColorDefaultSelected:YES backgroundColor:nil windowIsMainAndAppIsActive:mainAndActive];
         } else {
             DLog(@"not selected");
-            textColor = [self textColorDefaultSelected:NO backgroundColor:nil];
+            return [self textColorDefaultSelected:NO backgroundColor:nil windowIsMainAndAppIsActive:mainAndActive];
         }
     }
-    return textColor;
 }
 
 - (NSAttributedString *)attributedStringValueForTabCell:(PSMTabBarCell *)cell {
@@ -483,7 +497,7 @@
         return textAttributedString;
     }
     
-    NSTextAttachment *textAttachment = [[NSTextAttachment alloc] init];
+    NSTextAttachment *textAttachment = [[[NSTextAttachment alloc] init] autorelease];
     textAttachment.image = graphic;
     textAttachment.bounds = NSMakeRect(0,
                                        - (graphic.size.height - font.capHeight) / 2.0,
@@ -518,14 +532,15 @@
 #pragma mark - Drawing
 
 - (NSColor *)topLineColorSelected:(BOOL)selected {
+    const BOOL keyMainAndActive = self.windowIsMainAndAppIsActive;
     if (@available(macOS 10.14, *)) {
-        if (_tabBar.window.isKeyWindow && [NSApp isActive]) {
+        if (keyMainAndActive) {
             return [NSColor colorWithSRGBRed:180.0/255.0 green:180.0/255.0 blue:180.0/255.0 alpha:1];
         } else {
             return [NSColor colorWithSRGBRed:209.0/255.0 green:209.0/255.0 blue:209.0/255.0 alpha:1];
         }
     } else {
-        if (_tabBar.window.isKeyWindow && [NSApp isActive]) {
+        if (keyMainAndActive) {
             if (selected) {
                 return [NSColor colorWithSRGBRed:189/255.0 green:189/255.0 blue:189/255.0 alpha:1];
             } else {
@@ -538,14 +553,15 @@
 }
 
 - (NSColor *)verticalLineColorSelected:(BOOL)selected {
+    const BOOL keyMainAndActive = self.windowIsMainAndAppIsActive;
     if (@available(macOS 10.14, *)) {
-        if (_tabBar.window.isKeyWindow && [NSApp isActive]) {
+        if (keyMainAndActive) {
             return [NSColor colorWithSRGBRed:174.0/255.0 green:174.0/255.0 blue:174.0/255.0 alpha:1];
         } else {
             return [NSColor colorWithSRGBRed:209.0/255.0 green:209.0/255.0 blue:209.0/255.0 alpha:1];
         }
     } else {
-        if (_tabBar.window.isKeyWindow && [NSApp isActive]) {
+        if (keyMainAndActive) {
             return [NSColor colorWithSRGBRed:160/255.0 green:160/255.0 blue:160/255.0 alpha:1];
         } else {
             return [NSColor colorWithSRGBRed:219/255.0 green:219/255.0 blue:219/255.0 alpha:1];
@@ -557,7 +573,8 @@
     if (@available(macOS 10.14, *)) {
         return [NSColor colorWithWhite:0 alpha:0.15];
     } else {
-        if (_tabBar.window.isKeyWindow && [NSApp isActive]) {
+        const BOOL keyMainAndActive = self.windowIsMainAndAppIsActive;
+        if (keyMainAndActive) {
             return [NSColor colorWithSRGBRed:160/255.0 green:160/255.0 blue:160/255.0 alpha:1];
         } else {
             return [NSColor colorWithSRGBRed:210/255.0 green:210/255.0 blue:210/255.0 alpha:1];
@@ -578,7 +595,8 @@
         }
     } else {
         CGFloat value;
-        if (_tabBar.window.isKeyWindow && [NSApp isActive]) {
+        const BOOL keyMainAndActive = self.windowIsMainAndAppIsActive;
+        if (keyMainAndActive) {
             value = 190/255.0 - highlightAmount * 0.048;
         } else {
             // Make inactive windows' background color lighter
@@ -593,7 +611,8 @@
 }
 - (NSColor *)mojaveBackgroundColorSelected:(BOOL)selected highlightAmount:(CGFloat)highlightAmount NS_AVAILABLE_MAC(10_14) {
     CGFloat colors[3];
-    if (self.tabBar.window.isKeyWindow && [NSApp isActive]) {
+    const BOOL keyMainAndActive = self.windowIsMainAndAppIsActive;
+    if (keyMainAndActive) {
         if (selected) {
             colors[0] = 210.0 / 255.0;
             colors[1] = 210.0 / 255.0;
@@ -658,7 +677,8 @@
                                     selected:(BOOL)selected {
     // Alpha the non-key window's tab colors a bit to make it clearer which window is key.
     CGFloat alpha;
-    if ([_tabBar.window isKeyWindow]) {
+    const BOOL keyMainAndActive = self.windowIsMainAndAppIsActive;
+    if (keyMainAndActive) {
         if (selected) {
             alpha = 1;
         } else {
@@ -867,7 +887,8 @@
         NSColor *innerColor;
         NSNumber *strengthNumber = [bar.delegate tabView:bar valueOfOption:PSMTabBarControlOptionColoredSelectedTabOutlineStrength] ?: @0.5;
         CGFloat strength = strengthNumber.doubleValue;
-        const CGFloat alpha = MIN(MAX(strength, 0), 1) * ([_tabBar.window isKeyWindow] ? 1 : 0.6);
+        const BOOL keyMainAndActive = self.windowIsMainAndAppIsActive;
+        const CGFloat alpha = MIN(MAX(strength, 0), 1) * (keyMainAndActive ? 1 : 0.6);
         if (brightness > 0.5) {
             outerColor = [NSColor colorWithWhite:1 alpha:alpha];
             innerColor = [NSColor colorWithWhite:0 alpha:alpha];
@@ -1009,13 +1030,36 @@
             }
         }
 
+        attributedString = [self truncateAttributedStringIfNeeded:attributedString forWidth:labelRect.size.width];
         [attributedString drawInRect:labelRect];
     }
 }
 
+// In the neverending saga of Cocoa embarassing itself, if there isn't enough space for a text
+// attachment and the text that follows it, they are drawn overlapping.
+- (NSAttributedString *)truncateAttributedStringIfNeeded:(NSAttributedString *)attributedString
+                                                forWidth:(CGFloat)width {
+    __block BOOL truncate = NO;
+    [attributedString enumerateAttribute:NSAttachmentAttributeName
+                                 inRange:NSMakeRange(0, 1)
+                                 options:0
+                              usingBlock:^(id  _Nullable value, NSRange range, BOOL * _Nonnull stop) {
+                                  if (![value isKindOfClass:[NSTextAttachment class]]) {
+                                      return;
+                                  }
+                                  NSTextAttachment *attachment = value;
+                                  truncate = (attachment.image.size.width * 2 > width);
+                              }];
+    if (truncate) {
+        return [attributedString attributedSubstringFromRange:NSMakeRange(0, 1)];
+    }
+    return attributedString;
+}
+
 - (NSColor *)tabBarColor {
+    const BOOL keyMainAndActive = self.windowIsMainAndAppIsActive;
     if (@available(macOS 10.14, *)) {
-        if (_tabBar.window.isKeyWindow && [NSApp isActive]) {
+        if (keyMainAndActive) {
             return [NSColor colorWithSRGBRed:188.0 / 255.0
                                        green:188.0 / 255.0
                                         blue:188.0 / 255.0
@@ -1027,7 +1071,7 @@
                                        alpha:1];
         }
     } else {
-        if (_tabBar.window.isKeyWindow && [NSApp isActive]) {
+        if (keyMainAndActive) {
             return [NSColor colorWithCalibratedWhite:0.0 alpha:0.2];
         } else {
             return [NSColor colorWithCalibratedWhite:236 / 255.0 alpha:1];

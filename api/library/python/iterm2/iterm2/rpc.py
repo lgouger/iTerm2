@@ -144,20 +144,24 @@ async def async_create_tab(connection, profile=None, window=None, index=None, co
         request.create_tab_request.custom_profile_properties.extend(_profile_properties_from_dict(profile_customizations))
     return await _async_call(connection, request)
 
-async def async_get_screen_contents(connection, session, windowedCoordRange):
+async def async_get_screen_contents(connection, session, windowed_coord_range=None):
     """
     Gets screen contents, including both the mutable area and history.
 
     connection: A connected iterm2.Connection.
     session: Session ID
-    windowedCoordRange: The range of characters to fetch.
+    windowed_coord_range: The range of characters to fetch.
 
     Returns: iterm2.api_pb2.ServerOriginatedMessage
     """
     request = _alloc_request()
     if session is not None:
         request.get_buffer_request.session = session
-    request.get_buffer_request.line_range.windowed_coord_range.CopyFrom(windowedCoordRange.proto)
+    if windowed_coord_range:
+      request.get_buffer_request.line_range.windowed_coord_range.CopyFrom(
+          windowed_coord_range.proto)
+    else:
+      request.get_buffer_request.line_range.screen_contents_only = True
     return await _async_call(connection, request)
 
 async def async_get_prompt(connection, session=None):
@@ -590,6 +594,21 @@ async def async_close(connection, sessions=None, tabs=None, windows=None, force=
     request.close_request.force = force
     return await _async_call(connection, request)
 
+
+async def async_invoke_function(connection, invocation, session_id=None, tab_id=None, window_id=None, timeout=-1):
+    request = _alloc_request()
+    request.invoke_function_request.SetInParent()
+    request.invoke_function_request.invocation = invocation
+    if session_id:
+        request.invoke_function_request.session.session_id = session_id
+    elif tab_id:
+        request.invoke_function_request.tab.tab_id = tab_id
+    elif window_id:
+        request.invoke_function_request.window.window_id = window_id
+    else:
+        request.invoke_function_request.app.SetInParent()
+    request.invoke_function_request.timeout = timeout
+    return await _async_call(connection, request)
 
 ## Private --------------------------------------------------------------------
 

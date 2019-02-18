@@ -81,8 +81,7 @@
 + (void)writeMetadataTo:(NSURL *)destinationURL
               sourceURL:(NSURL *)sourceURL {
     NSString *autoLaunchPath = [[NSFileManager defaultManager] autolaunchScriptPath];
-    NSDictionary *metadata = @{};
-    metadata = @{ @"AutoLaunch": @([sourceURL.path hasPrefix:autoLaunchPath]) };
+    NSDictionary *metadata = @{ @"AutoLaunch": @([sourceURL.path hasPrefix:autoLaunchPath]) };
     [[NSJSONSerialization it_jsonStringForObject:metadata] writeToURL:[destinationURL URLByAppendingPathComponent:@"metadata.json"]
                                                            atomically:NO
                                                              encoding:NSUTF8StringEncoding
@@ -111,7 +110,7 @@
         sourceURLs = [sourceURLs arrayByAddingObject:metadata];
     }
 
-    NSString *extension = signingIdentity ? @"itermscript" : @"zip";
+    NSString *extension = signingIdentity ? @"its" : @"zip";
     NSURL *zipURL = [self urlForNewZipFileInFolder:destinationFolder name:name extension:extension];
     [iTermCommandRunner zipURLs:sourceURLs
                       arguments:@[ @"-r" ]
@@ -150,7 +149,7 @@
     }
 
     SIGArchiveBuilder *builder = [[SIGArchiveBuilder alloc] initWithPayloadFileURL:payloadURL identity:identity];
-    ok = [builder writeToURL:url error:&error];
+    [builder writeToURL:url error:&error];
     [[NSFileManager defaultManager] removeItemAtURL:payloadURL error:nil];
     completion(error);
 }

@@ -23,6 +23,7 @@
 @class iTermPromptOnCloseReason;
 @class iTermSessionFactory;
 @class iTermToolbeltView;
+@protocol iTermWindowScope;
 @class iTermController;
 @class TmuxController;
 
@@ -93,7 +94,7 @@ extern NSString *const iTermSelectedTabDidChange;
 @property(nonatomic, readonly) iTermSessionFactory *sessionFactory;
 @property(nonatomic, readonly) int number;
 @property(nonatomic, readonly) Profile *initialProfile;
-@property(nonatomic, readonly) iTermVariableScope *scope;
+@property(nonatomic, readonly) iTermVariableScope<iTermWindowScope> *scope;
 @property(nonatomic, readonly) NSWindowCollectionBehavior desiredWindowCollectionBehavior;
 
 // Draws a mock-up of a window arrangement into the current graphics context.
@@ -358,6 +359,8 @@ extern NSString *const iTermSelectedTabDidChange;
 - (void)addSessionInNewTab:(PTYSession *)object;
 - (void)didDonateTab:(PTYTab *)aTab toWindowController:(PseudoTerminal *)term;
 - (void)moveTabAtIndex:(NSInteger)selectedIndex toIndex:(NSInteger)destinationIndex;
+
+- (PseudoTerminal *)moveTabToNewWindow:(PTYTab *)aTab;
 
 @end
 

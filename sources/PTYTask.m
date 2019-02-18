@@ -11,6 +11,7 @@
 #import "iTermAdvancedSettingsModel.h"
 #import "iTermLSOF.h"
 #import "iTermOrphanServerAdopter.h"
+#import "NSDictionary+iTerm.h"
 #import <OpenDirectory/OpenDirectory.h>
 
 #include "iTermFileDescriptorClient.h"
@@ -316,7 +317,7 @@ static int iTermForkToRunJobInServer(iTermForkState *forkState,
     // This closes serverConnectionFd and deadMansPipe[1] in the parent process but not the child.
     iTermFileDescriptorServerLog("Calling MyForkPty");
     forkState->numFileDescriptorsToPreserve = kNumFileDescriptorsToDup;
-    int fd;
+    int fd = -1;
     forkState->pid = MyForkPty(&fd, ttyState, serverConnectionFd, forkState->deadMansPipe[1]);
     return fd;
 }
@@ -594,6 +595,9 @@ static void HandleSigChld(int n) {
         // We want to run
         //   iTerm2 --server progpath args
         NSArray *updatedArgs = [@[ @"--server", progpath ] arrayByAddingObjectsFromArray:args];
+        if (![iTermAdvancedSettingsModel bootstrapDaemon]) {
+            env = [env dictionaryBySettingObject:@"1" forKey:@"ITERM2_DISABLE_BOOTSTRAP"];
+        }
         [self reallyLaunchWithPath:[[NSBundle mainBundle] executablePath]
                          arguments:updatedArgs
                        environment:env

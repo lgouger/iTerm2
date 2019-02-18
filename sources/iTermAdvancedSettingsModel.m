@@ -196,7 +196,7 @@ DEFINE_FLOAT(coloredSelectedTabOutlineStrength, 0.5, SECTION_TABS @"How prominen
 DEFINE_FLOAT(minimalTabStyleBackgroundColorDifference, 0.05, SECTION_TABS @"In minimal tab style, how different should the background color of the selected tab be from the others?\nTakes a value in 0 to 1, where 0 is no difference and 1 very different.");
 DEFINE_FLOAT(minimalTabStyleOutlineStrength, 0.2, SECTION_TABS @"In minimal tab style, how prominent should the tab outline be?\nTakes a value in 0 to 1, where 0 is invisible and 1 is very prominent");
 DEFINE_FLOAT(minimalSplitPaneDividerProminence, 0.15, SECTION_TABS @"In minimal tab style, how prominent should split pane dividers be?\nTakes a value in 0 to 1, where 0 is invisible and 1 is very prominent");
-DEFINE_FLOAT(coloredUnselectedTabTextProminence, 0.1, SECTION_TABS @"How prominent should the text in a non-selected tab be when there are colored tabs in a window?\nTakes a value in 0 to 0.5, the distance from middle gray.");
+DEFINE_FLOAT(coloredUnselectedTabTextProminence, 0.5, SECTION_TABS @"How prominent should the text in a non-selected tab be when there are colored tabs in a window?\nTakes a value in 0 to 1, the alpha value.");
 DEFINE_FLOAT(compactMinimalTabBarHeight, 40, SECTION_TABS @"Tab bar height (points) for compact windows with minimal theme.");
 DEFINE_FLOAT(defaultTabBarHeight, 24, SECTION_TABS @"Default tab bar height")
 
@@ -314,6 +314,10 @@ DEFINE_BOOL(useVirtualKeyCodesForDetectingDigits, NO, SECTION_GENERAL @"Treat th
 DEFINE_BOOL(hotkeyWindowsExcludedFromCycling, NO, SECTION_GENERAL @"Hotkey windows are excluded from Cycle Through Windows.");
 DEFINE_BOOL(swapFindNextPrevious, YES, SECTION_GENERAL @"Swap Find Next and Find Previous.\nIf enabled, Find Next will search up and Find Previous will search down (iTerm2's traditional behavior, which is a departure from macOS's standard). When disabled, search behaves like a normal macOS app.");
 DEFINE_BOOL(pinEditSession, NO, SECTION_GENERAL @"Pin Edit Session window to the session it originally edited.\nIf not set, it will affect the most recently active session.");
+DEFINE_BOOL(remapModifiersWithoutEventTap, NO, SECTION_GENERAL @"Disable remapping modifiers for system shortcuts.\nThis prevents asking for accessibility permission. It breaks remapping system shortcuts like cmd-tab.");
+DEFINE_BOOL(alertsIndicateShortcuts, NO, SECTION_GENERAL @"Buttons in modal alerts indicate keyboard shortcuts.\nDo you miss Windows 95? I do.");
+DEFINE_BOOL(showHintsInSplitPaneMenuItems, NO, SECTION_GENERAL @"Show hints in split pane menu items to indicate horizontal vs vertical semantics.\nYou must restart iTerm2 after changing this setting for it to take effect.");
+DEFINE_BOOL(useOldStyleDropDownViews, NO, SECTION_GENERAL @"Use old-style find and paste progress indicator views.\nThis change will only affect new windows.");
 
 #pragma mark - Drawing
 
@@ -352,6 +356,7 @@ DEFINE_STRING(pathsToIgnore, @"", SECTION_SEMANTIC_HISTORY @"Paths to ignore for
 DEFINE_BOOL(showYellowMarkForJobStoppedBySignal, YES, SECTION_SEMANTIC_HISTORY @"Use a yellow for a Shell Integration prompt mark when the job is stopped by a signal.");
 DEFINE_BOOL(conservativeURLGuessing, NO, SECTION_SEMANTIC_HISTORY @"URLs must contain a scheme?\nEnable this to reduce the number of false positives that semantic history thinks are a URL");
 DEFINE_STRING(trailingPunctuationMarks, @"!?…)].\"';:,", SECTION_SEMANTIC_HISTORY @"Characters to ignore at the end of a URL");
+DEFINE_STRING(defaultURLScheme, @"https", SECTION_SEMANTIC_HISTORY @"Default URL scheme");
 
 #pragma mark - Debugging
 
@@ -368,6 +373,8 @@ DEFINE_BOOL(showBlockBoundaries, NO, SECTION_DEBUGGING @"Show line buffer block 
 #define SECTION_SESSION @"Session: "
 
 DEFINE_BOOL(runJobsInServers, YES, SECTION_SESSION @"Enable session restoration.\nSession restoration runs jobs in separate processes. They will survive crashes, force quits, and upgrades.\nYou must restart iTerm2 for this change to take effect.");
+DEFINE_BOOL(bootstrapDaemon, YES, SECTION_SESSION @"Allow sessions to survive logging out and back in.\nThis breaks the “auth sufficient pam_tid.so” hack some people use to allow sudo to authenticate with Touch ID.");
+
 DEFINE_BOOL(killJobsInServersOnQuit, YES, SECTION_SESSION @"User-initiated Quit (⌘Q) of iTerm2 will kill all running jobs.\nApplies only when session restoration is on.");
 DEFINE_SETTABLE_BOOL(suppressRestartAnnouncement, SuppressRestartAnnouncement, NO, SECTION_SESSION @"Suppress the Restart Session offer.\nWhen a session terminates, it will offer to restart itself. Turn this on to suppress the offer permanently.");
 DEFINE_BOOL(showSessionRestoredBanner, YES, SECTION_SESSION @"When restoring a session without restoring a running job, draw a banner saying “Session Contents Restored” below the restored contents.");
@@ -391,6 +398,7 @@ DEFINE_BOOL(serializeOpeningMultipleFullScreenWindows, YES, SECTION_WINDOWS @"Wh
 DEFINE_BOOL(trackingRunloopForLiveResize, YES, SECTION_WINDOWS @"Use a tracking runloop for live resizing.\nThis allows the terminal to redraw during a resizing drag.");
 DEFINE_FLOAT(invalidateShadowTimesPerSecond, 15, SECTION_WINDOWS @"How many times per second to update the shadow of transparent windows to prevent ghosting.\nThis works around a macOS Mojave bug that leaves a ghost of past window contents behind in transparent windows. It hurts performance to do it frequently, especially in large windows. Set to 0 to disable.");
 DEFINE_BOOL(disableWindowShadowWhenTransparencyOnMojave, YES, SECTION_WINDOWS @"Disable the window shadow on Mojave when the window has a transparent session to improve performance.");
+DEFINE_BOOL(disableWindowShadowWhenTransparencyPreMojave, YES, SECTION_WINDOWS @"Disable the window shadow on High Sierra and earlier when the window has a transparent session to prevent text shadows.");
 
 #pragma mark tmux
 
@@ -399,7 +407,6 @@ DEFINE_BOOL(disableWindowShadowWhenTransparencyOnMojave, YES, SECTION_WINDOWS @"
 DEFINE_BOOL(noSyncNewWindowOrTabFromTmuxOpensTmux, NO, SECTION_TMUX @"Suppress alert asking what kind of tab/window to open in tmux integration. Affects both windows and tabs.\nThis setting predates having separate settings for windows vs tabs. If it is off, then the two new settings will take effect.");
 DEFINE_BOOL(noSyncNewWindowFromTmuxOpensTmux, NO, SECTION_TMUX @"Suppress alert asking what kind of window to open in tmux integration.\nNOTE: This only takes effect if the now-deprecated “Suppress alert asking what kind of tab/window to open in tmux integration” setting is off.");
 DEFINE_BOOL(noSyncNewTabFromTmuxOpensTmux, NO, SECTION_TMUX @"Suppress alert asking what kind of tab to open in tmux integration.\nNOTE: This only takes effect if the now-deprecated “Suppress alert asking what kind of tab/window to open in tmux integration” setting is off.");
-DEFINE_BOOL(tmuxUsesDedicatedProfile, YES, SECTION_TMUX @"Tmux always uses the “tmux” profile.\nIf disabled, tmux sessions use the profile of the session you ran tmux -CC in.");
 DEFINE_BOOL(tolerateUnrecognizedTmuxCommands, NO, SECTION_TMUX @"Tolerate unrecognized commands from server.\nIf enabled, an unknown command from tmux (such as output from ssh or wall) will end the session. Turning this off helps detect dead ssh sessions.");
 DEFINE_BOOL(useTmuxStatusBar, YES, SECTION_TMUX @"Always use the tmux status bar in tmux integration mode.");
 
@@ -502,6 +509,7 @@ DEFINE_BOOL(sshURLsSupportPath, YES_IF_BETA_ELSE_NO, SECTION_EXPERIMENTAL @"SSH 
 DEFINE_BOOL(useDivorcedProfileToSplit, YES_IF_BETA_ELSE_NO, SECTION_EXPERIMENTAL @"When splitting a pane, use the profile with local modifications, not the backing profile.");
 DEFINE_BOOL(synergyModifierRemappingEnabled, YES_IF_BETA_ELSE_NO, SECTION_EXPERIMENTAL @"Support modifier remapping for keystrokes originated by Synergy.");
 DEFINE_BOOL(shouldSetLCTerminal, YES, SECTION_EXPERIMENTAL @"Set LC_TERMINAL=iTerm2.\nopenssh and mosh pass this to hosts you connect to. It communicates the current terminal emulator. This is useful for enabling terminal emulator-specific features.");
+DEFINE_BOOL(clearBellIconAggressively, YES, SECTION_EXPERIMENTAL @"Clear bell icon when a session becomes active.\nWhen off, you must type in the session to clear the bell icon.");
 
 #pragma mark - Scripting
 #define SECTION_SCRIPTING @"Scripting: "

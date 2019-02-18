@@ -325,7 +325,9 @@ static NSString *const kIntervalLengthKey = @"Length";
                     id<IntervalTreeObject> object = [[[theClass alloc] initWithDictionary:objectDict] autorelease];
                     if (object) {
                         Interval *interval = [Interval intervalWithDictionary:intervalDict];
-                        [self addObject:object withInterval:interval];
+                        if (interval.limit >= 0) {
+                            [self addObject:object withInterval:interval];
+                        }
                     }
                 }
             }

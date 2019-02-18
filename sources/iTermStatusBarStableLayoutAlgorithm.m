@@ -23,8 +23,7 @@
 }
 
 - (NSArray<iTermStatusBarContainerView *> *)allPossibleCandidateViews {
-    NSArray<iTermStatusBarContainerView *> *unhidden = [self unhiddenContainerViews];
-    return [self fittingSubsetOfContainerViewsFrom:unhidden];
+    return [self unhiddenContainerViews];
 }
 
 - (BOOL)componentIsSpacer:(id<iTermStatusBarComponent>)component {
@@ -61,18 +60,62 @@ haveSpacersOnBothSidesOfIndex:(NSInteger)index
 }
 
 - (NSArray<iTermStatusBarContainerView *> *)visibleContainerViewsAllowingEqualSpacingFromViews:(NSArray<iTermStatusBarContainerView *> *)visibleContainerViews {
-    if (_statusBarWidth >= [self minimumWidthOfContainerViews:visibleContainerViews]) {
-        return visibleContainerViews;
-    }
+    NSArray<iTermStatusBarContainerView *> *sortedViews = [self containerViewsSortedByPriority:visibleContainerViews];
+    return [self visibleContainerViewsAllowingEqualSpacingFromSortedViews:sortedViews
+                                                             orderedViews:visibleContainerViews];
+}
 
-    iTermStatusBarContainerView *viewWithLargestMinimumWidth = [self containerViewWithLargestMinimumWidthFromViews:visibleContainerViews];
-    iTermStatusBarContainerView *adjacentViewToRemove = [self viewToRemoveAdjacentToViewBeingRemoved:viewWithLargestMinimumWidth
-                                                                                           fromViews:visibleContainerViews];
-    if (adjacentViewToRemove) {
-        visibleContainerViews = [visibleContainerViews arrayByRemovingObject:adjacentViewToRemove];
+- (NSArray<iTermStatusBarContainerView *> *)visibleContainerViewsAllowingEqualSpacingFromSortedViews:(NSArray<iTermStatusBarContainerView *> *)sortedViews
+                                                                                        orderedViews:(NSArray<iTermStatusBarContainerView *> *)orderedViews {
+    if (_statusBarWidth >= [self minimumWidthOfContainerViews:orderedViews]) {
+        return orderedViews;
     }
-    visibleContainerViews = [visibleContainerViews arrayByRemovingObject:viewWithLargestMinimumWidth];
-    return [self visibleContainerViewsAllowingEqualSpacingFromViews:visibleContainerViews];
+    if (orderedViews.count == 0) {
+        return @[];
+    }
+    
+    // Find the views with equal priority to the first. Note the views are sorted by priority.
+    const double priority = sortedViews.firstObject.component.statusBarComponentPriority;
+    const NSInteger index = [sortedViews indexOfObjectPassingTest:^BOOL(iTermStatusBarContainerView * _Nonnull obj, NSUInteger idx, BOOL * _Nonnull stop) {
+        return obj.component.statusBarComponentPriority > priority;
+    }];
+    const NSRange range = (index == NSNotFound) ? NSMakeRange(0, sortedViews.count) : NSMakeRange(0, index);
+    NSArray<iTermStatusBarContainerView *> *removalCandidates = [sortedViews subarrayWithRange:range];
+    
+    // Of those, remove the one with the largest minimum width.
+    iTermStatusBarContainerView *viewWithLargestMinimumWidth = [self bestViewToRemoveFrom:removalCandidates];
+    iTermStatusBarContainerView *adjacentViewToRemove = [self viewToRemoveAdjacentToViewBeingRemoved:viewWithLargestMinimumWidth
+                                                                                           fromViews:orderedViews];
+    if (adjacentViewToRemove) {
+        sortedViews = [sortedViews arrayByRemovingObject:adjacentViewToRemove];
+        orderedViews = [orderedViews arrayByRemovingObject:adjacentViewToRemove];
+    }
+    sortedViews = [sortedViews arrayByRemovingObject:viewWithLargestMinimumWidth];
+    orderedViews = [orderedViews arrayByRemovingObject:viewWithLargestMinimumWidth];
+    return [self visibleContainerViewsAllowingEqualSpacingFromSortedViews:sortedViews
+                                                             orderedViews:orderedViews];
+}
+
+- (iTermStatusBarContainerView *)bestViewToRemoveFrom:(NSArray<iTermStatusBarContainerView *> *)views {
+    NSInteger (^score)(iTermStatusBarContainerView *) = ^NSInteger(iTermStatusBarContainerView *view) {
+        if ([view.component isKindOfClass:[iTermStatusBarSpringComponent class]]) {
+            return 2;
+        }
+        if ([view.component isKindOfClass:[iTermStatusBarFixedSpacerComponent class]]) {
+            return 1;
+        }
+        return 0;
+    };
+    return [views maxWithComparator:^NSComparisonResult(iTermStatusBarContainerView *a, iTermStatusBarContainerView *b) {
+        NSInteger aScore = score(a);
+        NSInteger bScore = score(b);
+        if (aScore == 0 && bScore == 0) {
+            // Tiebreak nonspacers by minimum width
+            aScore = a.component.statusBarComponentMinimumWidth;
+            bScore = b.component.statusBarComponentMinimumWidth;
+        }
+        return [@(aScore) compare:@(bScore)];
+    }];
 }
 
 - (NSArray<iTermStatusBarContainerView *> *)visibleContainerViewsAllowingEqualSpacing {
@@ -108,6 +151,12 @@ haveSpacersOnBothSidesOfIndex:(NSInteger)index
     }];
 }
 
+- (NSArray<iTermStatusBarContainerView *> *)viewsExcludingPreallocatedViews:(NSArray<iTermStatusBarContainerView *> *)views {
+    return [views filteredArrayUsingBlock:^BOOL(iTermStatusBarContainerView *view) {
+        return view.component.statusBarComponentPriority != INFINITY;
+    }];
+}
+
 - (CGFloat)widthOfFixedSpacersAmongViews:(NSArray<iTermStatusBarContainerView *> *)views {
     return [[views reduceWithFirstValue:@0 block:^id(NSNumber *partialSum, iTermStatusBarContainerView *view) {
         if (![view.component isKindOfClass:[iTermStatusBarFixedSpacerComponent class]]) {
@@ -123,17 +172,54 @@ haveSpacersOnBothSidesOfIndex:(NSInteger)index
     }] doubleValue];
 }
 
+- (CGFloat)preallocatedWidthInViews:(NSArray<iTermStatusBarContainerView *> *)views
+                          fromWidth:(CGFloat)totalWidth {
+    NSArray<iTermStatusBarContainerView *> *preallocatedViews = [views filteredArrayUsingBlock:^BOOL(iTermStatusBarContainerView *view) {
+        return view.component.statusBarComponentPriority == INFINITY;
+    }];
+    if (preallocatedViews.count == 0) {
+        // Normal case
+        return 0;
+    }
+    const CGFloat singleUnitWidth = totalWidth / views.count;
+    const CGFloat sumOfPreferredSizesOfPreallocatedViews = [[views mapWithBlock:^id(iTermStatusBarContainerView *view) {
+        return @(MAX(singleUnitWidth, view.component.statusBarComponentMinimumWidth));
+    }] sumOfNumbers];
+    if (sumOfPreferredSizesOfPreallocatedViews <= totalWidth) {
+        // Can use larger of min width or the standard 1-unit size for all preallocated views.
+        __block CGFloat preallocation = 0;
+        [preallocatedViews enumerateObjectsUsingBlock:^(iTermStatusBarContainerView * _Nonnull view, NSUInteger idx, BOOL * _Nonnull stop) {
+            const CGFloat width = MAX(singleUnitWidth, view.component.statusBarComponentMinimumWidth);
+            view.desiredWidth = width;
+            preallocation += width;
+        }];
+        return preallocation;
+    } else {
+        // Not enough space. Divide all available space among preallocated views, leaving nothing for others.
+        const CGFloat apportionment = totalWidth / views.count;
+        [preallocatedViews enumerateObjectsUsingBlock:^(iTermStatusBarContainerView * _Nonnull view, NSUInteger idx, BOOL * _Nonnull stop) {
+            view.desiredWidth = apportionment;
+        }];
+        return totalWidth;
+    }
+}
+
 - (void)updateDesiredWidthsForViews:(NSArray<iTermStatusBarContainerView *> *)views {
     [self updateMargins:views];
     NSArray<iTermStatusBarContainerView *> *viewsExFixedSpacers = [self viewsExcludingFixedSpacers:views];
     const CGFloat widthOfAllFixedSpacers = [self widthOfFixedSpacersAmongViews:views];
     const CGFloat totalMarginWidth = [self totalMarginWidthForViews:views];
-    const CGFloat availableWidth = _statusBarWidth - totalMarginWidth - widthOfAllFixedSpacers;
-    const double sumOfSpringConstants = [self sumOfSpringConstantsInViews:viewsExFixedSpacers];
+    const CGFloat availableWidthBeforePreallocation = _statusBarWidth - totalMarginWidth - widthOfAllFixedSpacers;
+    const CGFloat preallocatedWidth = [self preallocatedWidthInViews:viewsExFixedSpacers
+                                                           fromWidth:availableWidthBeforePreallocation];
+    const CGFloat availableWidth = availableWidthBeforePreallocation - preallocatedWidth;
+    NSArray<iTermStatusBarContainerView *> *viewsExPreallocatedViewsAndFixedSpacers = [self viewsExcludingPreallocatedViews:viewsExFixedSpacers];
+    const double sumOfSpringConstants = [self sumOfSpringConstantsInViews:viewsExPreallocatedViewsAndFixedSpacers];
+    NSArray<iTermStatusBarContainerView *> *viewsExPreallocatedViews = [self viewsExcludingPreallocatedViews:views];
     const CGFloat apportionment = availableWidth / sumOfSpringConstants;
     DLog(@"updateDesiredWidthsForViews available=%@ apportionment=%@", @(availableWidth), @(apportionment));
     // Allocate minimum widths
-    [views enumerateObjectsUsingBlock:^(iTermStatusBarContainerView * _Nonnull view, NSUInteger idx, BOOL * _Nonnull stop) {
+    [viewsExPreallocatedViews enumerateObjectsUsingBlock:^(iTermStatusBarContainerView * _Nonnull view, NSUInteger idx, BOOL * _Nonnull stop) {
         if ([view.component isKindOfClass:[iTermStatusBarFixedSpacerComponent class]]) {
             view.desiredWidth = view.component.statusBarComponentMinimumWidth;
             return;

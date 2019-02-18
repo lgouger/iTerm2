@@ -914,6 +914,7 @@ static NSString *const kInlineFileInset = @"inset";  // NSValue of NSEdgeInsets
 }
 
 - (void)reallySetSize:(VT100GridSize)newSize {
+    [self sanityCheckIntervalsFrom:currentGrid_.size note:@"pre-hoc"];
     [self.temporaryDoubleBuffer resetExplicitly];
     const VT100GridSize oldSize = currentGrid_.size;
     iTermSelection *selection = [delegate_ screenSelection];
@@ -1000,9 +1001,21 @@ static NSString *const kInlineFileInset = @"inset";  // NSValue of NSEdgeInsets
        couldHaveSelection:couldHaveSelection
             subSelections:newSubSelections];
     [altScreenLineBuffer endResizing];
-
+    [self sanityCheckIntervalsFrom:oldSize note:@"post-hoc"];
     DLog(@"After:\n%@", [currentGrid_ compactLineDumpWithContinuationMarks]);
     DLog(@"Cursor at %d,%d", currentGrid_.cursorX, currentGrid_.cursorY);
+}
+
+- (void)sanityCheckIntervalsFrom:(VT100GridSize)oldSize note:(NSString *)note {
+#if BETA
+    for (id<IntervalTreeObject> obj in [intervalTree_ allObjects]) {
+        IntervalTreeEntry *entry = obj.entry;
+        Interval *interval = entry.interval;
+        ITBetaAssert(interval.limit >= 0, @"Bogus interval %@ after resizing from %@ to %@. Note: %@",
+                     interval, VT100GridSizeDescription(oldSize), VT100GridSizeDescription(currentGrid_.size),
+                     note);
+    }
+#endif
 }
 
 - (void)reloadMarkCache {
@@ -1577,7 +1590,9 @@ static NSString *const kInlineFileInset = @"inset";  // NSValue of NSEdgeInsets
 basedAtAbsoluteLineNumber:(long long)absoluteLineNumber
                   URLCode:(unsigned short)code {
     long long lineNumber = absoluteLineNumber - self.totalScrollbackOverflow - self.numberOfScrollbackLines;
-    
+    if (lineNumber < 0) {
+        return;
+    }
     VT100GridRun gridRun = [currentGrid_ gridRunFromRange:range relativeToRow:lineNumber];
     if (gridRun.length > 0) {
         [self linkRun:gridRun withURLCode:code];
@@ -2241,7 +2256,11 @@ basedAtAbsoluteLineNumber:(long long)absoluteLineNumber
         screenMark.delegate = self;
         screenMark.sessionGuid = [delegate_ screenSessionGuid];
     }
-    int nonAbsoluteLine = line - [self totalScrollbackOverflow];
+    long long totalOverflow = [self totalScrollbackOverflow];
+    if (line < totalOverflow || line >= totalOverflow + self.numberOfLines) {
+        return nil;
+    }
+    int nonAbsoluteLine = line - totalOverflow;
     VT100GridCoordRange range;
     if (oneLine) {
         range = VT100GridCoordRangeMake(0, nonAbsoluteLine, self.width, nonAbsoluteLine);
@@ -5525,10 +5544,6 @@ static void SwapInt(int *a, int *b) {
 
     return state;
 
-}
-
-- (iTermColorMap *)temporaryDoubleBufferedGridColorMapCopy {
-    return [[delegate_ screenColorMap] copy];
 }
 
 - (void)temporaryDoubleBufferedGridDidExpire {

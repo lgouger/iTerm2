@@ -1,13 +1,13 @@
 """
 The iTerm2 module provides a Python interface for controlling iTerm2.
 """
-from iterm2.app import async_get_app, CreateWindowException, App
+from iterm2.app import async_get_app, CreateWindowException, App, async_invoke_function
 
 from iterm2.arrangement import SavedArrangementException, Arrangement
 
 from iterm2.broadcast import BroadcastDomain, async_set_broadcast_domains
 
-from iterm2.color import Color
+from iterm2.color import Color, ColorSpace
 
 from iterm2.colorpresets import ColorPreset, ListPresetsException, GetPresetException
 
@@ -15,7 +15,7 @@ from iterm2.connection import Connection, run_until_complete, run_forever
 
 from iterm2.customcontrol import CustomControlSequenceMonitor
 
-from iterm2.focus import FocusMonitor,  FocusUpdateApplicationActive, FocusUpdateWindowChanged, FocusUpdateSelectedTabChanged, FocusUpdateActiveSessionChanged, FocusUpdate, FocusMonitor
+from iterm2.focus import FocusMonitor, FocusUpdateApplicationActive, FocusUpdateWindowChanged, FocusUpdateSelectedTabChanged, FocusUpdateActiveSessionChanged, FocusUpdate, FocusMonitor
 
 from iterm2.lifecycle import SessionTerminationMonitor, LayoutChangeMonitor, NewSessionMonitor
 

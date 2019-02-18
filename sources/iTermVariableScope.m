@@ -12,12 +12,13 @@
 #import "iTermVariables.h"
 #import "NSArray+iTerm.h"
 #import "NSDictionary+iTerm.h"
+#import "NSObject+iTerm.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
 @interface iTermVariables(Private)
 - (NSDictionary<NSString *,NSString *> *)stringValuedDictionaryInScope:(nullable NSString *)scopeName;
-- (id)valueForVariableName:(NSString *)name;
+- (nullable id)valueForVariableName:(NSString *)name;
 - (NSString *)stringValueForVariableName:(NSString *)name;
 - (BOOL)hasLinkToReference:(iTermVariableReference *)reference
                       path:(NSString *)path;
@@ -34,12 +35,6 @@ NS_ASSUME_NONNULL_BEGIN
     NSPointerArray *_danglingReferences;
 }
 
-+ (instancetype)globalsScope {
-    iTermVariableScope *scope = [[iTermVariableScope alloc] init];
-    [scope addVariables:[iTermVariables globalInstance] toScopeNamed:nil];
-    return scope;
-}
-
 - (instancetype)init {
     self = [super init];
     if (self) {
@@ -52,6 +47,15 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)addVariables:(iTermVariables *)variables toScopeNamed:(nullable NSString *)scopeName {
     [_frames insertObject:[iTermTuple tupleWithObject:scopeName andObject:variables] atIndex:0];
     [self resolveDanglingReferences];
+}
+
+- (NSArray<iTermVariables *> *)variablesInScopeNamed:(nullable NSString *)scopeName {
+    return [_frames mapWithBlock:^id(iTermTuple<NSString *,iTermVariables *> *anObject) {
+        if (![NSObject object:scopeName isEqualToObject:anObject.firstObject]) {
+            return nil;
+        }
+        return anObject.secondObject;
+    }];
 }
 
 - (void)enumerateVariables:(void (^)(NSString * _Nonnull, iTermVariables * _Nonnull))block {
@@ -68,25 +72,48 @@ NS_ASSUME_NONNULL_BEGIN
     return result;
 }
 
+- (id)valueForPath:(NSString *)firstName, ... {
+    va_list args;
+    va_start(args, firstName);
+    NSMutableArray<NSString *> *parts = [NSMutableArray array];
+    for (NSString *name = firstName; name != nil; name = va_arg(args, NSString*)) {
+        [parts addObject:name];
+    }
+    va_end(args);
+    return [self valueForVariableName:[parts componentsJoinedByString:@"."]];
+}
+
 - (id)valueForVariableName:(NSString *)name {
     NSString *stripped = nil;
-    iTermVariables *owner = [self ownerForKey:name stripped:&stripped];
+    iTermVariables *owner = [self ownerForKey:name forWriting:NO stripped:&stripped];
     return [owner valueForVariableName:stripped];
 }
 
 - (NSString *)stringValueForVariableName:(NSString *)name {
     NSString *stripped = nil;
-    iTermVariables *owner = [self ownerForKey:name stripped:&stripped];
+    iTermVariables *owner = [self ownerForKey:name forWriting:NO stripped:&stripped];
     return [owner stringValueForVariableName:name] ?: @"";
 }
 
-- (iTermVariables *)ownerForKey:(NSString *)key stripped:(out NSString **)stripped {
+- (nullable iTermVariables *)ownerForKey:(NSString *)key forWriting:(BOOL)forWriting stripped:(out NSString **)stripped {
     NSArray<NSString *> *parts = [key componentsSeparatedByString:@"."];
     if (parts.count == 0) {
         return nil;
     }
     if (parts.count == 1) {
         *stripped = key;
+        if (!forWriting) {
+            // Check all anonymous frames in case one of them is a match.
+            for (iTermTuple<NSString *,iTermVariables *> *tuple in _frames) {
+                if (tuple.firstObject) {
+                    continue;
+                }
+                if ([tuple.secondObject valueForVariableName:key]) {
+                    return tuple.secondObject;
+                }
+            }
+        }
+        // Writes always go into the most recently added frame.
         return [_frames objectPassingTest:^BOOL(iTermTuple<NSString *,iTermVariables *> *element, NSUInteger index, BOOL *stop) {
             return element.firstObject == nil;
         }].secondObject;
@@ -107,7 +134,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (BOOL)variableNamed:(NSString *)name isReferencedBy:(iTermVariableReference *)reference {
     NSString *tail;
-    iTermVariables *variables = [self ownerForKey:name stripped:&tail];
+    iTermVariables *variables = [self ownerForKey:name forWriting:NO stripped:&tail];
     if (!variables) {
         return NO;
     }
@@ -120,7 +147,7 @@ NS_ASSUME_NONNULL_BEGIN
     for (NSString *key in dict) {
         id object = dict[key];
         NSString *stripped = nil;
-        iTermVariables *owner = [self ownerForKey:key stripped:&stripped];
+        iTermVariables *owner = [self ownerForKey:key forWriting:YES stripped:&stripped];
         NSValue *value = [NSValue valueWithNonretainedObject:owner];
         NSMutableDictionary *inner = valuesByOwner[value];
         if (!inner) {
@@ -144,13 +171,26 @@ NS_ASSUME_NONNULL_BEGIN
     return changed;
 }
 
+- (BOOL)setValue:(nullable id)value forPath:(NSString *)firstName, ... {
+    va_list args;
+    va_start(args, firstName);
+    NSMutableArray<NSString *> *parts = [NSMutableArray array];
+    for (NSString *name = firstName; name != nil; name = va_arg(args, NSString*)) {
+        [parts addObject:name];
+    }
+    va_end(args);
+    return [self setValue:value forVariableNamed:[parts componentsJoinedByString:@"."]];
+}
+
 - (BOOL)setValue:(nullable id)value forVariableNamed:(NSString *)name {
     return [self setValue:value forVariableNamed:name weak:NO];
 }
 
 - (BOOL)setValue:(nullable id)value forVariableNamed:(NSString *)name weak:(BOOL)weak {
+    assert(![value isKindOfClass:[iTermVariableScope class]]);  // You meant to use iTermVariables, not iTermVariableScope.
+
     NSString *stripped = nil;
-    iTermVariables *owner = [self ownerForKey:name stripped:&stripped];
+    iTermVariables *owner = [self ownerForKey:name forWriting:YES stripped:&stripped];
     if (!owner) {
         return NO;
     }
@@ -180,7 +220,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (void)addLinksToReference:(iTermVariableReference *)reference {
     NSString *tail;
-    iTermVariables *variables = [self ownerForKey:reference.path stripped:&tail];
+    iTermVariables *variables = [self ownerForKey:reference.path forWriting:YES stripped:&tail];
     if (!variables) {
         [_danglingReferences addPointer:(__bridge void * _Nullable)(reference)];
         return;
@@ -201,6 +241,12 @@ NS_ASSUME_NONNULL_BEGIN
     [_frames enumerateObjectsUsingBlock:^(iTermTuple<NSString *,iTermVariables *> * _Nonnull tuple, NSUInteger idx, BOOL * _Nonnull stop) {
         [theCopy addVariables:tuple.secondObject toScopeNamed:tuple.firstObject];
     }];
+    return theCopy;
+}
+
+- (id)unsafeCheapCopy {
+    iTermVariableScope *theCopy = [[self.class alloc] init];
+    theCopy->_frames = [_frames copy];
     return theCopy;
 }
 

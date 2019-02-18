@@ -249,6 +249,10 @@ const double iTermStatusBarBaseComponentDefaultPriority = 5;
     [self.delegate statusBarComponentKnobsDidChange:self];
 }
 
+- (NSDictionary *)statusBarComponentKnobValues {
+    return _configuration[iTermStatusBarComponentConfigurationKeyKnobValues];
+}
+
 - (NSView *)statusBarComponentView {
     [self doesNotRecognizeSelector:_cmd];
     return [[NSView alloc] init];
@@ -274,7 +278,7 @@ const double iTermStatusBarBaseComponentDefaultPriority = 5;
     return MAX(0.01, value.doubleValue);
 }
 
-- (NSViewController<iTermFindViewController> *)statusBarComponentSearchViewController {
+- (nullable NSViewController<iTermFindViewController> *)statusBarComponentSearchViewController {
     return nil;
 }
 

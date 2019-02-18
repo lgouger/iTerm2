@@ -346,10 +346,16 @@ class App:
 
     @property
     def broadcast_domains(self) -> typing.List[iterm2.broadcast.BroadcastDomain]:
-        """Returns the current broadcast domains."""
+        """Returns the current broadcast domains.
+
+        .. seealso::
+            * Example ":ref:`targeted_input_example`"
+            * Example ":ref:`enable_broadcasting_example`"
+        """
         return self.__broadcast_domains
 
-    def get_tab_and_window_for_session(self, session: iterm2.session.Session) -> typing.Union[typing.Tuple[None, None], typing.Tuple[iterm2.window.Window, iterm2.tab.Tab]]:
+    def get_tab_and_window_for_session(self,
+            session: iterm2.session.Session) -> typing.Union[typing.Tuple[None, None], typing.Tuple[iterm2.window.Window, iterm2.tab.Tab]]:
         """Finds the tab and window that own a session.
 
         :param session: The session whose tab and window you wish to find.
@@ -435,3 +441,32 @@ class App:
             raise iterm2.rpc.RPCException(iterm2.api_pb2.VariableResponse.Status.Name(status))
         else:
             return json.loads(result.variable_response.values[0])
+
+async def async_invoke_function(self, invocation: str, timeout: float=-1):
+    """
+    Invoke an RPC. Could be a registered function by this or another script of a built-in function.
+
+    This invokes the RPC in the global application context. Note that most user-defined RPCs expect to be invoked in the context of a session. Default variables will be pulled from that scope. If you call a function from the wrong context it may fail because its defaults will not be set properly.
+
+    :param invocation: A function invocation string.
+    :param timeout: Max number of secondsto wait. Negative values mean to use the system default timeout.
+
+    :returns: The result of the invocation if successful.
+
+    :throws: :class:`~iterm2.rpc.RPCException` if something goes wrong.
+    """
+    response = await iterm2.rpc.async_invoke_function(
+            self.connection,
+            invocation,
+            timeout=timeout)
+    which = response.invoke_function_response.WhichOneof('disposition')
+    if which == 'error':
+        if response.invoke_function_response.error.status == iterm2.api_pb2.InvokeFunctionResponse.Status.Value("TIMEOUT"):
+            raise iterm2.rpc.RPCException("Timeout")
+        else:
+            raise iterm2.rpc.RPCException("{}: {}".format(
+                iterm2.api_pb2.InvokeFunctionResponse.Status.Name(
+                    response.invoke_function_response.error.status),
+                response.invoke_function_response.error.error_reason))
+    return json.loads(response.invoke_function_response.success.json_result)
+

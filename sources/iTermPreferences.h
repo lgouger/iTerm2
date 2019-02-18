@@ -80,6 +80,7 @@ extern NSString *const kPreferenceKeyLionStyleFullscreen;
 extern NSString *const kPreferenceKeyOpenTmuxWindowsIn;
 extern NSString *const kPreferenceKeyTmuxDashboardLimit;
 extern NSString *const kPreferenceKeyAutoHideTmuxClientSession;
+extern NSString *const kPreferenceKeyUseTmuxProfile;
 extern NSString *const kPreferenceKeyUseMetal;
 extern NSString *const kPreferenceKeyDisableMetalWhenUnplugged;
 extern NSString *const kPreferenceKeyPreferIntegratedGPU;
@@ -92,6 +93,7 @@ extern NSString *const kPreferenceKeyTabPosition;
 extern NSString *const kPreferenceKeyStatusBarPosition;
 extern NSString *const kPreferenceKeyHideTabBar;
 extern NSString *const kPreferenceKeyHideTabNumber;
+extern NSString *const kPreferenceKeyPreserveWindowSizeWhenTabBarVisibilityChanges;
 extern NSString *const kPreferenceKeyHideTabCloseButton;
 extern NSString *const kPreferenceKeyHideTabActivityIndicator;
 extern NSString *const kPreferenceKeyShowNewOutputIndicator;
@@ -224,4 +226,5 @@ extern NSString *const kPreferenceKeyHotkeyMigratedFromSingleToMulti;
 @interface iTermPreferences (FastAccessors)
 + (BOOL)hideTabActivityIndicator;
 + (BOOL)maximizeMetalThroughput;
++ (BOOL)useTmuxProfile;
 @end

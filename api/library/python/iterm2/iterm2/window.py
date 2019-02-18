@@ -11,6 +11,7 @@ import iterm2.tab
 import iterm2.tmux
 import iterm2.transaction
 import iterm2.util
+import iterm2.window
 import typing
 
 class CreateTabException(Exception):
@@ -46,10 +47,12 @@ class Window:
         :returns: A new :class:`Window`.
 
         :throws: CreateWindowException if something went wrong.
+
+        .. seealso:: Example ":ref:`create_window_example`"
         """
         if command is not None:
             p = profile.LocalWriteOnlyProfile()
-            p.set_use_custom_command(profile.Profile.USE_CUSTOM_COMMAND_ENABLED)
+            p.set_use_custom_command(iterm2.profile.Profile.USE_CUSTOM_COMMAND_ENABLED)
             p.set_command(command)
             custom_dict = p.values
         elif profile_customizations is not None:
@@ -163,6 +166,11 @@ class Window:
 
         :param tabs: a list of tabs, forming the new set of tabs in this window.
         :raises: RPCException if something goes wrong.
+
+        .. seealso::
+            * Example ":ref:`movetab_example`"
+            * Example ":ref:`mrutabs_example`"
+            * Example ":ref:`sorttabs_example`"
         """
         tab_ids = map(lambda tab: tab.tab_id, tabs)
         result = await iterm2.rpc.async_reorder_tabs(
@@ -186,7 +194,10 @@ class Window:
 
         :param tmux_connection: The tmux connection to own the new tab.
 
-        :returns: A newly created tab, or `None` if it could not be created."""
+        :returns: A newly created tab, or `None` if it could not be created.
+
+        .. seealso:: Example ":ref:`tmux_example`"
+        """
         tmux_window_id = "{}".format(-(self.__number + 1))
         response = await iterm2.rpc.async_rpc_create_tmux_window(
             self.connection,
@@ -218,8 +229,8 @@ class Window:
         :raises: CreateTabException if something goes wrong.
         """
         if command is not None:
-            p = profile.LocalWriteOnlyProfile()
-            p.set_use_custom_command(profile.Profile.USE_CUSTOM_COMMAND_ENABLED)
+            p = iterm2.profile.LocalWriteOnlyProfile()
+            p.set_use_custom_command(iterm2.profile.Profile.USE_CUSTOM_COMMAND_ENABLED)
             p.set_command(command)
             custom_dict = p.values
         elif profile_customizations is not None:
@@ -362,3 +373,32 @@ class Window:
             raise iterm2.arrangement.SavedArrangementException(
                 iterm2.api_pb2.SavedArrangementResponse.Status.Name(
                     result.saved_arrangement_response.status))
+
+    async def async_invoke_function(self, invocation: str, timeout: float=-1):
+        """
+        Invoke an RPC. Could be a registered function by this or another script of a built-in function.
+
+        This invokes the RPC in the context of this window. Note that most user-defined RPCs expect to be invoked in the context of a session. Default variables will be pulled from that scope. If you call a function from the wrong context it may fail because its defaults will not be set properly.
+
+        :param invocation: A function invocation string.
+        :param timeout: Max number of secondsto wait. Negative values mean to use the system default timeout.
+
+        :returns: The result of the invocation if successful.
+
+        :throws: :class:`~iterm2.rpc.RPCException` if something goes wrong.
+        """
+        response = await iterm2.rpc.async_invoke_function(
+                self.connection,
+                invocation,
+                window_id=self.window_id,
+                timeout=timeout)
+        which = response.invoke_function_response.WhichOneof('disposition')
+        if which == 'error':
+            if response.invoke_function_response.error.status == iterm2.api_pb2.InvokeFunctionResponse.Status.Value("TIMEOUT"):
+                raise iterm2.rpc.RPCException("Timeout")
+            else:
+                raise iterm2.rpc.RPCException("{}: {}".format(
+                    iterm2.api_pb2.InvokeFunctionResponse.Status.Name(
+                        response.invoke_function_response.error.status),
+                    response.invoke_function_response.error.error_reason))
+        return json.loads(response.invoke_function_response.success.json_result)

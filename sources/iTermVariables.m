@@ -28,8 +28,11 @@ NSString *const iTermVariableKeyApplicationLocalhostName = @"localhostName";
 NSString *const iTermVariableKeyApplicationEffectiveTheme = @"effectiveTheme";
 
 NSString *const iTermVariableKeyTabTitleOverride = @"titleOverride";
+NSString *const iTermVariableKeyTabTitleOverrideFormat = @"titleOverrideFormat";
 NSString *const iTermVariableKeyTabCurrentSession = @"currentSession";
 NSString *const iTermVariableKeyTabTmuxWindow = @"tmuxWindow";
+NSString *const iTermVariableKeyTabID = @"id";
+NSString *const iTermVariableKeyTabWindow = @"window";
 
 NSString *const iTermVariableKeySessionAutoLogID = @"autoLogId";
 NSString *const iTermVariableKeySessionColumns = @"columns";
@@ -63,7 +66,7 @@ NSString *const iTermVariableKeySessionMouseReportingMode = @"mouseReportingMode
 NSString *const iTermVariableKeySessionBadge = @"badge";
 NSString *const iTermVariableKeySessionTab = @"tab";
 
-NSString *const iTermVariableKeyWindowTitleOverride = @"titleOverride";
+NSString *const iTermVariableKeyWindowTitleOverrideFormat = @"titleOverrideFormat";
 NSString *const iTermVariableKeyWindowCurrentTab = @"currentTab";
 
 // NOTE: If you add here, also update +recordBuiltInVariables
@@ -138,11 +141,11 @@ NSString *const iTermVariableKeyWindowCurrentTab = @"currentTab";
     return YES;
 }
 
-- (id)discouragedValueForVariableName:(NSString *)name {
+- (nullable id)discouragedValueForVariableName:(NSString *)name {
     return [self valueForVariableName:name];
 }
 
-- (id)rawValueForVariableName:(NSString *)name {
+- (nullable id)rawValueForVariableName:(NSString *)name {
     return _values[name];
 }
 
@@ -155,7 +158,7 @@ NSString *const iTermVariableKeyWindowCurrentTab = @"currentTab";
     }
 }
 
-- (id)valueForVariableName:(NSString *)name {
+- (nullable id)valueForVariableName:(NSString *)name {
     if (_values[name]) {
         return [self valueByUnwrappingWeakVariables:_values[name]];
     }
@@ -295,7 +298,7 @@ NSString *const iTermVariableKeyWindowCurrentTab = @"currentTab";
     }
 }
 
-- (iTermVariables *)setValue:(id)value forVariableNamed:(NSString *)name withSideEffects:(BOOL)sideEffects weak:(BOOL)weak {
+- (nullable iTermVariables *)setValue:(id)value forVariableNamed:(NSString *)name withSideEffects:(BOOL)sideEffects weak:(BOOL)weak {
     assert(name.length > 0);
 
     // If name refers to a variable of a child, go down a level.

@@ -30,6 +30,7 @@ const CGFloat iTermStatusBarHeight = 21;
 
 @interface iTermStatusBarViewController ()<
     iTermStatusBarComponentDelegate,
+    iTermStatusBarContainerViewDelegate,
     iTermStatusBarLayoutDelegate>
 
 @end
@@ -38,6 +39,7 @@ const CGFloat iTermStatusBarHeight = 21;
     NSMutableArray<iTermStatusBarContainerView *> *_containerViews;
     NSArray<iTermStatusBarContainerView *> *_visibleContainerViews;
     NSInteger _updating;
+    BOOL _makeSearchControllerFirstResponder;
 }
 
 - (instancetype)initWithLayout:(iTermStatusBarLayout *)layout
@@ -62,8 +64,18 @@ const CGFloat iTermStatusBarHeight = 21;
     [self updateViews];
 }
 
+- (iTermStatusBarContainerView *)mandatoryView {
+    if (!self.mustShowSearchComponent) {
+        return nil;
+    }
+    return [_containerViews objectPassingTest:^BOOL(iTermStatusBarContainerView *containerView, NSUInteger index, BOOL *stop) {
+        return containerView.component.statusBarComponentSearchViewController != nil;
+    }];
+}
+
 - (iTermStatusBarLayoutAlgorithm *)layoutAlgorithm {
     return [iTermStatusBarLayoutAlgorithm layoutAlgorithmWithContainerViews:_containerViews
+                                                              mandatoryView:self.mandatoryView
                                                              statusBarWidth:self.view.frame.size.width
                                                                     setting:_layout.advancedConfiguration.layoutAlgorithm];
 }
@@ -107,10 +119,7 @@ const CGFloat iTermStatusBarHeight = 21;
         }
 
         // Normal case: add a separator after this component
-        haveFoundNonSpacer = YES;
         anObject.rightSeparatorOffset = offset.doubleValue;
-        lastFixedSpacerOffset = nil;
-        previousObject = anObject;
         return @[ offset ];
     }
     return [offsets uniq];
@@ -162,6 +171,10 @@ const CGFloat iTermStatusBarHeight = 21;
     view.backgroundColors = [self desiredBackgroundColors];
 
     [view setNeedsDisplay:YES];
+    if (_makeSearchControllerFirstResponder) {
+        [self.searchViewController open];
+        _makeSearchControllerFirstResponder = NO;
+    }
     DLog(@"--- end status bar layout ---");
 }
 
@@ -181,6 +194,12 @@ const CGFloat iTermStatusBarHeight = 21;
     return [_containerViews mapWithBlock:^id(iTermStatusBarContainerView *containerView) {
         return containerView.component.statusBarComponentSearchViewController;
     }].firstObject;
+}
+
+- (void)setMustShowSearchComponent:(BOOL)mustShowSearchComponent {
+    _mustShowSearchComponent = mustShowSearchComponent;
+    _makeSearchControllerFirstResponder = mustShowSearchComponent;
+    [self.view setNeedsLayout:YES];
 }
 
 #pragma mark - Private
@@ -218,6 +237,7 @@ const CGFloat iTermStatusBarHeight = 21;
             [_containerViews removeObject:view];
         } else {
             view = [[iTermStatusBarContainerView alloc] initWithComponent:component];
+            view.delegate = self;
         }
         [updatedContainerViews addObject:view];
     }
@@ -291,6 +311,25 @@ const CGFloat iTermStatusBarHeight = 21;
 
 - (void)statusBarComponent:(id<iTermStatusBarComponent>)component writeString:(NSString *)string {
     [self.delegate statusBarWriteString:string];
+}
+
+#pragma mark - iTermStatusBarContainerViewDelegate
+
+- (void)statusBarContainerView:(iTermStatusBarContainerView *)sender hideComponent:(id<iTermStatusBarComponent>)component {
+    iTermStatusBarLayout *layout = [[iTermStatusBarLayout alloc] initWithDictionary:[self.layout dictionaryValue]
+                                                                              scope:_scope];
+    layout.components = [layout.components it_arrayByRemovingObjectsPassingTest:^BOOL(id<iTermStatusBarComponent> anObject) {
+        return anObject.class == component.class;
+    }];
+    [self.delegate statusBarSetLayout:layout];
+}
+
+- (void)statusBarContainerViewConfigureStatusBar:(iTermStatusBarContainerView *)sender {
+    [self.delegate statusBarOpenPreferencesToComponent:nil];
+}
+
+- (void)statusBarContainerView:(iTermStatusBarContainerView *)sender configureComponent:(id<iTermStatusBarComponent>)component {
+    [self.delegate statusBarOpenPreferencesToComponent:component];
 }
 
 @end

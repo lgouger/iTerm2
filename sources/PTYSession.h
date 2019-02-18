@@ -57,6 +57,7 @@ extern NSString *const PTYSessionRevivedNotification;
 @class iTermNotificationController;
 @class iTermPromptOnCloseReason;
 @class iTermQuickLookController;
+@protocol iTermSessionScope;
 @class SessionView;
 
 typedef NS_ENUM(NSInteger, SplitSelectionMode) {
@@ -432,7 +433,8 @@ typedef enum {
 @property(nonatomic, readonly) NSMutableArray<VT100RemoteHost *> *hosts;  // of VT100RemoteHost
 
 @property (nonatomic, readonly) iTermVariables *variables;
-@property (nonatomic, readonly) iTermVariableScope *variablesScope;
+@property (nonatomic, readonly) iTermVariableScope<iTermSessionScope> *variablesScope;
+@property (nonatomic, readonly) BOOL triggerParametersUseInterpolatedStrings;
 
 @property(atomic, readonly) PTYSessionTmuxMode tmuxMode;
 
@@ -704,6 +706,7 @@ typedef enum {
 - (void)setTmuxPane:(int)windowPane;
 
 - (void)addNoteAtCursor;
+- (void)addNoteWithText:(NSString *)text inAbsoluteRange:(VT100GridAbsCoordRange)range;
 - (void)previousMarkOrNote;
 - (void)nextMarkOrNote;
 - (void)scrollToMark:(id<iTermMark>)mark;
@@ -727,6 +730,11 @@ typedef enum {
 - (NSDictionary *)arrangementWithContents:(BOOL)includeContents;
 
 - (void)toggleTmuxZoom;
+- (void)forceTmuxDetach;
+
+// This is to work around a macOS bug where setNeedsDisplay: on the root view controller does not
+// cause the TextViewWrapper to be redrawn in its entirety.
+- (void)setNeedsDisplay:(BOOL)needsDisplay;
 
 // Kill the running command (if possible), print a banner, and rerun the profile's command.
 - (void)restartSession;

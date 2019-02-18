@@ -91,8 +91,9 @@ class Tab:
         """
         Selects this tab.
 
-        :param order_window_front: Whether the window this session is in should be
-          brought to the front and given keyboard focus.
+        :param order_window_front: Whether the window this session is in should be brought to the front and given keyboard focus.
+
+        .. seealso:: Example ":ref:`function_key_tabs_example`"
         """
         await iterm2.rpc.async_activate(
             self.connection,
@@ -153,6 +154,8 @@ class Tab:
         :returns: The variable's value or `None` if it is undefined.
 
         :throws: :class:`RPCException` if something goes wrong.
+
+        .. seealso:: Example ":ref:`sorttabs_example`"
         """
         result = await iterm2.rpc.async_variable(self.connection, gets=[name], tab_id=self.__tab_id)
         status = result.variable_response.status
@@ -168,9 +171,53 @@ class Tab:
         :param force: If True, the user will not be prompted for a confirmation.
 
         :throws: :class:`RPCException` if something goes wrong.
+
+        .. seealso:: Example ":ref:`close_to_the_right_example`"
         """
         result = await iterm2.rpc.async_close(self.connection, tabs=[self.__tab_id], force=force)
         status = result.close_response.statuses[0]
         if status != iterm2.api_pb2.CloseResponse.Status.Value("OK"):
             raise iterm2.rpc.RPCException(iterm2.api_pb2.CloseResponse.Status.Name(status))
+
+    async def async_invoke_function(self, invocation: str, timeout: float=-1):
+        """
+        Invoke an RPC. Could be a registered function by this or another script of a built-in function.
+
+        This invokes the RPC in the context of this tab. Note that most user-defined RPCs expect to be invoked in the context of a session. Default variables will be pulled from that scope. If you call a function from the wrong context it may fail because its defaults will not be set properly.
+
+        :param invocation: A function invocation string.
+        :param timeout: Max number of secondsto wait. Negative values mean to use the system default timeout.
+
+        :returns: The result of the invocation if successful.
+
+        :throws: :class:`~iterm2.rpc.RPCException` if something goes wrong.
+        """
+        response = await iterm2.rpc.async_invoke_function(
+                self.connection,
+                invocation,
+                tab_id=self.tab_id,
+                timeout=timeout)
+        which = response.invoke_function_response.WhichOneof('disposition')
+        if which == 'error':
+            if response.invoke_function_response.error.status == iterm2.api_pb2.InvokeFunctionResponse.Status.Value("TIMEOUT"):
+                raise iterm2.rpc.RPCException("Timeout")
+            else:
+                raise iterm2.rpc.RPCException("{}: {}".format(
+                    iterm2.api_pb2.InvokeFunctionResponse.Status.Name(
+                        response.invoke_function_response.error.status),
+                    response.invoke_function_response.error.error_reason))
+        return json.loads(response.invoke_function_response.success.json_result)
+
+    async def async_move_to_window(self) -> 'iterm2.window.Window':
+        """
+        Moves this tab to its own window, provided there are multiple tabs in the window it belongs to.
+
+        :returns: The new window ID.
+
+        :throws: :class:`~iterm2.rpc.RPCException` if something goes wrong.
+        """
+        window_id = await self.async_invoke_function("iterm2.move_tab_to_window()")
+        app = await iterm2.app.async_get_app(self.connection)
+        return app.get_window_by_id(window_id)
+
 

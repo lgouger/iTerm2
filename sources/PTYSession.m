@@ -34,6 +34,8 @@
 #import "iTermInitialDirectory.h"
 #import "iTermKeyBindingMgr.h"
 #import "iTermKeyLabels.h"
+#import "iTermScriptConsole.h"
+#import "iTermScriptHistory.h"
 #import "iTermStandardKeyMapper.h"
 #import "iTermRawKeyMapper.h"
 #import "iTermTermkeyKeyMapper.h"
@@ -41,8 +43,8 @@
 #import "iTermMetaFrustrationDetector.h"
 #import "iTermMetalGlue.h"
 #import "iTermMetalDriver.h"
-#import "iTermMenuOpener.h"
 #import "iTermMouseCursor.h"
+#import "iTermNotificationCenter.h"
 #import "iTermPasteHelper.h"
 #import "iTermPreferences.h"
 #import "iTermProcessCache.h"
@@ -73,6 +75,8 @@
 #import "iTermUpdateCadenceController.h"
 #import "iTermVariableReference.h"
 #import "iTermVariableScope.h"
+#import "iTermVariableScope+Global.h"
+#import "iTermVariableScope+Session.h"
 #import "iTermWarning.h"
 #import "iTermWorkingDirectoryPoller.h"
 #import "MovePaneController.h"
@@ -497,6 +501,7 @@ static const NSUInteger kMaxHosts = 100;
 
     id<iTermKeyMapper> _keyMapper;
     BOOL _useLibTickit;
+    NSString *_badgeFontName;
 }
 
 + (NSMapTable<NSString *, PTYSession *> *)sessionMap {
@@ -808,6 +813,7 @@ ITERM_WEAKLY_REFERENCEABLE
     [_jobPidRef release];
     [_customIcon release];
     [_keyMapper release];
+    [_badgeFontName release];
 
     [super dealloc];
 }
@@ -872,6 +878,10 @@ ITERM_WEAKLY_REFERENCEABLE
     }
 }
 
+- (void)setNeedsDisplay:(BOOL)needsDisplay {
+    [_wrapper setNeedsDisplay:needsDisplay];
+}
+
 - (void)irAdvance:(int)dir
 {
     if (!_dvr) {
@@ -927,18 +937,16 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (void)educateAboutCopyMode {
-    [iTermMenuOpener revealMenuWithPath:@[ @"Help", @"Copy Mode Shortcuts" ]
-                                message:@"You have entered Copy Mode.\nWhile in copy mode, you use keyboard\nshortcuts to modify the selection.\nYou can always find the list of\nshortcuts in the Help menu."];
-
+    [[iTermNotificationController sharedInstance] postNotificationWithTitle:@"Copy Mode"
+                                                                     detail:@"Copy Mode lets you make a selection with the keyboard. Click to view the manual."
+                                                                        URL:[NSURL URLWithString:@"https://iterm2.com/documentation-copymode.html"]];
 }
 
 - (void)setCopyMode:(BOOL)copyMode {
     if (copyMode) {
         NSString *const key = @"NoSyncHaveUsedCopyMode";
         if ([[NSUserDefaults standardUserDefaults] objectForKey:key] == nil) {
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                [self educateAboutCopyMode];
-            });
+            [self educateAboutCopyMode];
         }
         [[NSUserDefaults standardUserDefaults] setBool:YES forKey:key];
     }
@@ -1148,7 +1156,7 @@ ITERM_WEAKLY_REFERENCEABLE
             aSession.textview.highlightCursorLine = [arrangement[SESSION_ARRANGEMENT_CURSOR_GUIDE] boolValue];
         }
         aSession->_lastMark = [aSession.screen.lastMark retain];
-        aSession.lastRemoteHost = [aSession.screen.lastRemoteHost retain];
+        aSession.lastRemoteHost = aSession.screen.lastRemoteHost;
         if (arrangement[SESSION_ARRANGEMENT_LAST_DIRECTORY]) {
             [aSession->_lastDirectory autorelease];
             aSession->_lastDirectory = [arrangement[SESSION_ARRANGEMENT_LAST_DIRECTORY] copy];
@@ -1452,7 +1460,7 @@ ITERM_WEAKLY_REFERENCEABLE
                                                  oldCWD:oldCWD
                                          forceUseOldCWD:contents != nil && oldCWD.length
                                                 command:commandArg
-                                                 isUTF8:@(aSession.isUTF8)
+                                                 isUTF8:isUTF8Arg
                                           substitutions:substitutionsArg
                                        windowController:(PseudoTerminal *)aSession.delegate.realParentWindow
                                              completion:completion];
@@ -1580,6 +1588,8 @@ ITERM_WEAKLY_REFERENCEABLE
     int width = (contentSize.width - [iTermAdvancedSettingsModel terminalMargin]*2) / [_textview charWidth];
     int height = (contentSize.height - [iTermAdvancedSettingsModel terminalVMargin]*2) / [_textview lineHeight];
     [_screen destructivelySetScreenWidth:width height:height];
+    [self.variablesScope setValuesFromDictionary:@{ iTermVariableKeySessionColumns: @(width),
+                                                    iTermVariableKeySessionRows: @(height) }];
 
     [_textview setDataSource:_screen];
     [_textview setDelegate:self];
@@ -1659,6 +1669,8 @@ ITERM_WEAKLY_REFERENCEABLE
     if (@available(macOS 10.11, *)) {
         [self updateMetalDriver];
     }
+    [self.variablesScope setValuesFromDictionary:@{ iTermVariableKeySessionColumns: @(_screen.width),
+                                                    iTermVariableKeySessionRows: @(_screen.height) }];
 }
 
 - (void)setSplitSelectionMode:(SplitSelectionMode)mode move:(BOOL)move {
@@ -2368,10 +2380,10 @@ ITERM_WEAKLY_REFERENCEABLE
     BOOL moved = NO;
     if ((event.modifierFlags & mask) == NSEventModifierFlagControl) {
         switch (code) {
-            case 2:  // ^B
+            case 'b':  // ^B
                 moved = [_copyModeState pageUp];
                 break;
-            case 6: // ^F
+            case 'f': // ^F
                 moved = [_copyModeState pageDown];
                 break;
             case ' ':
@@ -2542,8 +2554,21 @@ ITERM_WEAKLY_REFERENCEABLE
                      responseSelector:@selector(printTmuxCommandOutputToScreen:)];
         }
     } else if (unicode == 'X') {
-        [self printTmuxMessage:@"Exiting tmux mode, but tmux client may still be running."];
-        [self tmuxHostDisconnected:[[_tmuxGateway.dcsID copy] autorelease]];
+        [self forceTmuxDetach];
+    }
+}
+
+- (void)forceTmuxDetach {
+    switch (self.tmuxMode) {
+        case TMUX_GATEWAY:
+            [self printTmuxMessage:@"Exiting tmux mode, but tmux client may still be running."];
+            [self tmuxHostDisconnected:[[_tmuxGateway.dcsID copy] autorelease]];
+            return;
+        case TMUX_NONE:
+            return;
+        case TMUX_CLIENT:
+            [self.tmuxGatewaySession forceTmuxDetach];
+            return;
     }
 }
 
@@ -2795,7 +2820,8 @@ ITERM_WEAKLY_REFERENCEABLE
         BOOL stop = [trigger tryString:stringLine
                              inSession:self
                            partialLine:partial
-                            lineNumber:startAbsLineNumber];
+                            lineNumber:startAbsLineNumber
+                      useInterpolation:_triggerParametersUseInterpolatedStrings];
         if (stop || _exited || (_triggers != triggers)) {
             break;
         }
@@ -3702,6 +3728,9 @@ ITERM_WEAKLY_REFERENCEABLE
             [_triggers addObject:trigger];
         }
     }
+    _triggerParametersUseInterpolatedStrings = [iTermProfilePreferences boolForKey:KEY_TRIGGERS_USE_INTERPOLATED_STRINGS
+                                                                         inProfile:aDict];
+
     [_textview setSmartSelectionRules:aDict[KEY_SMART_SELECTION_RULES]];
     [_textview setSemanticHistoryPrefs:aDict[KEY_SEMANTIC_HISTORY]];
     [_textview setUseNonAsciiFont:[iTermProfilePreferences boolForKey:KEY_USE_NONASCII_FONT
@@ -3766,6 +3795,9 @@ ITERM_WEAKLY_REFERENCEABLE
     _tmuxStatusBarMonitor.active = [iTermProfilePreferences boolForKey:KEY_SHOW_STATUS_BAR inProfile:aDict];
     _screen.appendToScrollbackWithStatusBar = [iTermProfilePreferences boolForKey:KEY_SCROLLBACK_WITH_STATUS_BAR
                                                                         inProfile:aDict];
+    [_badgeFontName release];
+    _badgeFontName = [[iTermProfilePreferences stringForKey:KEY_BADGE_FONT inProfile:aDict] copy];
+
     self.badgeFormat = [iTermProfilePreferences stringForKey:KEY_BADGE_FORMAT inProfile:aDict];
     // forces the badge to update
     _textview.badgeLabel = @"";
@@ -4813,6 +4845,21 @@ ITERM_WEAKLY_REFERENCEABLE
     _isDivorced = NO;
 }
 
+// TBH I'm not 100% sure this is correct. Don't use it for anything critical until this whole mess
+// has been burned to the ground and rebuilt.
+- (NSString *)guidOfUnderlyingProfile {
+    if (!self.isDivorced) {
+        return self.profile[KEY_GUID];
+    }
+
+    NSString *guid = _originalProfile[KEY_GUID];
+    if (guid && [[ProfileModel sharedInstance] bookmarkWithGuid:guid]) {
+        return guid;
+    }
+
+    return nil;
+}
+
 - (NSString*)divorceAddressBookEntryFromPreferences
 {
     Profile* bookmark = [self profile];
@@ -4873,6 +4920,12 @@ ITERM_WEAKLY_REFERENCEABLE
         [_textview scrollToAbsoluteOffset:offset height:[_screen height]];
         [_textview highlightMarkOnLine:VT100GridRangeMax(range) hasErrorCode:NO];
     }
+}
+
+- (void)setCurrentMarkOrNotePosition:(Interval *)currentMarkOrNotePosition {
+    [_currentMarkOrNotePosition autorelease];
+    _currentMarkOrNotePosition = [currentMarkOrNotePosition retain];
+    ITBetaAssert(currentMarkOrNotePosition.limit >= 0, @"Negative limit in current mark or note %@", currentMarkOrNotePosition);
 }
 
 - (BOOL)hasSavedScrollPosition
@@ -4962,13 +5015,20 @@ ITERM_WEAKLY_REFERENCEABLE
     [_textview clearHighlights:YES];
 }
 
-- (void)findViewControllerVisibilityDidChange:(id)sender {
+- (void)findViewControllerVisibilityDidChange:(id<iTermFindViewController>)sender {
     if (@available(macOS 10.11, *)) {
         [_delegate sessionUpdateMetalAllowed];
+    }
+    if (sender.driver.isVisible) {
+        return;
     }
     if (_view.findViewHasKeyboardFocus) {
         [_view findViewDidHide];
     }
+}
+
+- (void)findViewControllerDidCeaseToBeMandatory:(id<iTermFindViewController>)sender {
+    [_view findViewDidHide];
 }
 
 - (NSImage *)snapshot {
@@ -5144,6 +5204,13 @@ ITERM_WEAKLY_REFERENCEABLE
         }
         return NO;
     }
+    if ([PTYNoteViewController anyNoteVisible]) {
+        // When metal is enabled the note's superview (PTYTextView) has alphaValue=0 so it will not be visible.
+        if (reason) {
+            *reason = iTermMetalUnavailableReasonAnnotations;
+        }
+        return NO;
+    }
 
     if (_textview.transparencyAlpha < 1) {
         BOOL transparencyAllowed = NO;
@@ -5190,13 +5257,6 @@ ITERM_WEAKLY_REFERENCEABLE
             return NO;
         }
         
-        if ([PTYNoteViewController anyNoteVisible]) {
-            if (reason) {
-                *reason = iTermMetalUnavailableReasonAnnotations;
-            }
-            return NO;
-        }
-#warning TODO: This is wrong. Is it called too soon when closing the dropdown find panel?
         if (_view.isDropDownSearchVisible) {
             if (reason) {
                 *reason = iTermMetalUnavailableReasonFindPanel;
@@ -5425,8 +5485,8 @@ ITERM_WEAKLY_REFERENCEABLE
     }
     if (iTermTextIsMonochrome()) {
         // Mojave can use a glyph size larger than cell size because compositing is trivial without subpixel AA.
-        glyphSize.width = MAX(cellSize.width, NSMaxX(rect));
-        glyphSize.height = MAX(cellSize.height, NSMaxY(rect));
+        glyphSize.width = round(0.49 + MAX(cellSize.width, NSMaxX(rect)));
+        glyphSize.height = round(0.49 + MAX(cellSize.height, NSMaxY(rect)));
     } else {
         glyphSize = cellSize;
     }
@@ -5638,11 +5698,12 @@ ITERM_WEAKLY_REFERENCEABLE
     if (self.tmuxMode != TMUX_NONE) {
         return;
     }
+    NSString *preferredTmuxClientName = [self preferredTmuxClientName];
     self.tmuxMode = TMUX_GATEWAY;
     _tmuxGateway = [[TmuxGateway alloc] initWithDelegate:self dcsID:dcsID];
     ProfileModel *model;
     Profile *profile;
-    if ([iTermAdvancedSettingsModel tmuxUsesDedicatedProfile]) {
+    if ([iTermPreferences useTmuxProfile]) {
         model = [ProfileModel sharedInstance];
         profile = [[ProfileModel sharedInstance] tmuxProfile];
     } else {
@@ -5654,7 +5715,7 @@ ITERM_WEAKLY_REFERENCEABLE
         profile = self.profile;
     }
     _tmuxController = [[TmuxController alloc] initWithGateway:_tmuxGateway
-                                                   clientName:[self preferredTmuxClientName]
+                                                   clientName:preferredTmuxClientName
                                                       profile:profile
                                                  profileModel:model];
     [self.variablesScope setValue:_tmuxController.clientName forVariableNamed:iTermVariableKeySessionTmuxClientName];
@@ -5800,6 +5861,18 @@ ITERM_WEAKLY_REFERENCEABLE
     [note makeFirstResponder];
 }
 
+- (void)addNoteWithText:(NSString *)text inAbsoluteRange:(VT100GridAbsCoordRange)absRange {
+    VT100GridCoordRange range = VT100GridCoordRangeFromAbsCoordRange(absRange,
+                                                                     _screen.totalScrollbackOverflow);
+    if (range.start.x < 0) {
+        return;
+    }
+    PTYNoteViewController *note = [[[PTYNoteViewController alloc] init] autorelease];
+    [note setString:text];
+    [note sizeToFit];
+    [_screen addNote:note inRange:range];
+}
+
 - (void)textViewToggleAnnotations {
     VT100GridCoordRange range =
         VT100GridCoordRangeMake(0,
@@ -5817,6 +5890,7 @@ ITERM_WEAKLY_REFERENCEABLE
     for (PTYNoteViewController *note in notes) {
         [note setNoteHidden:anyNoteIsVisible];
     }
+    [self.delegate sessionUpdateMetalAllowed];
 }
 
 - (void)highlightMarkOrNote:(id<IntervalTreeObject>)obj {
@@ -5927,8 +6001,8 @@ ITERM_WEAKLY_REFERENCEABLE
 
         static NSString *const kAutoBurialKey = @"NoSyncAutoBurialReveal";
         if (![[NSUserDefaults standardUserDefaults] boolForKey:kAutoBurialKey]) {
-            [iTermMenuOpener revealMenuWithPath:@[ @"Session", @"Buried Sessions" ]
-                                        message:@"The session that started tmux has been hidden.\nYou can restore it here, in “Buried Sessions.”"];
+            [[iTermNotificationController sharedInstance] notify:@"Session Buried"
+                                                 withDescription:@"It can be restored by detaching from tmux, or from the Sessions > Buried Sessions menu."];
             [[NSUserDefaults standardUserDefaults] setBool:YES forKey:kAutoBurialKey];
         }
     }
@@ -6112,7 +6186,7 @@ ITERM_WEAKLY_REFERENCEABLE
 
 - (NSInteger)tmuxNumberOfLinesOfScrollbackHistory {
     Profile *profile = _tmuxController.profile;
-    if ([iTermAdvancedSettingsModel tmuxUsesDedicatedProfile]) {
+    if ([iTermPreferences useTmuxProfile]) {
         profile = [[ProfileModel sharedInstance] tmuxProfile];
     }
     if ([profile[KEY_UNLIMITED_SCROLLBACK] boolValue]) {
@@ -6120,6 +6194,46 @@ ITERM_WEAKLY_REFERENCEABLE
         return 10 * 1000 * 1000;
     } else {
         return [profile[KEY_SCROLLBACK_LINES] integerValue];
+    }
+}
+
+- (void)tmuxDoubleAttachForSessionGUID:(NSString *)sessionGUID {
+    NSArray<NSString *> *actions = @[ @"OK", @"Reveal" ];
+    TmuxController *controller = [[TmuxControllerRegistry sharedInstance] tmuxControllerWithSessionGUID:sessionGUID];
+    if (!controller) {
+        actions = @[ @"OK" ];
+    }
+    const iTermWarningSelection selection =
+    [iTermWarning showWarningWithTitle:@"This instance of iTerm2 is already attached to this session"
+                               actions:actions
+                             accessory:nil
+                            identifier:@"AlreadyAttachedToTmuxSession"
+                           silenceable:kiTermWarningTypePersistent
+                               heading:@"Cannot Attach"
+                                window:self.view.window];
+    if (selection != kiTermWarningSelection1) {
+        return;
+    }
+    NSArray<NSWindow *> *windows = [[[controller.clientSessions mapWithBlock:^id(PTYSession *anObject) {
+        return anObject.view.window;
+    }] sortedArrayUsingComparator:^NSComparisonResult(id  _Nonnull obj1, id  _Nonnull obj2) {
+        intptr_t p1 = (intptr_t)obj1;
+        intptr_t p2 = (intptr_t)obj2;
+        return [@(p1) compare:@(p2)];
+    }] uniq];
+
+    if (windows.count == 0) {
+        iTermApplicationDelegate *delegate = [iTermApplication.sharedApplication delegate];
+        [delegate openDashboard:nil];
+        return;
+    }
+
+    for (NSWindow *window in windows) {
+        if (window.miniaturized) {
+            [window deminiaturize:nil];
+        } else {
+            [window orderFront:nil];
+        }
     }
 }
 
@@ -6310,22 +6424,26 @@ ITERM_WEAKLY_REFERENCEABLE
     NSString *message = [NSString stringWithFormat:@"Error running “%@”:\n%@",
                          invocation, error.localizedDescription];
     NSString *traceback = error.localizedFailureReason;
-    iTermDisclosableView *accessory = nil;
+    NSArray *actions = @[ @"OK" ];
     if (traceback) {
-        accessory = [[iTermDisclosableView alloc] initWithFrame:NSZeroRect
-                                                         prompt:@"Traceback"
-                                                        message:traceback];
-        accessory.textView.selectable = YES;
-        accessory.frame = NSMakeRect(0, 0, accessory.intrinsicContentSize.width, accessory.intrinsicContentSize.height);
+        actions = [actions arrayByAddingObject:@"Reveal in Script Console"];
     }
-    [iTermWarning showWarningWithTitle:message
-                               actions:@[ @"OK" ]
-                             accessory:accessory
-                            identifier:@"NoSyncFunctionCallError"
-                           silenceable:kiTermWarningTypeTemporarilySilenceable
-                               heading:[NSString stringWithFormat:@"%@ Function Call Failed", origin]
-                                window:window];
-
+    NSString *connectionKey = error.userInfo[iTermAPIHelperFunctionCallErrorUserInfoKeyConnection];
+    iTermScriptHistoryEntry *entry = [[iTermScriptHistory sharedInstance] entryWithIdentifier:connectionKey];
+    [entry addOutput:[NSString stringWithFormat:@"An error occurred while running the function invocation “%@”:\n%@\n\nTraceback:\n%@",
+                      invocation,
+                      error.localizedDescription,
+                      traceback]];
+    iTermWarningSelection selection = [iTermWarning showWarningWithTitle:message
+                                                                 actions:actions
+                                                               accessory:nil
+                                                              identifier:@"NoSyncFunctionCallError"
+                                                             silenceable:kiTermWarningTypeTemporarilySilenceable
+                                                                 heading:[NSString stringWithFormat:@"%@ Function Call Failed", origin]
+                                                                  window:window];
+    if (selection == kiTermWarningSelection1) {
+        [[iTermScriptConsole sharedInstance] revealTailOfHistoryEntry:entry];
+    }
 }
 
 - (void)invokeFunctionCall:(NSString *)invocation
@@ -7581,11 +7699,8 @@ ITERM_WEAKLY_REFERENCEABLE
     return _variables.stringValuedDictionary;
 }
 
-- (iTermVariableScope *)variablesScope {
-    iTermVariableScope *scope = [[iTermVariableScope alloc] init];
-    [scope addVariables:self.variables toScopeNamed:nil];
-    [scope addVariables:[iTermVariables globalInstance] toScopeNamed:iTermVariableKeyGlobalScopeName];
-    return [scope autorelease];
+- (iTermVariableScope<iTermSessionScope> *)variablesScope {
+    return [[iTermVariableScope newSessionScopeWithVariables:self.variables] autorelease];
 }
 
 - (BOOL)textViewSuppressingAllOutput {
@@ -7819,6 +7934,13 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (void)bury {
+    if (self.isTmuxClient) {
+        if (!self.delegate) {
+            return;
+        }
+        [_tmuxController hideWindow:self.delegate.tmuxWindow];
+        return;
+    }
     [_textview setDataSource:nil];
     [_textview setDelegate:nil];
     [[iTermBuriedSessions sharedInstance] addBuriedSession:self];
@@ -7921,11 +8043,8 @@ ITERM_WEAKLY_REFERENCEABLE
     }
 }
 
-- (NSString *)valueForLanguageEnvironmentVariable {
-    DLog(@"Looking for a locale...");
-    const NSInteger numberOfLanguagesToConsider = 1;
-    DLog(@"Consider %@ of languages: %@", @(numberOfLanguagesToConsider), [NSLocale preferredLanguages]);
-    NSArray<NSString *> *languageCodes = [[[NSLocale preferredLanguages] subarrayToIndex:numberOfLanguagesToConsider] mapWithBlock:^id(NSString *language) {
+- (NSArray<NSString *> *)preferredLanguageCodesByRemovingCountry {
+    return [[NSLocale preferredLanguages] mapWithBlock:^id(NSString *language) {
         DLog(@"Found preferred language: %@", language);
         NSUInteger index = [language rangeOfString:@"-" options:0].location;
         if (index == NSNotFound) {
@@ -7934,7 +8053,23 @@ ITERM_WEAKLY_REFERENCEABLE
             return [language substringToIndex:index];
         }
     }];
-    DLog(@"Preferred languages are: %@", languageCodes);
+}
+
+- (NSArray<NSString *> *)languageCodesUpToAndIncludingFirstTwoLetterCode:(NSArray<NSString *> *)allCodes {
+    NSInteger lastIndexToInclude = [allCodes indexOfObjectPassingTest:^BOOL(NSString * _Nonnull obj, NSUInteger idx, BOOL * _Nonnull stop) {
+        return obj.length <= 2;
+    }];
+    if (lastIndexToInclude == NSNotFound) {
+        return allCodes;
+    }
+    return [allCodes subarrayToIndex:lastIndexToInclude + 1];
+}
+
+- (NSString *)valueForLanguageEnvironmentVariable {
+    DLog(@"Looking for a locale...");
+    DLog(@"Preferred languages are: %@", [NSLocale preferredLanguages]);
+    NSArray<NSString *> *languageCodes = [self languageCodesUpToAndIncludingFirstTwoLetterCode:[self preferredLanguageCodesByRemovingCountry]];
+    DLog(@"Considering these languages: %@", languageCodes);
 
     NSString *const countryCode = [[NSLocale currentLocale] objectForKey:NSLocaleCountryCode];
     NSArray<NSString *> *languagePlusCountryCodes = @[];
@@ -9980,6 +10115,7 @@ ITERM_WEAKLY_REFERENCEABLE
 
 - (void)sessionViewDraggingExited:(id<NSDraggingInfo>)sender {
     [self.delegate sessionDraggingExited:self];
+    [_textview setNeedsDisplay:YES];
 }
 
 - (NSDragOperation)sessionViewDraggingEntered:(id<NSDraggingInfo>)sender {
@@ -10767,6 +10903,36 @@ ITERM_WEAKLY_REFERENCEABLE
     [_view updateFindDriver];
 }
 
+- (void)statusBarOpenPreferencesToComponent:(nullable id<iTermStatusBarComponent>)component {
+    PreferencePanel *panel;
+    NSString *guid;
+    if (self.isDivorced && [_overriddenFields containsObject:KEY_STATUS_BAR_LAYOUT]) {
+        panel = [PreferencePanel sessionsInstance];
+        guid = _profile[KEY_GUID];
+    } else {
+        panel = [PreferencePanel sharedInstance];
+        guid = _originalProfile[KEY_GUID];
+    }
+    [panel openToProfileWithGuid:guid
+  andEditComponentWithIdentifier:component.statusBarComponentIdentifier
+                            tmux:self.isTmuxClient
+                           scope:self.variablesScope];
+}
+
+
+- (void)statusBarSetLayout:(nonnull iTermStatusBarLayout *)layout {
+    ProfileModel *model;
+    if (self.isDivorced && [_overriddenFields containsObject:KEY_STATUS_BAR_LAYOUT]) {
+        model = [ProfileModel sessionsInstance];
+    } else {
+        model = [ProfileModel sharedInstance];
+    }
+    [iTermProfilePreferences setObject:[layout dictionaryValue]
+                                forKey:KEY_STATUS_BAR_LAYOUT
+                             inProfile:self.originalProfile
+                                 model:model];
+}
+
 #pragma mark - iTermMetaFrustrationDetectorDelegate
 
 - (void)metaFrustrationDetectorDidDetectFrustrationForLeftOption {
@@ -10806,14 +10972,11 @@ ITERM_WEAKLY_REFERENCEABLE
     NSArray<NSString *> *actions;
     NSInteger thisProfile = 0;
     NSInteger allProfiles = -1;
-    NSInteger stopAsking = -1;
     if ([[[ProfileModel sharedInstance] bookmarks] count] == 1) {
         actions = @[ @"Yes", @"Stop Asking" ];
-        stopAsking = 1;
     } else {
         actions = @[ @"Change This Profile", @"Change All Profiles", @"Stop Asking" ];
         allProfiles = 1;
-        stopAsking = 2;
     }
 
     Profile *profileToChange = [[ProfileModel sharedInstance] bookmarkWithGuid:self.profile[KEY_GUID]];
@@ -10899,10 +11062,7 @@ ITERM_WEAKLY_REFERENCEABLE
 
 - (NSFont *)badgeLabelFontOfSize:(CGFloat)pointSize {
     NSFontManager *fontManager = [NSFontManager sharedFontManager];
-    NSString *fontName = [iTermProfilePreferences stringForKey:KEY_BADGE_FONT inProfile:self.profile];
-    NSFont *font;
-
-    font = [NSFont fontWithName:fontName size:pointSize];
+    NSFont *font = [NSFont fontWithName:_badgeFontName size:pointSize];
     if (!font) {
         font = [NSFont fontWithName:@"Helvetica" size:pointSize];
     }

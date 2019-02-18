@@ -8,6 +8,9 @@
 
 #import "iTermProfilePreferencesBaseViewController.h"
 
+@protocol iTermSessionScope;
+@class iTermVariableScope;
+
 @protocol ProfilesGeneralPreferencesViewControllerDelegate <NSObject>
 
 - (void)profilesGeneralPreferencesNameWillChange;
@@ -19,6 +22,7 @@
 
 - (void)profilesGeneralPreferencesSessionHotkeyDidChange;
 
+- (iTermVariableScope<iTermSessionScope> *)profilesGeneralPreferencesScope;
 @end
 
 @interface ProfilesGeneralPreferencesViewController : iTermProfilePreferencesBaseViewController

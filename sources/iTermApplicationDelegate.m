@@ -35,6 +35,7 @@
 #import "iTermAboutWindowController.h"
 #import "iTermAppHotKeyProvider.h"
 #import "iTermAdvancedSettingsModel.h"
+#import "iTermBuiltInFunctions.h"
 #import "iTermBuriedSessions.h"
 #import "iTermCPUProfilerUI.h"
 #import "iTermColorPresets.h"
@@ -44,7 +45,6 @@
 #import "iTermExpose.h"
 #import "iTermFileDescriptorSocketPath.h"
 #import "iTermFontPanel.h"
-#import "iTermFullDiskAccessManager.h"
 #import "iTermFullScreenWindowManager.h"
 #import "iTermHotKeyController.h"
 #import "iTermHotKeyProfileBindingController.h"
@@ -83,7 +83,7 @@
 #import "iTermTipWindowController.h"
 #import "iTermToolbeltView.h"
 #import "iTermURLStore.h"
-#import "iTermVariableScope.h"
+#import "iTermVariableScope+Global.h"
 #import "iTermWarning.h"
 #import "iTermWebSocketCookieJar.h"
 #import "MovePaneController.h"
@@ -136,8 +136,6 @@ static NSString *const kHotkeyWindowRestorableState = @"kHotkeyWindowRestorableS
 static NSString *const kHotkeyWindowsRestorableStates = @"kHotkeyWindowsRestorableState";  // deprecated
 static NSString *const iTermBuriedSessionState = @"iTermBuriedSessionState";
 
-static NSString *const kHaveWarnedAboutIncompatibleSoftware = @"NoSyncHaveWarnedAboutIncompatibleSoftware";  // deprecated
-
 static NSString *const kRestoreDefaultWindowArrangementShortcut = @"R";
 NSString *const iTermApplicationWillTerminate = @"iTermApplicationWillTerminate";
 
@@ -181,6 +179,11 @@ static BOOL hasBecomeActive = NO;
     IBOutlet NSMenuItem *_showTipOfTheDay;  // Here because we must remove it for older OS versions.
     BOOL secureInputDesired_;
     BOOL quittingBecauseLastWindowClosed_;
+
+    IBOutlet NSMenuItem *_splitHorizontallyWithCurrentProfile;
+    IBOutlet NSMenuItem *_splitVerticallyWithCurrentProfile;
+    IBOutlet NSMenuItem *_splitHorizontally;
+    IBOutlet NSMenuItem *_splitVertically;
 
     // If set, skip performing launch actions.
     BOOL quiet_;
@@ -315,12 +318,17 @@ static BOOL hasBecomeActive = NO;
     if (![iTermTipController sharedInstance]) {
         [_showTipOfTheDay.menu removeItem:_showTipOfTheDay];
     }
+
+    if ([iTermAdvancedSettingsModel showHintsInSplitPaneMenuItems]) {
+        _splitHorizontally.title = [@"─⃞ " stringByAppendingString:_splitHorizontally.title];
+        _splitHorizontallyWithCurrentProfile.title = [@"─⃞ " stringByAppendingString:_splitHorizontallyWithCurrentProfile.title];
+        _splitVertically.title = [@"│⃞ " stringByAppendingString:_splitVertically.title];
+        _splitVerticallyWithCurrentProfile.title = [@"│⃞ " stringByAppendingString:_splitVerticallyWithCurrentProfile.title];
+    }
 }
 
 - (BOOL)validateMenuItem:(NSMenuItem *)menuItem {
-    if ([menuItem action] == @selector(openDashboard:)) {
-        return [[iTermController sharedInstance] haveTmuxConnection];
-    } else if ([menuItem action] == @selector(toggleUseBackgroundPatternIndicator:)) {
+    if ([menuItem action] == @selector(toggleUseBackgroundPatternIndicator:)) {
       [menuItem setState:[self useBackgroundPatternIndicator]];
       return YES;
     } else if ([menuItem action] == @selector(undo:)) {
@@ -555,20 +563,16 @@ static BOOL hasBecomeActive = NO;
  */
 - (BOOL)application:(NSApplication *)theApplication openFile:(NSString *)filename {
     DLog(@"application:%@ openFile:%@", theApplication, filename);
-    if ([[filename pathExtension] isEqualToString:@"itermscript"]) {
+    if ([[filename pathExtension] isEqualToString:@"its"]) {
         [iTermScriptImporter importScriptFromURL:[NSURL fileURLWithPath:filename]
                                    userInitiated:NO
-                                      completion:^(NSString * _Nullable errorMessage) {
-                                          if (errorMessage) {
-                                              NSAlert *alert = [[NSAlert alloc] init];
-                                              alert.messageText = @"Script Not Installed";
-                                              alert.informativeText = errorMessage;
-                                              [alert runModal];
-                                          } else {
-                                              NSAlert *alert = [[NSAlert alloc] init];
-                                              alert.messageText = @"Script Imported Successfully";
-                                              [alert runModal];
+                                      completion:^(NSString * _Nullable errorMessage, BOOL quiet, NSURL *location) {
+                                          if (quiet) {
+                                              return;
                                           }
+                                          [self->_scriptsMenuController importDidFinishWithErrorMessage:errorMessage
+                                                                                               location:location
+                                                                                            originalURL:[NSURL fileURLWithPath:filename]];
                                       }];
         return YES;
     }
@@ -1144,6 +1148,8 @@ static BOOL hasBecomeActive = NO;
     }];
 
     [PTYSession registerBuiltInFunctions];
+    [PTYTab registerBuiltInFunctions];
+    [iTermArrayCountBuiltInFunction registerBuiltInFunction];
     
     [iTermMigrationHelper migrateApplicationSupportDirectoryIfNeeded];
     [self buildScriptMenu:nil];
@@ -1499,7 +1505,8 @@ static BOOL hasBecomeActive = NO;
                [[[iTermController sharedInstance] terminals] count] == 0 &&
                ![self isAppleScriptTestApp] &&
                [[[iTermHotKeyController sharedInstance] profileHotKeys] count] == 0 &&
-               [[[iTermBuriedSessions sharedInstance] buriedSessions] count] == 0) {
+               [[[iTermBuriedSessions sharedInstance] buriedSessions] count] == 0 &&
+               ![[NSApplication sharedApplication] isRunningUnitTests]) {
         [self newWindow:nil];
     }
     if (_untitledFileOpenStatus == iTermUntitledFileOpenDisallowed) {
@@ -1575,7 +1582,6 @@ static BOOL hasBecomeActive = NO;
 
 - (IBAction)checkForUpdatesFromMenu:(id)sender {
     [suUpdater checkForUpdates:(sender)];
-    [[iTermPythonRuntimeDownloader sharedInstance] upgradeIfPossible];
 }
 
 #pragma mark - Main Menu
@@ -2002,6 +2008,7 @@ static BOOL hasBecomeActive = NO;
 - (IBAction)installPythonRuntime:(id)sender {  // Explicit request from menu item
     [[iTermPythonRuntimeDownloader sharedInstance] downloadOptionalComponentsIfNeededWithConfirmation:NO
                                                                                         pythonVersion:nil
+                                                                                   requiredToContinue:NO
                                                                                        withCompletion:^(BOOL ok) {}];
 }
 
@@ -2013,6 +2020,7 @@ static BOOL hasBecomeActive = NO;
 - (IBAction)openREPL:(id)sender {
     [[iTermPythonRuntimeDownloader sharedInstance] downloadOptionalComponentsIfNeededWithConfirmation:YES
                                                                                         pythonVersion:nil
+                                                                                   requiredToContinue:YES
                                                                                        withCompletion:^(BOOL ok) {
         if (!ok) {
             return;
@@ -2023,7 +2031,7 @@ static BOOL hasBecomeActive = NO;
         NSString *command = [[[[[iTermPythonRuntimeDownloader sharedInstance] pathToStandardPyenvPythonWithPythonVersion:nil] stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"apython"] stringWithEscapedShellCharactersIncludingNewlines:YES];
         NSURL *bannerURL = [[NSBundle mainBundle] URLForResource:@"repl_banner" withExtension:@"txt"];
         command = [command stringByAppendingFormat:@" --banner=\"`cat %@`\"", [bannerURL.path stringWithEscapedShellCharactersIncludingNewlines:YES]];
-        NSString *cookie = [[iTermWebSocketCookieJar sharedInstance] newCookie];
+        NSString *cookie = [[iTermWebSocketCookieJar sharedInstance] randomStringForCooke];
         NSDictionary *environment = @{ @"ITERM2_COOKIE": cookie };
         [[iTermController sharedInstance] openSingleUseWindowWithCommand:command
                                                                   inject:nil
