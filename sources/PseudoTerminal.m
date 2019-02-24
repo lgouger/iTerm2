@@ -59,6 +59,7 @@
 #import "iTermTouchBarButton.h"
 #import "iTermVariableReference.h"
 #import "iTermVariableScope.h"
+#import "iTermVariableScope+Tab.h"
 #import "iTermVariableScope+Window.h"
 #import "iTermWarning.h"
 #import "iTermWindowOcclusionChangeMonitor.h"
@@ -5208,17 +5209,56 @@ ITERM_WEAKLY_REFERENCEABLE
     }
 }
 
-- (void)updateProxyIcon {
+- (BOOL)proxyIconIsAllowed {
     if (![iTermPreferences boolForKey:kPreferenceKeyEnableProxyIcon]) {
+        return NO;
+    }
+
+    switch ((iTermPreferencesTabStyle)[iTermPreferences intForKey:kPreferenceKeyTabStyle]) {
+        case TAB_STYLE_MINIMAL:
+            return NO;
+
+        case TAB_STYLE_AUTOMATIC:
+        case TAB_STYLE_LIGHT:
+        case TAB_STYLE_LIGHT_HIGH_CONTRAST:
+        case TAB_STYLE_DARK:
+        case TAB_STYLE_DARK_HIGH_CONTRAST:
+            break;
+    }
+
+    switch (windowType_) {
+        case WINDOW_TYPE_TOP:
+        case WINDOW_TYPE_LEFT:
+        case WINDOW_TYPE_RIGHT:
+        case WINDOW_TYPE_BOTTOM:
+        case WINDOW_TYPE_TOP_PARTIAL:
+        case WINDOW_TYPE_LEFT_PARTIAL:
+        case WINDOW_TYPE_BOTTOM_PARTIAL:
+        case WINDOW_TYPE_RIGHT_PARTIAL:
+        case WINDOW_TYPE_NO_TITLE_BAR:
+        case WINDOW_TYPE_COMPACT:
+        case WINDOW_TYPE_TRADITIONAL_FULL_SCREEN:
+            return NO;
+
+        case WINDOW_TYPE_LION_FULL_SCREEN:
+        case WINDOW_TYPE_NORMAL:
+        case WINDOW_TYPE_ACCESSORY:
+            break;
+    }
+
+    return YES;
+}
+
+- (void)updateProxyIcon {
+    if (![self proxyIconIsAllowed]) {
         self.window.representedURL = nil;
         return;
     }
-
     if (self.currentSession.preferredProxyIcon) {
         self.window.representedURL = self.currentSession.preferredProxyIcon;
-    } else {
-        self.window.representedURL = self.currentSession.textViewCurrentLocation;
+        return;
     }
+    self.window.representedURL = self.currentSession.textViewCurrentLocation;
 }
 
 - (void)notifyTmuxOfTabChange {
@@ -5856,6 +5896,14 @@ ITERM_WEAKLY_REFERENCEABLE
         return;
     }
     [tabView selectTabViewItem:tabViewItem];
+    [self openEditTabTitleWindow];
+}
+
+- (IBAction)editTabTitle:(id)sender {
+    [self openEditTabTitleWindow];
+}
+
+- (void)openEditTabTitleWindow {
     NSAlert *alert = [[[NSAlert alloc] init] autorelease];
     alert.messageText = @"Set Tab Title";
     alert.informativeText = @"If this is empty, the tab takes the active session’s title. Variables and function calls enclosed in \\(…) will replaced with their evaluation.";
@@ -5867,7 +5915,7 @@ ITERM_WEAKLY_REFERENCEABLE
     titleTextField.delegate = delegate;
     titleTextField.editable = YES;
     titleTextField.selectable = YES;
-    titleTextField.stringValue = [self.scope valueForVariableName:iTermVariableKeyWindowTitleOverrideFormat] ?: @"";
+    titleTextField.stringValue = self.currentTab.variablesScope.tabTitleOverrideFormat ?: @"";
     alert.accessoryView = titleTextField;
     [alert addButtonWithTitle:@"OK"];
     [alert addButtonWithTitle:@"Cancel"];
@@ -5875,8 +5923,7 @@ ITERM_WEAKLY_REFERENCEABLE
         [titleTextField.window makeFirstResponder:titleTextField];
     });
     if ([alert runModal] == NSAlertFirstButtonReturn) {
-        [self.scope setValue:titleTextField.stringValue.length ? titleTextField.stringValue : nil
-            forVariableNamed:iTermVariableKeyWindowTitleOverrideFormat];
+        self.currentTab.variablesScope.tabTitleOverrideFormat = titleTextField.stringValue.length ? titleTextField.stringValue : nil;
     }
 }
 
@@ -8534,6 +8581,8 @@ ITERM_WEAKLY_REFERENCEABLE
         result = ![[self currentTab] isTmuxTab];
     } else if ([item action] == @selector(jumpToSavedScrollPosition:)) {
         result = [self hasSavedScrollPosition];
+    } else if ([item action] == @selector(editTabTitle:)) {
+        return self.numberOfTabs > 0;
     } else if ([item action] == @selector(moveTabLeft:)) {
         result = [_contentView.tabView numberOfTabViewItems] > 1;
     } else if ([item action] == @selector(moveTabRight:)) {

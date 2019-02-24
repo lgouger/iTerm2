@@ -14,6 +14,9 @@
 
 NSString *const iTermProcessTypeDidChangeNotification = @"iTermProcessTypeDidChangeNotification";
 
+@interface AppearancePreferencesViewController()<NSTabViewDelegate>
+@end
+
 @implementation AppearancePreferencesViewController {
     // This is actually the tab style. See TAB_STYLE_XXX defines.
     IBOutlet NSPopUpButton *_tabStyle;
@@ -87,6 +90,9 @@ NSString *const iTermProcessTypeDidChangeNotification = @"iTermProcessTypeDidCha
     IBOutlet NSButton *_enableDivisionView;
 
     IBOutlet NSButton *_enableProxyIcon;
+
+    IBOutlet NSTabView *_tabView;
+    NSRect _desiredFrame;
 }
 
 - (void)awakeFromNib {
@@ -119,7 +125,10 @@ NSString *const iTermProcessTypeDidChangeNotification = @"iTermProcessTypeDidCha
     info = [self defineControl:_tabStyle
                            key:kPreferenceKeyTabStyle
                           type:kPreferenceInfoTypePopup];
-    info.onChange = ^() { [weakSelf postRefreshNotification]; };
+    info.onChange = ^() {
+        [weakSelf postRefreshNotification];
+        [weakSelf updateProxyIconEnabled];
+    };
 
 
     info = [self defineControl:_hideTab
@@ -279,6 +288,12 @@ NSString *const iTermProcessTypeDidChangeNotification = @"iTermProcessTypeDidCha
                            key:kPreferenceKeyEnableProxyIcon
                           type:kPreferenceInfoTypeCheckbox];
     info.onChange = ^() { [weakSelf postRefreshNotification]; };
+    [self updateProxyIconEnabled];
+}
+
+- (void)updateProxyIconEnabled {
+    const iTermPreferencesTabStyle tabStyle = [self intForKey:kPreferenceKeyTabStyle];
+    _enableProxyIcon.enabled = (tabStyle != TAB_STYLE_MINIMAL);
 }
 
 - (void)dealloc {
@@ -307,6 +322,14 @@ NSString *const iTermProcessTypeDidChangeNotification = @"iTermProcessTypeDidCha
 
     // Can't preserve size if you can't hide the tab bar.
     _preserveWindowSizeWhenTabBarVisibilityChanges.enabled = (_hideTab.state != NSOnState);
+}
+
+- (NSTabView *)tabView {
+    return _tabView;
+}
+
+- (CGFloat)minimumWidth {
+    return 374;
 }
 
 @end

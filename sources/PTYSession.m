@@ -260,7 +260,7 @@ static const NSUInteger kMaxHosts = 100;
     iTermUpdateCadenceControllerDelegate,
     iTermWorkingDirectoryPollerDelegate>
 @property(nonatomic, retain) Interval *currentMarkOrNotePosition;
-@property(nonatomic, retain) TerminalFile *download;
+@property(nonatomic, retain) TerminalFileDownload *download;
 @property(nonatomic, retain) TerminalFileUpload *upload;
 
 // Time since reference date when last output was received. New output in a brief period after the
@@ -7393,6 +7393,13 @@ ITERM_WEAKLY_REFERENCEABLE
     [_delegate previousSession];
 }
 
+- (void)textViewPasteSpecialWithStringConfiguration:(NSString *)configuration
+                                      fromSelection:(BOOL)fromSelection {
+    NSString *string = fromSelection ? [[iTermController sharedInstance] lastSelection] : [NSString stringFromPasteboard];
+    [_pasteHelper pasteString:string
+                 stringConfig:configuration];
+}
+
 - (void)textViewEditSession {
     [[_delegate realParentWindow] editSession:self makeKey:YES];
 }
@@ -8781,7 +8788,7 @@ ITERM_WEAKLY_REFERENCEABLE
 - (void)screenWillReceiveFileNamed:(NSString *)filename ofSize:(int)size {
     [self.download stop];
     [self.download endOfData];
-    self.download = [[[TerminalFile alloc] initWithName:filename size:size] autorelease];
+    self.download = [[[TerminalFileDownload alloc] initWithName:filename size:size] autorelease];
     [self.download download];
 }
 
