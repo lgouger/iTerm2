@@ -14,6 +14,7 @@
 #import "iTermPromptOnCloseReason.h"
 #import "iTermProfilePreferences.h"
 #import "iTermSwiftyString.h"
+#import "iTermSwiftyStringGraph.h"
 #import "iTermVariableReference.h"
 #import "iTermVariableScope.h"
 #import "iTermVariableScope+Tab.h"
@@ -198,7 +199,6 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 
     BOOL _resizingSplit;
     iTermSwiftyString *_tabTitleOverrideSwiftyString;
-    iTermVariableReference *_tabTitleOverrideFormatReference;
 
     NSInteger _numberOfSplitViewDragsInProgress;
 
@@ -207,6 +207,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     NSString *_temporarilyUnmaximizedSessionGUID;
 
     NSMutableArray<PTYSession *> *_sessionsWithDeferredFontChanges;
+    iTermVariableScope<iTermTabScope> *_variablesScope;
 }
 
 @synthesize parentWindow = parentWindow_;
@@ -408,10 +409,11 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
                                              selector:@selector(screenParametersDidChange:)
                                                  name:NSApplicationDidChangeScreenParametersNotification
                                                object:nil];
-    _tabTitleOverrideFormatReference = [[iTermVariableReference alloc] initWithPath:iTermVariableKeyTabTitleOverrideFormat
-                                                                              scope:self.variablesScope];
+    _tabTitleOverrideSwiftyString = [[iTermSwiftyString alloc] initWithScope:self.variablesScope
+                                                                  sourcePath:iTermVariableKeyTabTitleOverrideFormat
+                                                             destinationPath:iTermVariableKeyTabTitleOverride];
     __weak __typeof(self) weakSelf = self;
-    _tabTitleOverrideFormatReference.onChangeBlock = ^{
+    _tabTitleOverrideSwiftyString.observer = ^(NSString * _Nonnull newValue) {
         [weakSelf updateTitleOverrideFromFormatVariable];
     };
 }
@@ -623,7 +625,10 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 }
 
 - (void)updateTabTitleForCurrentSessionName:(NSString *)newName {
-    NSString *value = (self.evaluatedTitleOverride ?: newName) ?: @" ";
+    NSString *value = self.variablesScope.tabTitleOverride;
+    if (value.length == 0) {
+        value = newName ?: @"";
+    }
     [tabViewItem_ setLabel:value];  // PSM uses bindings to bind the label to its title
     [self.realParentWindow tabTitleDidChange:self];
 }
@@ -2874,7 +2879,7 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     }
 
     return [@{ TAB_ARRANGEMENT_ROOT: rootNode,
-               TAB_ARRANGEMENT_TITLE_OVERRIDE: self.titleOverride ?: [NSNull null] } dictionaryByRemovingNullValues];
+               TAB_ARRANGEMENT_TITLE_OVERRIDE: self.titleOverride.length ? self.titleOverride : [NSNull null] } dictionaryByRemovingNullValues];
 }
 
 - (NSDictionary*)arrangement {
@@ -4096,7 +4101,10 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 }
 
 - (iTermVariableScope<iTermTabScope> *)variablesScope {
-    return [iTermVariableScope newTabScopeWithVariables:_variables];
+    if (!_variablesScope) {
+        _variablesScope = [iTermVariableScope newTabScopeWithVariables:_variables];
+    }
+    return _variablesScope;
 }
 
 - (id)valueForVariable:(NSString *)name {
@@ -4108,32 +4116,16 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 }
 
 - (void)updateTitleOverrideFromFormatVariable {
-    NSString *titleOverride = [self.variablesScope valueForVariableName:iTermVariableKeyTabTitleOverrideFormat];
-    [_tabTitleOverrideSwiftyString invalidate];
-    if (!titleOverride) {
-        _tabTitleOverrideSwiftyString = nil;
-        [self.variablesScope setValue:nil forVariableNamed:iTermVariableKeyTabTitleOverride];
-        [self updateTabTitle];
-        return;
+    [self updateTabTitle];
+    for (PTYSession *session in self.sessions) {
+        if ([session checkForCyclesInSwiftyStrings]) {
+            _tabTitleOverrideSwiftyString.swiftyString = @"[Cycle detected]";
+        }
     }
-    __weak __typeof(self) weakSelf = self;
-    _tabTitleOverrideSwiftyString =
-        [[iTermSwiftyString alloc] initWithString:titleOverride
-                                            scope:self.variablesScope
-                                         observer:
-         ^(NSString * _Nonnull newValue) {
-             [weakSelf.variablesScope setValue:newValue forVariableNamed:iTermVariableKeyTabTitleOverride];
-             [weakSelf updateTabTitle];
-         }];
-
 }
 
 - (NSString *)titleOverride {
     return _tabTitleOverrideSwiftyString.swiftyString;
-}
-
-- (NSString *)evaluatedTitleOverride {
-    return [self.variablesScope valueForVariableName:iTermVariableKeyTabTitleOverride];
 }
 
 #pragma mark NSSplitView delegate methods
@@ -5349,6 +5341,15 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     if (session == self.activeSession) {
         [_delegate tabDidInvalidateStatusBar:self];
     }
+}
+
+- (void)sessionAddSwiftyStringsToGraph:(iTermSwiftyStringGraph *)graph {
+    [graph addSwiftyString:_tabTitleOverrideSwiftyString
+            withFormatPath:iTermVariableKeyTabTitleOverrideFormat
+            evaluationPath:iTermVariableKeyTabTitleOverride
+                     scope:self.variablesScope];
+
+    [self.realParentWindow tabAddSwiftyStringsToGraph:graph];
 }
 
 @end

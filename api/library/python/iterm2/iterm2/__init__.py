@@ -1,7 +1,9 @@
 """
 The iTerm2 module provides a Python interface for controlling iTerm2.
 """
-from iterm2.app import async_get_app, CreateWindowException, App, async_invoke_function
+from iterm2.alert import Alert
+
+from iterm2.app import async_get_app, CreateWindowException, App, async_invoke_function, async_get_variable
 
 from iterm2.arrangement import SavedArrangementException, Arrangement
 
@@ -25,7 +27,7 @@ from iterm2.keyboard import Modifier, Keycode, Keystroke, KeystrokePattern, Keys
 
 from iterm2.preferences import PreferenceKey, async_get_preference
 
-from iterm2.profile import Profile, PartialProfile, BadGUIDException, LocalWriteOnlyProfile, BackgroundImageMode, CursorType, ThinStrokes, UnicodeNormalization, CharacterEncoding, OptionKeySends, InitialWorkingDirectory
+from iterm2.profile import Profile, PartialProfile, BadGUIDException, LocalWriteOnlyProfile, BackgroundImageMode, CursorType, ThinStrokes, UnicodeNormalization, CharacterEncoding, OptionKeySends, InitialWorkingDirectory, IconMode, TitleComponents
 
 from iterm2.prompt import PromptMonitor, async_get_last_prompt
 

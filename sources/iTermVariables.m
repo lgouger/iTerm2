@@ -23,9 +23,13 @@ typedef iTermTriple<NSNumber *, iTermVariables *, NSString *> iTermVariablesDept
 
 NSString *const iTermVariableKeyGlobalScopeName = @"iterm2";
 
+#pragma mark - Global Context
+
 NSString *const iTermVariableKeyApplicationPID = @"pid";
 NSString *const iTermVariableKeyApplicationLocalhostName = @"localhostName";
 NSString *const iTermVariableKeyApplicationEffectiveTheme = @"effectiveTheme";
+
+#pragma mark - Tab Context
 
 NSString *const iTermVariableKeyTabTitleOverride = @"titleOverride";
 NSString *const iTermVariableKeyTabTitleOverrideFormat = @"titleOverrideFormat";
@@ -33,6 +37,8 @@ NSString *const iTermVariableKeyTabCurrentSession = @"currentSession";
 NSString *const iTermVariableKeyTabTmuxWindow = @"tmuxWindow";
 NSString *const iTermVariableKeyTabID = @"id";
 NSString *const iTermVariableKeyTabWindow = @"window";
+
+#pragma mark - Session Context
 
 NSString *const iTermVariableKeySessionAutoLogID = @"autoLogId";
 NSString *const iTermVariableKeySessionColumns = @"columns";
@@ -66,10 +72,16 @@ NSString *const iTermVariableKeySessionMouseReportingMode = @"mouseReportingMode
 NSString *const iTermVariableKeySessionBadge = @"badge";
 NSString *const iTermVariableKeySessionTab = @"tab";
 
+#pragma mark - Window Context
+
 NSString *const iTermVariableKeyWindowTitleOverrideFormat = @"titleOverrideFormat";
+NSString *const iTermVariableKeyWindowTitleOverride = @"titleOverride";
 NSString *const iTermVariableKeyWindowCurrentTab = @"currentTab";
 
 // NOTE: If you add here, also update +recordBuiltInVariables
+
+#pragma mark -
+
 @implementation iTermVariables {
     NSMutableDictionary<NSString *, id> *_values;
     __weak iTermVariables *_parent;
@@ -244,6 +256,17 @@ NSString *const iTermVariableKeyWindowCurrentTab = @"currentTab";
     for (iTermVariableReference *ref in refs) {
         [ref invalidate];
     }
+}
+
+// This is useful for debugging purposes.
+- (NSString *)linksDescription {
+    return [[_resolvedLinks.allKeys mapWithBlock:^NSString *(NSString *key) {
+        NSArray<iTermVariableReference *> *refs = [self strongArrayFromWeakArray:self->_resolvedLinks[key]];
+        NSString *refsString = [[refs mapWithBlock:^id(iTermVariableReference *ref) {
+            return [NSString stringWithFormat:@"%@=%p", ref.path, (__bridge void *)ref.onChangeBlock];
+        }] componentsJoinedByString:@", "];
+        return [NSString stringWithFormat:@"%@ -> %@", key, refsString];
+    }] componentsJoinedByString:@"\n"];
 }
 
 - (void)didChangeTerminalValueWithPath:(NSString *)name {

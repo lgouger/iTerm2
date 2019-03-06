@@ -1149,7 +1149,7 @@ static BOOL hasBecomeActive = NO;
 
     [PTYSession registerBuiltInFunctions];
     [PTYTab registerBuiltInFunctions];
-    [iTermArrayCountBuiltInFunction registerBuiltInFunction];
+    [iTermBuiltInFunctions registerStandardFunctions];
     
     [iTermMigrationHelper migrateApplicationSupportDirectoryIfNeeded];
     [self buildScriptMenu:nil];
@@ -1286,7 +1286,7 @@ static BOOL hasBecomeActive = NO;
     } else {
         [self restoreBuriedSessionsState];
     }
-    if ([iTermAdvancedSettingsModel enableAPIServer]) {
+    if ([iTermAPIHelper isEnabled]) {
         [iTermAPIHelper sharedInstance];  // starts the server. Won't ask the user since it's enabled.
     }
 }
@@ -2025,7 +2025,7 @@ static BOOL hasBecomeActive = NO;
         if (!ok) {
             return;
         }
-        if (![iTermAPIHelper sharedInstance]) {
+        if (![iTermAPIHelper sharedInstanceFromExplicitUserAction]) {
             return;
         }
         NSString *command = [[[[[iTermPythonRuntimeDownloader sharedInstance] pathToStandardPyenvPythonWithPythonVersion:nil] stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"apython"] stringWithEscapedShellCharactersIncludingNewlines:YES];

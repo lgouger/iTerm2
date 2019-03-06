@@ -17,6 +17,7 @@
 #import "iTermController.h"
 #import "iTermDisclosableView.h"
 #import "iTermLSOF.h"
+#import "iTermPreferences.h"
 #import "iTermProfilePreferences.h"
 #import "iTermPythonArgumentParser.h"
 #import "iTermScriptFunctionCall.h"
@@ -50,13 +51,15 @@ NSString *const iTermRemoveAPIServerSubscriptionsNotification = @"iTermRemoveAPI
 NSString *const iTermAPIRegisteredFunctionsDidChangeNotification = @"iTermAPIRegisteredFunctionsDidChangeNotification";
 NSString *const iTermAPIDidRegisterSessionTitleFunctionNotification = @"iTermAPIDidRegisterSessionTitleFunctionNotification";
 NSString *const iTermAPIDidRegisterStatusBarComponentNotification = @"iTermAPIDidRegisterStatusBarComponentNotification";
+NSString *const iTermAPIHelperDidStopNotification = @"iTermAPIHelperDidStopNotification";
+static NSString *const iTermAPIHelperEnablePythonAPIWarningIdentifier = @"NoSyncEnableAPIServer";
 
 const NSInteger iTermAPIHelperFunctionCallUnregisteredErrorCode = 100;
 const NSInteger iTermAPIHelperFunctionCallOtherErrorCode = 1;
 
 NSString *const iTermAPIHelperFunctionCallErrorUserInfoKeyConnection = @"iTermAPIHelperFunctionCallErrorUserInfoKeyConnection";;
 
-static id sAPIHelperInstance;
+static iTermAPIHelper *sAPIHelperInstance;
 
 @interface iTermAllSessionsSubscription : NSObject
 @property (nonatomic, strong) ITMNotificationRequest *request;
@@ -155,6 +158,62 @@ static id sAPIHelperInstance;
     return iTermFunctionSignatureFromNameAndArguments(self.name, argNames);
 }
 
+- (NSSet<NSString *> *)it_allArgumentNames {
+    return [NSSet setWithArray:[self.argumentsArray mapWithBlock:^id(ITMRPCRegistrationRequest_RPCArgumentSignature *anObject) {
+        return anObject.name;
+    }]];
+}
+
+- (NSSet<NSString *> *)it_argumentsWithDefaultValues {
+    return [NSSet setWithArray:[self.defaultsArray mapWithBlock:^id(ITMRPCRegistrationRequest_RPCArgument *anObject) {
+        return anObject.name;
+    }]];
+}
+
+- (NSSet<NSString *> *)it_requiredArguments {
+    NSMutableSet *result = [[self it_allArgumentNames] mutableCopy];
+    [result minusSet:[self it_argumentsWithDefaultValues]];
+    return result;
+}
+
+- (BOOL)it_satisfiesExplicitParameters:(NSDictionary<NSString *, id> *)explicitParameters
+                                 scope:(iTermVariableScope *)scope
+                        fullParameters:(out NSDictionary<NSString *, id> **)fullParameters {
+    NSSet<NSString *> *providedArguments = [NSSet setWithArray:explicitParameters.allKeys];
+    NSSet<NSString *> *requiredArguments = [self it_requiredArguments];
+    if (![requiredArguments isSubsetOfSet:providedArguments]) {
+        // Does not contain all required arguments
+        return NO;
+    }
+
+    // Make sure all the arguments with defaults can be satisfied by the scope.
+    NSMutableDictionary<NSString *, id> *params = [explicitParameters mutableCopy];
+    for (ITMRPCRegistrationRequest_RPCArgument *defaultArgument in self.defaultsArray) {
+        NSString *name = defaultArgument.name;
+        NSString *path = defaultArgument.path;
+        BOOL isOptional = NO;
+        if ([path hasSuffix:@"?"]) {
+            isOptional = YES;
+            path = [path substringToIndex:path.length - 1];
+        }
+        if (params[name]) {
+            // An explicit value was provided, which overrides the default.
+            continue;
+        }
+        id value = [scope valueForVariableName:path];
+        if (value) {
+            params[name] = value;
+            continue;
+        }
+        if (!isOptional) {
+            return NO;
+        }
+        params[name] = [NSNull null];
+    }
+    *fullParameters = params;
+    return YES;
+}
+
 @end
 
 @interface ITMServerOriginatedRPC(Extensions)
@@ -228,7 +287,7 @@ static id sAPIHelperInstance;
     // Saves the last one to avoid sending changed notifications when nothing changed.
     ITMBroadcastDomainsChangedNotification *_lastBroadcastChangeNotification;
 
-    // When adding a new dictionary of subscriptions update removeAllSubscriptionsForConnectionKey:.
+    // When adding a new dictionary of subscriptions update -removeAllSubscriptionsForConnectionKey: and -stop.
     NSMutableDictionary<id, ITMNotificationRequest *> *_newSessionSubscriptions;
     NSMutableDictionary<id, ITMNotificationRequest *> *_terminateSessionSubscriptions;
     NSMutableDictionary<id, ITMNotificationRequest *> *_layoutChangeSubscriptions;
@@ -251,10 +310,16 @@ static id sAPIHelperInstance;
 }
 
 + (instancetype)sharedInstance {
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        sAPIHelperInstance = [[self alloc] initPrivate];
-    });
+    if (!sAPIHelperInstance) {
+        sAPIHelperInstance = [[self alloc] initWithExplicitUserAction:NO];
+    }
+    return sAPIHelperInstance;
+}
+
++ (instancetype)sharedInstanceFromExplicitUserAction {
+    if (!sAPIHelperInstance) {
+        sAPIHelperInstance = [[self alloc] initWithExplicitUserAction:YES];
+    }
     return sAPIHelperInstance;
 }
 
@@ -290,18 +355,37 @@ static id sAPIHelperInstance;
     return [sAPIHelperInstance statusBarComponentProviderRegistrationRequests] ?: @[];
 }
 
-- (instancetype)initPrivate {
++ (BOOL)confirmShouldStartServerAndUpdateUserDefaultsForced:(BOOL)forced {
+    // It was not enabled in preferences. Ask the user. If they permanently silence this
+    // they'll need to go into prefs to enable it.
+    iTermWarning *warning = [[iTermWarning alloc] init];
+    warning.heading = @"Enable Python API?";
+    warning.actionLabels = @[ @"OK", @"Cancel" ];
+    warning.identifier = iTermAPIHelperEnablePythonAPIWarningIdentifier;
+    warning.warningType = forced ? kiTermWarningTypePersistent : kiTermWarningTypePermanentlySilenceable;
+    warning.title = @"The Python API allows scripts you run to control iTerm2 and access all its data.";
+    static BOOL showing;
+    assert(!showing);
+    showing = YES;
+    const iTermWarningSelection selection = [warning runModal];
+    showing = NO;
+    if (selection == kiTermWarningSelection1) {
+        [iTermPreferences setBool:NO forKey:kPreferenceKeyEnableAPIServer];
+        return NO;
+    } else {
+        [iTermPreferences setBool:YES forKey:kPreferenceKeyEnableAPIServer];
+    }
+    return YES;
+}
+
+- (instancetype)initWithExplicitUserAction:(BOOL)force {
     self = [super init];
     if (self) {
         if (![NSApp isRunningUnitTests]) {
-            iTermWarning *warning = [[iTermWarning alloc] init];
-            warning.heading = @"Enable Python API?";
-            warning.actionLabels = @[ @"OK", @"Cancel" ];
-            warning.identifier = @"EnableAPIServer";
-            warning.warningType = kiTermWarningTypePermanentlySilenceable;
-            warning.title = @"The Python API allows scripts you run to control iTerm2 and access all its data.";
-            if ([warning runModal] == kiTermWarningSelection1) {
-                return nil;
+            if (![iTermPreferences boolForKey:kPreferenceKeyEnableAPIServer]) {
+                if (![iTermAPIHelper confirmShouldStartServerAndUpdateUserDefaultsForced:force]) {
+                    return nil;
+                }
             }
             _apiServer = [[iTermAPIServer alloc] init];
             _apiServer.delegate = self;
@@ -377,6 +461,47 @@ static id sAPIHelperInstance;
 
 - (void)dealloc {
     [[NSNotificationCenter defaultCenter] removeObserver:self];
+}
+
++ (void)setEnabled:(BOOL)enabled {
+    [iTermWarning unsilenceIdentifier:iTermAPIHelperEnablePythonAPIWarningIdentifier
+                    ifSelectionEquals:kiTermWarningSelection0];
+    [iTermWarning unsilenceIdentifier:iTermAPIHelperEnablePythonAPIWarningIdentifier
+                    ifSelectionEquals:kiTermWarningSelection1];
+    if (enabled) {
+        [iTermPreferences setBool:YES forKey:kPreferenceKeyEnableAPIServer];
+        [self sharedInstance];
+    } else {
+        [iTermPreferences setBool:NO forKey:kPreferenceKeyEnableAPIServer];
+        [sAPIHelperInstance stop];
+        sAPIHelperInstance = nil;
+    }
+}
+
++ (BOOL)isEnabled {
+    return [iTermPreferences boolForKey:kPreferenceKeyEnableAPIServer];
+}
+
+- (void)stop {
+    [_apiServer stop];
+    _apiServer.delegate = nil;
+    _apiServer = nil;
+    [_newSessionSubscriptions removeAllObjects];
+    [_terminateSessionSubscriptions removeAllObjects];
+    [_layoutChangeSubscriptions removeAllObjects];
+    [_focusChangeSubscriptions removeAllObjects];
+    [_broadcastDomainChangeSubscriptions removeAllObjects];
+    [_profileChangeSubscriptions removeAllObjects];
+    [_appVariableSubscriptions removeAllObjects];
+    [_tabVariableSubscriptions removeAllObjects];
+    [_windowVariableSubscriptions removeAllObjects];
+    [_sessionVariableSubscriptions removeAllObjects];
+    [_allSessionVariableSubscriptions removeAllObjects];
+    [_internalServerOriginatedRPCSubscriptions removeAllObjects];
+    [_allSessionsSubscriptions removeAllObjects];
+    [_serverOriginatedRPCCompletionBlocks removeAllObjects];
+    [_outstandingRPCs removeAllObjects];
+    [[NSNotificationCenter defaultCenter] postNotificationName:iTermAPIHelperDidStopNotification object:nil];
 }
 
 - (void)postAPINotification:(ITMNotification *)notification toConnectionKey:(NSString *)connectionKey {
@@ -565,6 +690,28 @@ static id sAPIHelperInstance;
     return self.serverOriginatedRPCSubscriptions[signature].firstObject;
 }
 
+- (NSString *)connectionKeyForRPCWithName:(NSString *)name
+                       explicitParameters:(NSDictionary<NSString *, id> *)explicitParameters
+                                    scope:(iTermVariableScope *)scope
+                           fullParameters:(out NSDictionary<NSString *, id> **)fullParameters {
+    if ([name hasPrefix:@"iterm2."]) {
+        return nil;
+    }
+    for (NSString *signature in self.serverOriginatedRPCSubscriptions) {
+        iTermTuple<id, ITMNotificationRequest *> *tuple = self.serverOriginatedRPCSubscriptions[signature];
+        ITMNotificationRequest *request = tuple.secondObject;
+        if (![request.rpcRegistrationRequest.name isEqualToString:name]) {
+            continue;
+        }
+        if ([request.rpcRegistrationRequest it_satisfiesExplicitParameters:explicitParameters
+                                                                     scope:scope
+                                                            fullParameters:fullParameters]) {
+            return tuple.firstObject;
+        }
+    }
+    return nil;
+}
+
 - (ITMServerOriginatedRPC *)serverOriginatedRPCWithName:(NSString *)name
                                               arguments:(NSDictionary *)arguments
                                                   error:(out NSError **)error {
@@ -629,7 +776,7 @@ static id sAPIHelperInstance;
             return request.rpcRegistrationRequest.it_stringRepresentation;
         }
     }
-    return nil;
+    return [iTermBuiltInFunctions.sharedInstance signatureOfAnyRegisteredFunctionWithName:name];
 }
 
 // Dispatches a well-formed proto buffer or gives an error if not connected.
@@ -2920,7 +3067,7 @@ static BOOL iTermCheckSplitTreesIsomorphic(ITMSplitTreeNode *node1, ITMSplitTree
 
 - (ITMPreferencesResponse_Result_GetPreferenceResult *)handleGetPreferenceRequestForKey:(NSString *)key {
     ITMPreferencesResponse_Result_GetPreferenceResult *result = [[ITMPreferencesResponse_Result_GetPreferenceResult alloc] init];
-    id obj = [[NSUserDefaults standardUserDefaults] objectForKey:key];
+    id obj = [iTermPreferences objectForKey:key];
     NSString *json = [NSJSONSerialization it_jsonStringForObject:obj];
     result.jsonValue = json;
     return result;

@@ -50,9 +50,7 @@
                                 </connections>
                             </menuItem>
                             <menuItem title="Profile CPU Usage" identifier="Profile CPU Usage" id="BHe-4M-lqd">
-                                <string key="keyEquivalent" base64-UTF8="YES">
-CQ
-</string>
+                                <modifierMask key="keyEquivalentModifierMask"/>
                                 <connections>
                                     <action selector="createCPUProfile:" target="201" id="kex-OS-LzO"/>
                                 </connections>
@@ -1045,7 +1043,7 @@ DQ
                                 </connections>
                             </menuItem>
                             <menuItem isSeparatorItem="YES" id="24F-Ft-dce"/>
-                            <menuItem title="Edit Tab Title" identifier="Edit Window Title" id="o4x-qQ-aC9">
+                            <menuItem title="Edit Tab Title" identifier="Edit Tab Title" id="o4x-qQ-aC9">
                                 <modifierMask key="keyEquivalentModifierMask"/>
                                 <connections>
                                     <action selector="editTabTitle:" target="-1" id="tXR-UH-8S7"/>

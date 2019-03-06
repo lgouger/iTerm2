@@ -332,10 +332,16 @@ class Session:
         """
         Sets the value of properties in this session.
 
+        When you use this function the underlying profile is not modified. The session will keep a copy of its profile with these modifications.
+
         :param key: The name of the property
         :param write_only_profile: A write-only profile that has the desired changes.
 
         :throws: :class:`~iterm2.rpc.RPCException` if something goes wrong.
+
+        .. seealso::
+          * Example ":ref:`copycolor_example`"
+          * Example ":ref:`settabcolor_example`"
         """
         for key, json_value in write_only_profile.values.items():
             response = await iterm2.rpc.async_set_profile_property_json(
@@ -585,7 +591,7 @@ class Session:
 
     async def async_invoke_function(self, invocation: str, timeout: float=-1):
         """
-        Invoke an RPC. Could be a registered function by this or another script of a built-in function.
+        Invoke an RPC. Could be a function registered by this or another script, or a built-in function.
 
         This invokes the RPC in the context of this session. Most user-defined RPCs are invoked in a session context (for example, invocations attached to triggers or key bindings). Default variables will be pulled from that scope. If you call a function from the wrong context it may fail because its defaults will not be set properly.
 

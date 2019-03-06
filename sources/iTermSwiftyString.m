@@ -9,6 +9,7 @@
 
 #import "DebugLogging.h"
 #import "iTermAPIHelper.h"
+#import "iTermExpressionEvaluator.h"
 #import "iTermScriptFunctionCall.h"
 #import "iTermScriptHistory.h"
 #import "iTermVariableReference.h"
@@ -27,6 +28,7 @@
     NSMutableSet<NSString *> *_missingFunctions;
     iTermVariableScope *_scope;
     BOOL _observing;
+    iTermVariableReference<NSString *> *_sourceRef;
 }
 
 - (instancetype)initWithString:(NSString *)swiftyString
@@ -48,12 +50,55 @@
     return self;
 }
 
+- (instancetype)initWithScope:(iTermVariableScope *)scope
+                   sourcePath:(nonnull NSString *)sourcePath
+              destinationPath:(NSString *)destinationPath {
+    self = [super init];
+    if (self) {
+        _swiftyString = [[NSString castFrom:[scope valueForVariableName:sourcePath]] copy] ?: @"";
+        _scope = scope;
+        _refs = [NSMutableArray array];
+        _missingFunctions = [NSMutableSet set];
+        _destinationPath = [destinationPath copy];
+        _sourceRef = [[iTermVariableReference alloc] initWithPath:sourcePath scope:scope];
+        __weak __typeof(self) weakSelf = self;
+        _sourceRef.onChangeBlock = ^{
+            [weakSelf sourceDidChange];
+        };
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(registeredFunctionsDidChange:)
+                                                     name:iTermAPIRegisteredFunctionsDidChangeNotification
+                                                   object:nil];
+        [self reevaluateIfNeeded];
+    }
+    return self;
+}
+
 - (void)dealloc {
     [self invalidate];
 }
 
+- (void)sourceDidChange {
+    self.swiftyString = [NSString castFrom:_sourceRef.value] ?: @"";
+}
+
+- (void)setSwiftyString:(NSString *)swiftyString {
+    if ([NSObject object:swiftyString isEqualToObject:_swiftyString]) {
+        return;
+    }
+    _swiftyString = [swiftyString copy];
+    if (_evaluatedString) {
+        // Update the refs without losing the cached evaluation.
+        [self evaluateSynchronously:YES completion:^(NSString *newValue) {}];
+    }
+    // Reevaluate later, which may happen asynchronously.
+    [self setNeedsReevaluation];
+}
+
 - (void)invalidate {
     _observer = nil;
+    _sourceRef.onChangeBlock = nil;
+    [_sourceRef invalidate];
     [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 
@@ -63,7 +108,12 @@
     if ([NSObject object:evaluatedString isEqualToObject:self.evaluatedString]) {
         return;
     }
+
     _evaluatedString = [evaluatedString copy];
+    if (self.destinationPath) {
+        [_scope setValue:evaluatedString forVariableNamed:self.destinationPath];
+    }
+
     assert(!_observing);
     if (!self.observer) {
         DLog(@"Swifty string %@ has no observer", self);
@@ -132,10 +182,12 @@
 - (void)evaluateSynchronously:(BOOL)synchronously
                    withScope:(iTermVariableScope *)scope
                    completion:(void (^)(NSString *result, NSError *error, NSSet<NSString *> *missing))completion {
-    [iTermScriptFunctionCall evaluateString:_swiftyString
-                                    timeout:synchronously ? 0 : 30
-                                      scope:scope
-                                 completion:completion];
+    iTermExpressionEvaluator *evaluator = [[iTermExpressionEvaluator alloc] initWithInterpolatedString:_swiftyString
+                                                                                                 scope:scope];
+    [evaluator evaluateWithTimeout:synchronously ? 0 : 30
+                        completion:^(iTermExpressionEvaluator * _Nonnull evaluator) {
+                            completion(evaluator.value, evaluator.error, evaluator.missingValues);
+                        }];
 }
 
 - (void)dependencyDidChange {

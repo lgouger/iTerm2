@@ -7,7 +7,9 @@
 
 #import "iTermScriptHistory.h"
 
+#import "DebugLogging.h"
 #import "iTermAPIServer.h"
+#import "iTermAPIHelper.h"
 #import "iTermWebSocketConnection.h"
 #import "NSArray+iTerm.h"
 #import "NSObject+iTerm.h"
@@ -65,6 +67,10 @@ NSString *const iTermScriptHistoryEntryFieldRPCValue = @"rpc";
                                                  selector:@selector(apiServerWillSendMessage:)
                                                      name:iTermAPIServerWillSendMessage
                                                    object:identifier];
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(apiDidStop:)
+                                                     name:iTermAPIHelperDidStopNotification
+                                                   object:nil];
     }
     return self;
 }
@@ -123,13 +129,41 @@ NSString *const iTermScriptHistoryEntryFieldRPCValue = @"rpc";
                                                                   iTermScriptHistoryEntryFieldKey: iTermScriptHistoryEntryFieldRPCValue }];
 }
 
+- (void)apiDidStop:(NSNotification *)notification {
+    self.terminatedByUser = YES;
+    if (self.pid > 0) {
+        [self kill:9];
+    }
+    [self stopRunning];
+}
+
+- (void)setPid:(int)pid {
+    _pid = pid;
+}
+
 - (void)kill {
     [self addOutput:@"\n*Terminate button pressed*\n"];
     self.terminatedByUser = YES;
-    kill(self.pid, 1);
+    if (self.pid > 0) {
+        [self kill:1];
+    }
     [self.websocketConnection abortWithCompletion:nil];
 }
 
+- (void)kill:(int)signal {
+    pid_t pid = self.pid;
+    if (pid <= 0) {
+        return;
+    }
+    pid_t pgid = getpgid(self.pid);
+    if (pgid <= 0) {
+        DLog(@"Failed to get the process group id %@", @(errno));
+        kill(pid, signal);
+        return;
+    }
+
+    killpg(pgid, signal);
+}
 - (void)stopRunning {
     _isRunning = NO;
     [[NSNotificationCenter defaultCenter] postNotificationName:iTermScriptHistoryEntryDidChangeNotification

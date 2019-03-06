@@ -8,6 +8,7 @@
 #import "iTermScriptsMenuController.h"
 
 #import "DebugLogging.h"
+#import "iTermAPIHelper.h"
 #import "iTermAPIScriptLauncher.h"
 #import "iTermAdvancedSettingsModel.h"
 #import "iTermBuildingScriptWindowController.h"
@@ -329,7 +330,8 @@ NS_ASSUME_NONNULL_BEGIN
             return;
         }
         if (response == NSAlertSecondButtonReturn) {
-            [self launchScriptWithAbsolutePath:location.path];
+            [self launchScriptWithAbsolutePath:location.path
+                            explicitUserAction:YES];
         }
     }
 }
@@ -379,7 +381,7 @@ NS_ASSUME_NONNULL_BEGIN
     if (entry) {
         [entry kill];
     } else {
-        [self launchScriptWithAbsolutePath:fullPath];
+        [self launchScriptWithAbsolutePath:fullPath explicitUserAction:YES];
     }
 }
 
@@ -390,26 +392,37 @@ NS_ASSUME_NONNULL_BEGIN
     [[NSWorkspace sharedWorkspace] activateFileViewerSelectingURLs:@[ [NSURL fileURLWithPath:fullPath] ]];
 }
 
-- (void)launchScriptWithRelativePath:(NSString *)path {
+- (void)launchScriptWithRelativePath:(NSString *)path
+                  explicitUserAction:(BOOL)explicitUserAction {
     NSString *fullPath = [[[NSFileManager defaultManager] scriptsPath] stringByAppendingPathComponent:path];
-    [self launchScriptWithAbsolutePath:fullPath];
+    [self launchScriptWithAbsolutePath:fullPath explicitUserAction:explicitUserAction];
 }
 
 // NOTE: This logic needs to be kept in sync with -couldLaunchScriptWithAbsolutePath
-- (void)launchScriptWithAbsolutePath:(NSString *)fullPath {
+- (void)launchScriptWithAbsolutePath:(NSString *)fullPath explicitUserAction:(BOOL)explicitUserAction {
     NSString *venv = [iTermAPIScriptLauncher environmentForScript:fullPath checkForMain:YES];
     if (venv) {
+        if (!explicitUserAction && ![iTermAPIHelper isEnabled]) {
+            DLog(@"Not launching %@ because the API is not enabled", fullPath);
+            return;
+        }
         NSString *name = fullPath.lastPathComponent;
         NSString *mainPyPath = [[[fullPath stringByAppendingPathComponent:name] stringByAppendingPathComponent:name] stringByAppendingPathExtension:@"py"];
         [iTermAPIScriptLauncher launchScript:mainPyPath
                                     fullPath:fullPath
                               withVirtualEnv:venv
-                                 setupPyPath:[fullPath stringByAppendingPathComponent:@"setup.py"]];
+                                 setupPyPath:[fullPath stringByAppendingPathComponent:@"setup.py"]
+                          explicitUserAction:explicitUserAction];
         return;
     }
 
     if ([[fullPath pathExtension] isEqualToString:@"py"]) {
-        [iTermAPIScriptLauncher launchScript:fullPath];
+        if (!explicitUserAction && ![iTermAPIHelper isEnabled]) {
+            DLog(@"Not launching %@ because the API is not enabled", fullPath);
+            return;
+        }
+        [iTermAPIScriptLauncher launchScript:fullPath
+                          explicitUserAction:explicitUserAction];
         return;
     }
     if ([[fullPath pathExtension] isEqualToString:@"scpt"]) {
@@ -912,7 +925,7 @@ NS_ASSUME_NONNULL_BEGIN
 }
 
 - (void)runAutoLaunchScript:(NSString *)path {
-    [self launchScriptWithAbsolutePath:path];
+    [self launchScriptWithAbsolutePath:path explicitUserAction:NO];
 }
 
 - (void)runLegacyAutoLaunchScripts {

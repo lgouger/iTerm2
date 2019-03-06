@@ -13,12 +13,15 @@ extern NSString *const iTermRemoveAPIServerSubscriptionsNotification;
 extern NSString *const iTermAPIRegisteredFunctionsDidChangeNotification;
 extern NSString *const iTermAPIDidRegisterSessionTitleFunctionNotification;
 extern NSString *const iTermAPIDidRegisterStatusBarComponentNotification;  // object is the unique id of the status bar component
+extern NSString *const iTermAPIHelperDidStopNotification;
 
 extern const NSInteger iTermAPIHelperFunctionCallUnregisteredErrorCode;
 extern const NSInteger iTermAPIHelperFunctionCallOtherErrorCode;
 extern NSString *const iTermAPIHelperFunctionCallErrorUserInfoKeyConnection;
 
+@class iTermParsedExpression;
 @class iTermScriptHistoryEntry;
+@class iTermVariableScope;
 
 typedef void (^iTermServerOriginatedRPCCompletionBlock)(id, NSError *);
 
@@ -30,13 +33,18 @@ typedef void (^iTermServerOriginatedRPCCompletionBlock)(id, NSError *);
 
 @interface iTermAPIHelper : NSObject<iTermAPIServerDelegate>
 
++ (BOOL)confirmShouldStartServerAndUpdateUserDefaultsForced:(BOOL)forced;
 + (instancetype)sharedInstance;
++ (instancetype)sharedInstanceFromExplicitUserAction;
 
 + (NSString *)invocationWithName:(NSString *)name
                         defaults:(NSArray<ITMRPCRegistrationRequest_RPCArgument*> *)defaultsArray;
 + (ITMRPCRegistrationRequest *)registrationRequestForStatusBarComponentWithUniqueIdentifier:(NSString *)uniqueIdentifier;
 
 - (instancetype)init NS_UNAVAILABLE;
+
++ (void)setEnabled:(BOOL)enabled;
++ (BOOL)isEnabled;
 
 - (void)postAPINotification:(ITMNotification *)notification toConnectionKey:(NSString *)connectionKey;
 
@@ -63,6 +71,11 @@ typedef void (^iTermServerOriginatedRPCCompletionBlock)(id, NSError *);
 // stringSignature is like func(arg1,arg2). Use iTermFunctionSignatureFromNameAndArguments to construct it safely.
 - (BOOL)haveRegisteredFunctionWithSignature:(NSString *)stringSignature;
 - (NSString *)connectionKeyForRPCWithSignature:(NSString *)signature;
+- (NSString *)connectionKeyForRPCWithName:(NSString *)name
+                       explicitParameters:(NSDictionary<NSString *, id> *)explicitParameters
+                                    scope:(iTermVariableScope *)scope
+                           fullParameters:(out NSDictionary<NSString *, id> **)fullParameters;
+
 - (void)logToConnectionHostingFunctionWithSignature:(NSString *)signatureString
                                              format:(NSString *)format, ...;
 - (void)logToConnectionHostingFunctionWithSignature:(NSString *)signatureString

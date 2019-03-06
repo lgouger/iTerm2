@@ -7,12 +7,12 @@
 
 #import <XCTest/XCTest.h>
 #import "iTermFunctionCallSuggester.h"
-#import "iTermFunctionCallParser.h"
+#import "iTermExpressionParser.h"
 #import "iTermParsedExpression+Tests.h"
 #import "iTermScriptFunctionCall+Private.h"
 #import "iTermVariableScope.h"
 
-@interface iTermFunctionCallParser(Testing)
+@interface iTermExpressionParser(Testing)
 - (instancetype)initPrivate;
 @end
 
@@ -21,7 +21,7 @@
 @end
 
 @implementation iTermFunctionCallSuggesterTest {
-    iTermFunctionCallParser *_parser;
+    iTermExpressionParser *_parser;
     iTermFunctionCallSuggester *_suggester;
 }
 
@@ -37,7 +37,7 @@
                                                                 return [NSSet setWithArray:paths];
                                                             }];
 
-    _parser = [[iTermFunctionCallParser alloc] initWithStart:@"expression"];
+    _parser = [iTermExpressionParser expressionParser];
 }
 
 - (void)tearDown {
@@ -59,7 +59,7 @@
                                              scope:scope];
     iTermScriptFunctionCall *functionCall = [[iTermScriptFunctionCall alloc] init];
     functionCall.name = @"func";
-    [functionCall addParameterWithName:@"x" value:@"foo"];
+    [functionCall addParameterWithName:@"x" parsedExpression:[[iTermParsedExpression alloc] initWithInterpolatedStringParts:@[ [[iTermParsedExpression alloc] initWithString:@"foo" optional:NO] ]]];
     iTermParsedExpression *expected = [[iTermParsedExpression alloc] initWithFunctionCall:functionCall];
 
     XCTAssertEqualObjects(actual, expected);
@@ -75,7 +75,7 @@
                                              scope:scope];
     iTermScriptFunctionCall *functionCall = [[iTermScriptFunctionCall alloc] init];
     functionCall.name = @"func";
-    [functionCall addParameterWithName:@"x" value:@"foovaluebar"];
+    [functionCall addParameterWithName:@"x" parsedExpression:[[iTermParsedExpression alloc] initWithInterpolatedStringParts:@[ [[iTermParsedExpression alloc] initWithString:@"foovaluebar" optional:NO] ]]];
     iTermParsedExpression *expected = [[iTermParsedExpression alloc] initWithFunctionCall:functionCall];
 
     XCTAssertEqualObjects(actual, expected);
@@ -98,14 +98,17 @@
                                              scope:scope];
     iTermScriptFunctionCall *functionCall = [[iTermScriptFunctionCall alloc] init];
     functionCall.name = @"inner";
-    [functionCall addParameterWithName:@"s" value:@"Hello WORLD, how are you?"];
+    iTermParsedExpression *sParsedExpression = [[iTermParsedExpression alloc] initWithInterpolatedStringParts:@[ [[iTermParsedExpression alloc] initWithString:@"Hello WORLD, how are you?" optional:NO] ]];
+    [functionCall addParameterWithName:@"s" parsedExpression:sParsedExpression];
     iTermParsedExpression *innerCall = [[iTermParsedExpression alloc] initWithFunctionCall:functionCall];
 
-    iTermParsedExpression *xValue = [[iTermParsedExpression alloc] initWithInterpolatedStringParts:@[ @"foo", innerCall, @"bar" ]];
+    iTermParsedExpression *xValue = [[iTermParsedExpression alloc] initWithInterpolatedStringParts:@[ [[iTermParsedExpression alloc] initWithString:@"foo" optional:NO],
+                                                                                                      innerCall,
+                                                                                                      [[iTermParsedExpression alloc] initWithString:@"bar" optional:NO] ]];
 
     functionCall = [[iTermScriptFunctionCall alloc] init];
     functionCall.name = @"func";
-    [functionCall addParameterWithName:@"x" value:xValue];
+    [functionCall addParameterWithName:@"x" parsedExpression:xValue];
     iTermParsedExpression *expected = [[iTermParsedExpression alloc] initWithFunctionCall:functionCall];
 
     XCTAssertEqualObjects(actual, expected);

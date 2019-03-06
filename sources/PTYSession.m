@@ -26,6 +26,7 @@
 #import "iTermCopyModeState.h"
 #import "iTermDisclosableView.h"
 #import "iTermEchoProbe.h"
+#import "iTermExpressionParser.h"
 #import "iTermFindDriver.h"
 #import "iTermGraphicSource.h"
 #import "iTermNotificationController.h"
@@ -68,6 +69,7 @@
 #import "iTermStatusBarLayout+tmux.h"
 #import "iTermStatusBarViewController.h"
 #import "iTermSwiftyString.h"
+#import "iTermSwiftyStringGraph.h"
 #import "iTermSystemVersion.h"
 #import "iTermTextExtractor.h"
 #import "iTermThroughputEstimator.h"
@@ -494,7 +496,6 @@ static const NSUInteger kMaxHosts = 100;
     
     iTermGraphicSource *_graphicSource;
     iTermVariableReference *_jobPidRef;
-    iTermVariableReference *_autoNameFormatRef;
     iTermCacheableImage *_customIcon;
     CGContextRef _metalContext;
     BOOL _errorCreatingMetalContext;
@@ -502,6 +503,7 @@ static const NSUInteger kMaxHosts = 100;
     id<iTermKeyMapper> _keyMapper;
     BOOL _useLibTickit;
     NSString *_badgeFontName;
+    iTermVariableScope *_variablesScope;
 }
 
 + (NSMapTable<NSString *, PTYSession *> *)sessionMap {
@@ -602,12 +604,16 @@ static const NSUInteger kMaxHosts = 100;
             [weakSelf jobPidDidChange];
         };
 
-        _autoNameFormatRef = [[iTermVariableReference alloc] initWithPath:iTermVariableKeySessionAutoNameFormat scope:self.variablesScope];
-        _autoNameFormatRef.onChangeBlock = ^{
-            [weakSelf updateAutoNameSwiftyStringIfNeeded];
+        [_autoNameSwiftyString invalidate];
+        [_autoNameSwiftyString autorelease];
+        _autoNameSwiftyString = [[iTermSwiftyString alloc] initWithScope:self.variablesScope
+                                                              sourcePath:iTermVariableKeySessionAutoNameFormat
+                                                         destinationPath:iTermVariableKeySessionAutoName];
+        _autoNameSwiftyString.observer = ^(NSString * _Nonnull newValue) {
+            if ([weakSelf checkForCyclesInSwiftyStrings]) {
+                weakSelf.variablesScope.autoNameFormat = @"[Cycle detected]";
+            }
         };
-        [self updateAutoNameSwiftyStringIfNeeded];
-
         _tmuxSecureLogging = NO;
         _tailFindContext = [[FindContext alloc] init];
         _commandRange = VT100GridCoordRangeMake(-1, -1, -1, -1);
@@ -701,6 +707,10 @@ static const NSUInteger kMaxHosts = 100;
         [[NSNotificationCenter defaultCenter] addObserver:self
                                                  selector:@selector(annotationVisibilityDidChange:)
                                                      name:iTermAnnotationVisibilityDidChange
+                                                   object:nil];
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(apiDidStop:)
+                                                     name:iTermAPIHelperDidStopNotification
                                                    object:nil];
         [self.variablesScope setValue:[self.sessionId stringByReplacingOccurrencesOfString:@":" withString:@"."]
                      forVariableNamed:iTermVariableKeySessionTermID];
@@ -814,6 +824,7 @@ ITERM_WEAKLY_REFERENCEABLE
     [_customIcon release];
     [_keyMapper release];
     [_badgeFontName release];
+    [_variablesScope release];
 
     [super dealloc];
 }
@@ -1797,39 +1808,6 @@ ITERM_WEAKLY_REFERENCEABLE
 
 - (void)didMoveSession {
     [self.variablesScope setValue:self.sessionId forVariableNamed:iTermVariableKeySessionTermID];
-}
-
-- (void)updateAutoNameSwiftyStringIfNeeded {
-    NSString *autoNameFormat = [self.variablesScope valueForVariableName:iTermVariableKeySessionAutoNameFormat];
-    if (!_autoNameSwiftyString ||
-        ![_autoNameSwiftyString.swiftyString isEqualToString:autoNameFormat]) {
-        __weak __typeof(self) weakSelf = self;
-        iTermSwiftyString *temp = [[iTermSwiftyString alloc] initWithString:autoNameFormat ?: @""
-                                                                      scope:self.variablesScope
-                                                                   observer:^(NSString * _Nonnull newValue) {
-                                                                       [weakSelf didEvaluateAutoName:newValue];
-                                                                   }];
-        NSArray *pathsPossiblyComputedFromAutoName = @[iTermVariableKeySessionAutoNameFormat,
-                                                       iTermVariableKeySessionAutoName,
-                                                       iTermVariableKeySessionName];
-        BOOL hasCycle = [self checkForCycleInSwiftyString:temp paths:pathsPossiblyComputedFromAutoName];
-        if (!hasCycle) {
-            hasCycle = ([self doesSwiftyString:_badgeSwiftyString referencePaths:pathsPossiblyComputedFromAutoName] &&
-                        [self doesSwiftyString:temp referencePaths:@[ iTermVariableKeySessionBadge ]]);
-        }
-        if (hasCycle) {
-            [temp release];
-            DLog(@"cycle detected in %@", autoNameFormat);
-            temp = [[iTermSwiftyString alloc] initWithString:@"[CYCLE DETECTED]"
-                                                       scope:self.variablesScope
-                                                    observer:^(NSString * _Nonnull newValue) {
-                                                        [weakSelf didEvaluateAutoName:newValue];
-                                                    }];
-        }
-        DLog(@"Set autoNameFormat to %@", temp.swiftyString);
-        [_autoNameSwiftyString autorelease];
-        _autoNameSwiftyString = temp;
-    }
 }
 
 - (void)didEvaluateAutoName:(NSString *)evaluated {
@@ -3842,6 +3820,8 @@ ITERM_WEAKLY_REFERENCEABLE
         return;
     }
     __weak __typeof(self) weakSelf = self;
+    [_badgeSwiftyString invalidate];
+    [_badgeSwiftyString autorelease];
     _badgeSwiftyString = [[iTermSwiftyString alloc] initWithString:badgeFormat
                                                              scope:self.variablesScope
                                                           observer:^(NSString * _Nonnull newValue) {
@@ -3895,28 +3875,28 @@ ITERM_WEAKLY_REFERENCEABLE
     return NO;
 }
 
-- (BOOL)checkForCycleInSwiftyString:(iTermSwiftyString *)swiftyString
-                              paths:(NSArray<NSString *> *)paths {
-    NSMutableArray *badRefs = [NSMutableArray array];
-    for (iTermVariableReference *ref in swiftyString.refs) {
-        for (NSString *path in paths) {
-            if ([self.variablesScope variableNamed:path isReferencedBy:ref]) {
-                [badRefs addObject:ref];
-            }
-        }
+- (BOOL)checkForCyclesInSwiftyStrings {
+    iTermSwiftyStringGraph *graph = [[[iTermSwiftyStringGraph alloc] init] autorelease];
+    [graph addSwiftyString:_autoNameSwiftyString
+            withFormatPath:iTermVariableKeySessionAutoNameFormat
+            evaluationPath:iTermVariableKeySessionAutoName
+                     scope:self.variablesScope];
+    if (_badgeSwiftyString) {
+        [graph addSwiftyString:_badgeSwiftyString
+                withFormatPath:nil
+                evaluationPath:iTermVariableKeySessionBadge
+                         scope:self.variablesScope];
     }
-    if (badRefs.count) {
-        for (iTermVariableReference *ref in badRefs) {
-            [ref removeAllLinks];
-        }
-        return YES;
-    }
-    return NO;
+    [self.delegate sessionAddSwiftyStringsToGraph:graph];
+    [graph addEdgeFromPath:iTermVariableKeySessionAutoNameFormat
+                    toPath:iTermVariableKeySessionName
+                     scope:self.variablesScope];
+    return graph.containsCycle;
 }
 
 - (void)updateBadgeLabel {
-    if ([self checkForCycleInSwiftyString:_badgeSwiftyString paths:@[iTermVariableKeySessionBadge]]) {
-        [self setSessionSpecificProfileValues:@{ KEY_BADGE_FORMAT: @"[CYCLE DETECTED]" }];
+    if ([self checkForCyclesInSwiftyStrings]) {
+        [self setBadgeFormat:@"[Cycle detected]"];
         return;
     }
     [self updateBadgeLabel:[self badgeLabel]];
@@ -4682,6 +4662,14 @@ ITERM_WEAKLY_REFERENCEABLE
     }
 }
 
+- (void)apiDidStop:(NSNotification *)notification {
+    [_promptSubscriptions removeAllObjects];
+    [_keystrokeSubscriptions removeAllObjects];
+    [_keyboardFilterSubscriptions removeAllObjects];
+    [_updateSubscriptions removeAllObjects];
+    [_customEscapeSequenceNotifications removeAllObjects];
+}
+
 - (void)apiServerUnsubscribe:(NSNotification *)notification {
     [_promptSubscriptions removeObjectForKey:notification.object];
     [_keystrokeSubscriptions removeObjectForKey:notification.object];
@@ -4988,11 +4976,13 @@ ITERM_WEAKLY_REFERENCEABLE
 - (void)findString:(NSString *)aString
   forwardDirection:(BOOL)direction
               mode:(iTermFindMode)mode
-        withOffset:(int)offset {
+        withOffset:(int)offset
+scrollToFirstResult:(BOOL)scrollToFirstResult {
     [_textview findString:aString
          forwardDirection:direction
                      mode:mode
-               withOffset:offset];
+               withOffset:offset
+      scrollToFirstResult:scrollToFirstResult];
 }
 
 - (NSString *)unpaddedSelectedText {
@@ -7471,6 +7461,7 @@ ITERM_WEAKLY_REFERENCEABLE
 - (void)textViewDidBecomeFirstResponder {
     [_delegate setActiveSession:self];
     [_view setNeedsDisplay:YES];
+    [_view.findDriver owningViewDidBecomeFirstResponder];
 }
 
 - (void)textViewDidResignFirstResponder {
@@ -7707,7 +7698,10 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (iTermVariableScope<iTermSessionScope> *)variablesScope {
-    return [[iTermVariableScope newSessionScopeWithVariables:self.variables] autorelease];
+    if (_variablesScope == nil) {
+        _variablesScope = [iTermVariableScope newSessionScopeWithVariables:self.variables];
+    }
+    return _variablesScope;
 }
 
 - (BOOL)textViewSuppressingAllOutput {
@@ -8318,6 +8312,9 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (void)screenSetWindowTitle:(NSString *)title {
+    // The window name doesn't normally serve as an interpolated string, but just to be extra safe
+    // break up \(.
+    title = [title stringByReplacingOccurrencesOfString:@"\\(" withString:@"\\\u200B("];
     [self.variablesScope setValue:title forVariableNamed:iTermVariableKeySessionWindowName];
 }
 
@@ -8329,7 +8326,9 @@ ITERM_WEAKLY_REFERENCEABLE
     return [self.variablesScope valueForVariableName:iTermVariableKeySessionIconName] ?: [self.variablesScope valueForVariableName:iTermVariableKeySessionName];
 }
 
-- (void)screenSetName:(NSString *)theName {
+- (void)screenSetIconName:(NSString *)theName {
+    // Put a zero-width space in between \ and ( to avoid interpolated strings coming from the server.
+    theName = [theName stringByReplacingOccurrencesOfString:@"\\(" withString:@"\\\u200B("];
     [self.variablesScope setValuesFromDictionary:@{ iTermVariableKeySessionAutoNameFormat: theName ?: [NSNull null],
                                                     iTermVariableKeySessionIconName: theName ?: [NSNull null] }];
 }
@@ -8988,6 +8987,13 @@ ITERM_WEAKLY_REFERENCEABLE
 
 - (void)screenSetBadgeFormat:(NSString *)base64Format {
     NSString *theFormat = [base64Format stringByBase64DecodingStringWithEncoding:self.encoding];
+    iTermParsedExpression *parsedExpression = [iTermExpressionParser parsedExpressionWithInterpolatedString:theFormat scope:self.variablesScope];
+    if ([parsedExpression containsAnyFunctionCall]) {
+        XLog(@"Rejected control-sequence provided badge format containing function calls: %@", theFormat);
+        [self showSimpleWarningAnnouncment:@"The application attempted to set the badge to a value that would invoke a function call. For security reasons, this is not allowed and the badge was not updated."
+                                identifier:@"UnsaveBadgeFormatRejected"];
+        return;
+    }
     if (theFormat) {
         [self setSessionSpecificProfileValues:@{ KEY_BADGE_FORMAT: theFormat }];
         _textview.badgeLabel = [self badgeLabel];
@@ -9168,6 +9174,16 @@ ITERM_WEAKLY_REFERENCEABLE
 
 - (iTermQuickLookController *)quickLookController {
     return _textview.quickLookController;
+}
+
+- (void)showSimpleWarningAnnouncment:(NSString *)message
+                          identifier:(NSString *)identifier {
+    iTermAnnouncementViewController *announcement =
+    [iTermAnnouncementViewController announcementWithTitle:message
+                                                     style:kiTermAnnouncementViewStyleWarning
+                                               withActions:@[ @"OK" ]
+                                                              completion:^(int selection) {}];
+     [self queueAnnouncement:announcement identifier:identifier];
 }
 
 - (void)offerToTurnOffMouseReportingOnHostChange {
