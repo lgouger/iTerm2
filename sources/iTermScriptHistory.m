@@ -206,6 +206,7 @@ NSString *const iTermScriptHistoryNumberOfEntriesDidChangeNotification = @"iTerm
 
 @implementation iTermScriptHistory {
     NSMutableArray<iTermScriptHistoryEntry *> *_entries;
+    NSMutableSet<NSNumber *> *_replPIDs;
 }
 
 + (instancetype)sharedInstance {
@@ -222,6 +223,7 @@ NSString *const iTermScriptHistoryNumberOfEntriesDidChangeNotification = @"iTerm
     if (self) {
         _entries = [NSMutableArray array];
         [_entries addObject:[iTermScriptHistoryEntry globalEntry]];
+        _replPIDs = [NSMutableSet set];
     }
     return self;
 }

@@ -17,6 +17,12 @@
 
 #import <ColorPicker/ColorPicker.h>
 
+@interface iTermPreferencesInnerTabContainerView : NSView
+@end
+
+@implementation iTermPreferencesInnerTabContainerView
+@end
+
 static NSString *const kPreferenceDidChangeFromOtherPanel = @"kPreferenceDidChangeFromOtherPanel";
 
 // key for userInfo dictionary of kPreferenceDidChangeFromOtherPanel notification having
@@ -628,8 +634,9 @@ NSString *const kPreferenceDidChangeFromOtherPanelKeyUserInfoKey = @"key";
 - (void)resizeWindowForView:(NSView *)theView tabView:(NSTabView *)tabView animated:(BOOL)animated {
     const CGFloat kTabViewMinWidth = self.minimumWidth;
     const CGFloat inset = NSWidth(tabView.bounds) - NSWidth(theView.superview.bounds);
+    const CGFloat bottomMargin = 36;
     CGSize tabViewSize = NSMakeSize(MAX(kTabViewMinWidth, theView.bounds.size.width) + inset,
-                                    theView.bounds.size.height + 50);
+                                    theView.bounds.size.height + bottomMargin);
     NSRect frame = [self windowFrameForTabViewSize:tabViewSize tabView:tabView];
     if (NSEqualRects(_desiredFrame, frame)) {
         return;
