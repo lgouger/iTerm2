@@ -7,6 +7,7 @@
 #import "ITAddressBookMgr.h"
 #import "iTerm.h"
 #import "iTermAPIHelper.h"
+#import "iTermActionsModel.h"
 #import "iTermAdvancedSettingsModel.h"
 #import "iTermAnnouncementViewController.h"
 #import "iTermApplication.h"
@@ -62,6 +63,7 @@
 #import "iTermSessionHotkeyController.h"
 #import "iTermSessionNameController.h"
 #import "iTermSessionTitleBuiltInFunction.h"
+#import "iTermSetFindStringNotification.h"
 #import "iTermShellHistoryController.h"
 #import "iTermShortcut.h"
 #import "iTermShortcutInputView.h"
@@ -72,6 +74,7 @@
 #import "iTermSwiftyStringGraph.h"
 #import "iTermSystemVersion.h"
 #import "iTermTextExtractor.h"
+#import "iTermTheme.h"
 #import "iTermThroughputEstimator.h"
 #import "iTermTmuxStatusBarMonitor.h"
 #import "iTermUpdateCadenceController.h"
@@ -712,6 +715,12 @@ static const NSUInteger kMaxHosts = 100;
                                                  selector:@selector(apiDidStop:)
                                                      name:iTermAPIHelperDidStopNotification
                                                    object:nil];
+
+        [iTermSetFindStringNotification subscribe:self
+                                            block:^(iTermSetFindStringNotification * _Nonnull notification) {
+                                                [weakSelf useStringForFind:notification.string];
+                                            }];
+
         [self.variablesScope setValue:[self.sessionId stringByReplacingOccurrencesOfString:@":" withString:@"."]
                      forVariableNamed:iTermVariableKeySessionTermID];
 
@@ -6457,6 +6466,10 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
                                }];
 }
 
+- (void)applyAction:(iTermAction *)action {
+    [self performKeyBindingAction:action.action parameter:action.parameter event:nil];
+}
+
 // This is limited to the actions that don't need any existing session
 + (BOOL)performKeyBindingAction:(int)keyBindingAction parameter:(NSString *)keyBindingText event:(NSEvent *)event {
     switch (keyBindingAction) {
@@ -7205,25 +7218,29 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
 // way SessionView and TextViewWrapper don't have to worry about whether a background image is
 // present.
 - (void)textViewDrawBackgroundImageInView:(NSView *)view
-                                 viewRect:(NSRect)rect
+                                 viewRect:(NSRect)dirtyRect
                    blendDefaultBackground:(BOOL)blendDefaultBackground {
     if (!_backgroundDrawingHelper) {
         _backgroundDrawingHelper = [[iTermBackgroundDrawingHelper alloc] init];
         _backgroundDrawingHelper.delegate = self;
     }
     if ([iTermPreferences boolForKey:kPreferenceKeyPerPaneBackgroundImage]) {
+        NSRect contentRect = self.view.contentRect;
         [_backgroundDrawingHelper drawBackgroundImageInView:view
                                                   container:self.view
-                                                   viewRect:rect
-                                                contentRect:self.view.contentRect
+                                                  dirtyRect:dirtyRect
+                                     visibleRectInContainer:NSMakeRect(0, 0, contentRect.size.width, contentRect.size.height)
                                      blendDefaultBackground:blendDefaultBackground
                                                        flip:NO];
     } else {
         NSView *container = [self.delegate sessionContainerView:self];
+        NSRect windowVisibleRect = [self.view insetRect:container.bounds
+                                                flipped:YES
+                                 includeBottomStatusBar:![iTermPreferences boolForKey:kPreferenceKeySeparateStatusBarsPerPane]];
         [_backgroundDrawingHelper drawBackgroundImageInView:view
                                                   container:container
-                                                   viewRect:NSIntersectionRect(rect, view.enclosingScrollView.documentVisibleRect)
-                                                contentRect:container.bounds
+                                                  dirtyRect:NSIntersectionRect(dirtyRect, view.enclosingScrollView.documentVisibleRect)
+                                     visibleRectInContainer:windowVisibleRect
                                      blendDefaultBackground:blendDefaultBackground
                                                        flip:YES];
     }
@@ -7234,20 +7251,30 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
         return CGRectMake(0, 0, 1, 1);
     }
     NSView *container = [self.delegate sessionContainerView:self];
-    const NSRect viewRect = [container convertRect:self.view.bounds fromView:self.view];
-    const NSRect containerBounds = container.bounds;
+    const NSRect sessionViewFrameInContainer = [container convertRect:self.view.bounds fromView:self.view];
+    NSRect viewRect = [self.view insetRect:sessionViewFrameInContainer
+                                   flipped:YES
+                    includeBottomStatusBar:YES];
+    NSRect containerBounds = [self.view insetRect:container.bounds
+                                          flipped:YES
+                           includeBottomStatusBar:![iTermPreferences boolForKey:kPreferenceKeySeparateStatusBarsPerPane]];
+    viewRect.origin.x -= containerBounds.origin.x;
+    viewRect.origin.y -= containerBounds.origin.y;
+
     return CGRectMake(viewRect.origin.x / containerBounds.size.width,
                       viewRect.origin.y / containerBounds.size.height,
                       viewRect.size.width / containerBounds.size.width,
                       viewRect.size.height / containerBounds.size.height);
 }
 
-- (CGSize)textViewContainerSize {
+- (CGRect)textViewContainerRect {
     if ([iTermPreferences boolForKey:kPreferenceKeyPerPaneBackgroundImage]) {
-        return self.view.scrollview.frame.size;
+        return self.view.scrollview.frame;
     }
     NSView *container = [self.delegate sessionContainerView:self];
-    return container.bounds.size;
+    return [self.view insetRect:container.bounds
+                        flipped:YES
+         includeBottomStatusBar:![iTermPreferences boolForKey:kPreferenceKeySeparateStatusBarsPerPane]];
 }
 
 - (NSImage *)textViewBackgroundImage {
@@ -9411,7 +9438,7 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
 
 - (void)screenCommandDidChangeWithRange:(VT100GridCoordRange)range {
     DLog(@"FinalTerm: command changed. New range is %@", VT100GridCoordRangeDescription(range));
-    _shellIntegrationEverUsed = YES;
+    [self didUseShellIntegration];
     BOOL hadCommand = _commandRange.start.x >= 0 && [self haveCommandInRange:_commandRange];
     _commandRange = range;
     BOOL haveCommand = _commandRange.start.x >= 0 && [self haveCommandInRange:_commandRange];
@@ -9444,7 +9471,7 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
 }
 
 - (void)screenCommandDidEndWithRange:(VT100GridCoordRange)range {
-    _shellIntegrationEverUsed = YES;
+    [self didUseShellIntegration];
     NSString *command = [self commandInRange:range];
     DLog(@"FinalTerm: Command <<%@>> ended with range %@",
          command, VT100GridCoordRangeDescription(range));
@@ -9734,6 +9761,10 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
     } else {
         return [n boolValue];
     }
+}
+
+- (void)didUseShellIntegration {
+    _shellIntegrationEverUsed = YES;
 }
 
 - (NSString *)shellIntegrationUpgradeUserDefaultsKeyForHost:(VT100RemoteHost *)host {
@@ -10202,7 +10233,13 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
 }
 
 - (BOOL)sessionViewTerminalIsFirstResponder {
-    return _textview.window.firstResponder == _textview;
+    return (_textview.window.firstResponder == _textview &&
+            [NSApp isActive] &&
+            _textview.window.isKeyWindow);
+}
+
+- (BOOL)sessionViewShouldDimOnlyText {
+    return [iTermPreferences boolForKey:kPreferenceKeyDimOnlyText];
 }
 
 - (NSColor *)sessionViewTabColor {
@@ -10889,16 +10926,10 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
 #pragma mark - iTermStatusBarViewControllerDelegate
 
 - (NSColor *)textColorForStatusBar {
-    if (self.view.window.ptyWindow.it_terminalWindowUseMinimalStyle) {
-        NSColor *color = [self.view.window.ptyWindow it_terminalWindowDecorationTextColorForBackgroundColor:nil];
-        return [_colorMap colorByDimmingTextColor:[color colorUsingColorSpace:[NSColorSpace sRGBColorSpace]]];
-    } else if (@available(macOS 10.14, *)) {
-        return [NSColor labelColor];
-    } else if ([_view.effectiveAppearance.name isEqualToString:NSAppearanceNameVibrantDark]) {
-        return [NSColor colorWithWhite:0.75 alpha:1];
-    } else {
-        return [NSColor blackColor];
-    }
+    return [[iTermTheme sharedInstance] statusBarTextColorForEffectiveAppearance:_view.effectiveAppearance
+                                                                        colorMap:_colorMap
+                                                                        tabStyle:[self.view.window.ptyWindow it_tabStyle]
+                                                                   mainAndActive:(self.view.window.isMainWindow && NSApp.isActive)];
 }
 
 - (NSColor *)statusBarDefaultTextColor {
@@ -10918,6 +10949,7 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
 
 - (void)updateStatusBarStyle {
     [_statusBarViewController updateColors];
+    [self invalidateStatusBar];
 }
 
 - (NSFont *)statusBarTerminalFont {
@@ -10964,6 +10996,10 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
                                 forKey:KEY_STATUS_BAR_LAYOUT
                              inProfile:self.originalProfile
                                  model:model];
+}
+
+- (void)statusBarPerformAction:(iTermAction *)action {
+    [self applyAction:action];
 }
 
 #pragma mark - iTermMetaFrustrationDetectorDelegate

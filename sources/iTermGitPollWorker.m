@@ -178,6 +178,7 @@ typedef void (^iTermGitCallback)(iTermGitState *);
 
     DLog(@"Parsed dict:\n%@", dict);
     iTermGitState *state = [[iTermGitState alloc] init];
+    state.xcode = dict[@"XCODE"];
     state.dirty = [dict[@"DIRTY"] isEqualToString:@"dirty"];
     state.pushArrow = dict[@"PUSH"];
     state.pullArrow = dict[@"PULL"];
@@ -206,6 +207,7 @@ typedef void (^iTermGitCallback)(iTermGitState *);
     [_readData setLength:0];
     _commandRunner = nil;
     [_queue removeAllObjects];
+    [_outstanding removeAllObjects];
 }
 
 - (void)scriptDied:(NSInteger)generation {

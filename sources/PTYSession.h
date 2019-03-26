@@ -37,6 +37,7 @@ extern NSString *const PTYSessionRevivedNotification;
 
 @class CapturedOutput;
 @class FakeWindow;
+@class iTermAction;
 @class iTermAnnouncementViewController;
 @class iTermEchoProbe;
 @class iTermStatusBarViewController;
@@ -792,6 +793,8 @@ typedef enum {
 - (void)profileDidChangeToProfileWithName:(NSString *)name;
 - (void)updateStatusBarStyle;
 - (BOOL)checkForCyclesInSwiftyStrings;
+- (void)applyAction:(iTermAction *)action;
+- (void)didUseShellIntegration;
 
 #pragma mark - API
 

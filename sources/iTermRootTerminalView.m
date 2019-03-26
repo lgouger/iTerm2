@@ -209,6 +209,19 @@ typedef struct {
     }
 }
 
+- (void)mouseUp:(NSEvent *)event {
+    if (!_windowTitleLabel.hidden && event.clickCount == 2) {
+        const NSPoint point = [self convertPoint:event.locationInWindow fromView:nil];
+        const CGFloat titleBarHeight = _tabBarControl.height;
+        NSRect rect = NSMakeRect(0, self.bounds.size.height - titleBarHeight, self.bounds.size.width, titleBarHeight);
+        if (NSPointInRect(point, rect)) {
+            [self.window performZoom:nil];
+            return;
+        }
+    }
+    [super mouseUp:event];
+}
+
 - (BOOL)mouseDownCanMoveWindow {
     return YES;
 }
@@ -319,6 +332,9 @@ typedef struct {
     if (!needCustomButtons) {
         [_standardWindowButtonsView removeFromSuperview];
         _standardWindowButtonsView = nil;
+        for (int i = 0; i < self.numberOfWindowButtons; i++) {
+            [[self.window standardWindowButton:self.windowButtonTypes[i]] setHidden:NO];
+        }
         return;
     }
     if (_standardWindowButtonsView) {
@@ -366,8 +382,9 @@ typedef struct {
     if (@available(macOS 10.14, *)) {
         if ([_delegate rootTerminalViewShouldDrawWindowTitleInPlaceOfTabBar]) {
             // Draw background color for fake title bar.
-            [[_delegate rootTerminalViewTabBarBackgroundColor] set];
+            NSColor *const backgroundColor = [_delegate rootTerminalViewTabBarBackgroundColor];
             const CGFloat height = [_delegate rootTerminalViewHeightOfTabBar:self];
+            [backgroundColor set];
             NSRectFill(NSMakeRect(0,
                                   self.frame.size.height - height,
                                   self.frame.size.width,
@@ -737,7 +754,9 @@ typedef struct {
 }
 
 - (BOOL)shouldLeaveEmptyAreaAtTop {
-    return _tabBarControlOnLoan && [self tabBarShouldBeVisibleWithAdditionalTabs:0];
+    return (_tabBarControlOnLoan &&
+            [self tabBarShouldBeVisibleWithAdditionalTabs:0] &&
+            [self.delegate rootTerminalViewShouldLeaveEmptyAreaAtTop]);
 }
 
 - (void)layoutSubviewsWithHiddenTabBarForWindow:(NSWindow *)thisWindow {
@@ -1209,14 +1228,29 @@ typedef struct {
 }
 
 - (BOOL)iTermTabBarCanDragWindow {
-    return[ _delegate iTermTabBarCanDragWindow];
+    return [_delegate iTermTabBarCanDragWindow];
 }
 
 - (BOOL)iTermTabBarShouldHideBacking {
-    if (@available(macOS 10.14, *)) {
-        const iTermPreferencesTabStyle preferredStyle = [iTermPreferences intForKey:kPreferenceKeyTabStyle];
-        return (preferredStyle == TAB_STYLE_MINIMAL);
+    if (@available(macOS 10.14, *)) {} else {
+        return YES;
     }
+    const iTermPreferencesTabStyle preferredStyle = [iTermPreferences intForKey:kPreferenceKeyTabStyle];
+    if (preferredStyle != TAB_STYLE_MINIMAL) {
+        return YES;
+    }
+    switch ([iTermPreferences intForKey:kPreferenceKeyTabPosition]) {
+        case PSMTab_BottomTab:
+        case PSMTab_LeftTab:
+            return YES;
+
+        case PSMTab_TopTab:
+            break;
+    }
+    if ([_delegate anyFullScreen] || [_delegate enteringLionFullscreen]) {
+        return NO;
+    }
+
     return YES;
 }
 

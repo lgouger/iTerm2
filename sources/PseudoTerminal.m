@@ -56,6 +56,7 @@
 #import "iTermSwiftyStringGraph.h"
 #import "iTermSystemVersion.h"
 #import "iTermTabBarControlView.h"
+#import "iTermTheme.h"
 #import "iTermToolbeltView.h"
 #import "iTermTouchBarButton.h"
 #import "iTermVariableReference.h"
@@ -383,7 +384,7 @@ static NSRect iTermRectCenteredVerticallyWithinRect(NSRect frameToCenter, NSRect
     iTermPasswordManagerWindowController *_passwordManagerWindowController;
 
     // Keeps the touch bar from updating on every keypress which is distracting.
-    iTermRateLimitedUpdate *_touchBarRateLimitedUpdate;
+    iTermRateLimitedIdleUpdate *_touchBarRateLimitedUpdate;
     NSString *_previousTouchBarWord;
 
     BOOL _windowWasJustCreated;
@@ -1500,38 +1501,15 @@ ITERM_WEAKLY_REFERENCEABLE
     }
 }
 
+- (id<PSMTabStyle>)terminalWindowTabStyle {
+    return _contentView.tabBarControl.style;
+}
+
 - (NSColor *)terminalWindowDecorationTextColorForBackgroundColor:(NSColor *)backgroundColor {
-    iTermPreferencesTabStyle preferredStyle = [iTermPreferences intForKey:kPreferenceKeyTabStyle];
-    if (self.shouldUseMinimalStyle) {
-        PSMMinimalTabStyle *style = [PSMMinimalTabStyle castFrom:_contentView.tabBarControl.style];
-        DLog(@"> begin Computing decoration color");
-        return [style textColorDefaultSelected:YES backgroundColor:backgroundColor windowIsMainAndAppIsActive:(self.window.isMainWindow && NSApp.isActive)];
-        DLog(@"< end Computing decoration color");
-    } else {
-        CGFloat whiteLevel;
-        switch ([self.window.effectiveAppearance it_tabStyle:preferredStyle]) {
-            case TAB_STYLE_AUTOMATIC:
-            case TAB_STYLE_MINIMAL:
-                assert(NO);
-
-            case TAB_STYLE_LIGHT:
-                whiteLevel = 0.2;
-                break;
-
-            case TAB_STYLE_LIGHT_HIGH_CONTRAST:
-                whiteLevel = 0;
-                break;
-
-            case TAB_STYLE_DARK:
-                whiteLevel = 0.8;
-                break;
-
-            case TAB_STYLE_DARK_HIGH_CONTRAST:
-                whiteLevel = 1;
-                break;
-        }
-        return [NSColor colorWithCalibratedWhite:whiteLevel alpha:1];
-    }
+    return [[iTermTheme sharedInstance] terminalWindowDecorationTextColorForBackgroundColor:backgroundColor
+                                                                        effectiveAppearance:self.window.effectiveAppearance
+                                                                                   tabStyle:_contentView.tabBarControl.style
+                                                                              mainAndActive:(self.window.isMainWindow && NSApp.isActive)];
 }
 
 - (BOOL)shouldUseMinimalStyle {
@@ -3115,6 +3093,7 @@ ITERM_WEAKLY_REFERENCEABLE
     // update the cursor
     [[self currentSession] refresh];
     [[[self currentSession] textview] setNeedsDisplay:YES];
+    [_contentView setNeedsDisplay:YES];
     [self _loadFindStringFromSharedPasteboard];
 
     // Start the timers back up
@@ -3526,6 +3505,7 @@ ITERM_WEAKLY_REFERENCEABLE
     // update the cursor
     [[[self currentSession] textview] refresh];
     [[[self currentSession] textview] setNeedsDisplay:YES];
+    [_contentView setNeedsDisplay:YES];
 
     // Note that if you have multiple displays you can see a lion fullscreen window when it's
     // not key.
@@ -4760,6 +4740,7 @@ ITERM_WEAKLY_REFERENCEABLE
         _didEnterLionFullscreen = nil;
     }
     [self updateTouchBarIfNeeded:NO];
+
     [self updateUseMetalInAllTabs];
     [self updateWindowShadow:self.ptyWindow];
     [self didFinishFullScreenTransitionSuccessfully:YES];
@@ -6155,32 +6136,36 @@ ITERM_WEAKLY_REFERENCEABLE
     return _contentView.tabView;
 }
 
-- (id)tabView:(PSMTabBarControl *)tabView valueOfOption:(PSMTabBarControlOptionKey)option {
-    typedef id (^iTermTabSettingsProvider)(void);
-    static NSDictionary<PSMTabBarControlOptionKey, iTermTabSettingsProvider> *providers;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        providers = @{
-                      PSMTabBarControlOptionColoredSelectedTabOutlineStrength: ^id() {
-                          return @([iTermAdvancedSettingsModel coloredSelectedTabOutlineStrength]);
-                      },
-                      PSMTabBarControlOptionMinimalStyleBackgroundColorDifference: ^id() {
-                          return @([iTermAdvancedSettingsModel minimalTabStyleBackgroundColorDifference]);
-                      },
-                      PSMTabBarControlOptionColoredUnselectedTabTextProminence: ^id() {
-                          return @([iTermAdvancedSettingsModel coloredUnselectedTabTextProminence]);
-                      },
-                      PSMTabBarControlOptionColoredMinimalOutlineStrength: ^id() {
-                          return @([iTermAdvancedSettingsModel minimalTabStyleOutlineStrength]);
-                      }, };
-        [providers retain];
-    });
-    iTermTabSettingsProvider provider = providers[option];
-    if (provider) {
-        return provider();
-    } else {
-        return nil;
+static CGFloat iTermDimmingAmount(PSMTabBarControl *tabView) {
+    if (tabView.window.isKeyWindow) {
+        return 0;
     }
+    if (![iTermPreferences boolForKey:kPreferenceKeyDimBackgroundWindows]) {
+        return 0;
+    }
+    if ([iTermPreferences boolForKey:kPreferenceKeyDimOnlyText]) {
+        return 0;
+    }
+    CGFloat value = [iTermPreferences floatForKey:kPreferenceKeyDimmingAmount];
+    CGFloat clamped = MAX(MIN(0.9, value), 0);
+    return clamped;
+}
+
+- (id)tabView:(PSMTabBarControl *)tabView valueOfOption:(PSMTabBarControlOptionKey)option {
+    if ([option isEqualToString:PSMTabBarControlOptionColoredSelectedTabOutlineStrength]) {
+        return @([iTermAdvancedSettingsModel coloredSelectedTabOutlineStrength]);
+    } else if ([option isEqualToString:PSMTabBarControlOptionMinimalStyleBackgroundColorDifference]) {
+        return @([iTermAdvancedSettingsModel minimalTabStyleBackgroundColorDifference]);
+    } else if ([option isEqualToString:PSMTabBarControlOptionColoredUnselectedTabTextProminence]) {
+        return @([iTermAdvancedSettingsModel coloredUnselectedTabTextProminence]);
+    } else if ([option isEqualToString:PSMTabBarControlOptionColoredMinimalOutlineStrength]) {
+        return @([iTermAdvancedSettingsModel minimalTabStyleOutlineStrength]);
+    } else if ([option isEqualToString:PSMTabBarControlOptionDimmingAmount]) {
+        return @(iTermDimmingAmount(tabView));
+    } else if ([option isEqualToString:PSMTabBarControlOptionMinimalStyleTreatLeftInsetAsPartOfFirstTab]) {
+        return @([iTermAdvancedSettingsModel minimalTabStyleTreatLeftInsetAsPartOfFirstTab]);
+    }
+    return nil;
 }
 
 - (BOOL)isInitialized
@@ -7768,10 +7753,8 @@ ITERM_WEAKLY_REFERENCEABLE
 
 - (NSColor *)rootTerminalViewTabBarBackgroundColor {
     // This is for the fake title bar and for the status bar background color.
-    if (self.currentSession.tabColor) {
-        return self.currentSession.tabColor;
-    }
-    return [_contentView.tabBarControl.style backgroundColorSelected:YES highlightAmount:0];
+    return [[iTermTheme sharedInstance] tabBarBackgroundColorForTabColor:self.currentSession.tabColor
+                                                                   style:_contentView.tabBarControl.style];
 }
 
 - (NSColor *)windowDecorationColor {
@@ -7871,48 +7854,31 @@ ITERM_WEAKLY_REFERENCEABLE
     return self.currentSession.statusBarViewController;
 }
 
-- (void)updateTabBarStyle {
-    id<PSMTabStyle> style;
-    iTermPreferencesTabStyle preferredStyle = [iTermPreferences intForKey:kPreferenceKeyTabStyle];
-    if (preferredStyle == TAB_STYLE_MINIMAL) {
-        style = [[[PSMMinimalTabStyle alloc] init] autorelease];
-        [(PSMMinimalTabStyle *)style setDelegate:self];
-    } else {
-        iTermPreferencesTabStyle tabStyle = preferredStyle;
-        switch (preferredStyle) {
-            case TAB_STYLE_AUTOMATIC:
-            case TAB_STYLE_MINIMAL:
-                // 10.14 path
-                tabStyle = [self.window.effectiveAppearance it_tabStyle:preferredStyle];
+- (BOOL)rootTerminalViewWindowHasFullSizeContentView {
+    return [PseudoTerminal windowTypeHasFullSizeContentView:windowType_];
+}
 
-            case TAB_STYLE_LIGHT:
-            case TAB_STYLE_DARK:
-            case TAB_STYLE_LIGHT_HIGH_CONTRAST:
-            case TAB_STYLE_DARK_HIGH_CONTRAST:
-                // Use the stated style. it_tabStyle assumes you want a style based on the current
-                // appearance but this is the one case where that is not true.
-                // If there is only one tab and it has a dark tab color the style will be adjusted
-                // later in the call to updateTabColors.
-                break;
-        }
-        switch (tabStyle) {
-            case TAB_STYLE_AUTOMATIC:
-            case TAB_STYLE_MINIMAL:
-                assert(NO);
-            case TAB_STYLE_LIGHT:
-                style = [[[PSMYosemiteTabStyle alloc] init] autorelease];
-                break;
-            case TAB_STYLE_DARK:
-                style = [[[PSMDarkTabStyle alloc] init] autorelease];
-                break;
-            case TAB_STYLE_LIGHT_HIGH_CONTRAST:
-                style = [[[PSMLightHighContrastTabStyle alloc] init] autorelease];
-                break;
-            case TAB_STYLE_DARK_HIGH_CONTRAST:
-                style = [[[PSMDarkHighContrastTabStyle alloc] init] autorelease];
-                break;
-        }
+- (BOOL)rootTerminalViewShouldLeaveEmptyAreaAtTop {
+    if ([PseudoTerminal windowTypeHasFullSizeContentView:windowType_]) {
+        return YES;
     }
+    if (!self.anyFullScreen) {
+        return NO;
+    }
+    BOOL topTabBar = ([iTermPreferences intForKey:kPreferenceKeyTabPosition] == PSMTab_TopTab);
+    if (!topTabBar) {
+        return NO;
+    }
+    if ([PseudoTerminal windowTypeHasFullSizeContentView:savedWindowType_]) {
+        // The tab bar is not a titlebar accessory
+        return YES;
+    }
+    return NO;
+}
+
+- (void)updateTabBarStyle {
+    id<PSMTabStyle> style = [[iTermTheme sharedInstance] tabStyleWithDelegate:self
+                                                          effectiveAppearance:self.window.effectiveAppearance];
     [_contentView.tabBarControl setStyle:style];
     [self updateTabColors];
     if (@available(macOS 10.14, *)) {
@@ -8696,7 +8662,6 @@ ITERM_WEAKLY_REFERENCEABLE
     } else if ([item action] == @selector(showFindPanel:) ||
                [item action] == @selector(findPrevious:) ||
                [item action] == @selector(findNext:) ||
-               [item action] == @selector(findWithSelection:) ||
                [item action] == @selector(jumpToSelection:) ||
                [item action] == @selector(findUrls:)) {
         result = ([self currentSession] != nil);
@@ -9348,18 +9313,6 @@ ITERM_WEAKLY_REFERENCEABLE
         [[self currentSession] searchNext];
     }
 }
-
-- (IBAction)findWithSelection:(id)sender {
-    NSString* selection = [[[self currentSession] textview] selectedText];
-    if (selection) {
-        for (PseudoTerminal* pty in [[iTermController sharedInstance] terminals]) {
-            for (PTYSession* session in [pty allSessions]) {
-                [session useStringForFind:selection];
-            }
-        }
-    }
-}
-
 - (IBAction)jumpToSelection:(id)sender
 {
     PTYTextView *textView = [[self currentSession] textview];
@@ -9480,6 +9433,7 @@ ITERM_WEAKLY_REFERENCEABLE
     iTermPreferencesTabStyle preferredStyle = [iTermPreferences intForKey:kPreferenceKeyTabStyle];
     if (preferredStyle == TAB_STYLE_MINIMAL) {
         [self.contentView setNeedsDisplay:YES];
+        [_contentView.tabBarControl backgroundColorWillChange];
     }
     [self updateWindowShadow:self.ptyWindow];
 }
@@ -9519,7 +9473,7 @@ ITERM_WEAKLY_REFERENCEABLE
     [_previousTouchBarWord release];
     _previousTouchBarWord = [word copy];
     if (_touchBarRateLimitedUpdate == nil) {
-        _touchBarRateLimitedUpdate = [[iTermRateLimitedUpdate alloc] init];
+        _touchBarRateLimitedUpdate = [[iTermRateLimitedIdleUpdate alloc] init];
         _touchBarRateLimitedUpdate.minimumInterval = 0.5;
     }
     [_touchBarRateLimitedUpdate performRateLimitedBlock:^{
@@ -9578,6 +9532,10 @@ ITERM_WEAKLY_REFERENCEABLE
 
 - (BOOL)toolbeltCurrentSessionHasGuid:(NSString *)guid {
     return [self.currentSession.guid isEqualToString:guid];
+}
+
+- (void)toolbeltApplyActionToCurrentSession:(iTermAction *)action {
+    [self.currentSession applyAction:action];
 }
 
 - (NSArray<iTermCommandHistoryCommandUseMO *> *)toolbeltCommandUsesForCurrentSession {

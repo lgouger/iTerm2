@@ -73,14 +73,16 @@ NS_ASSUME_NONNULL_BEGIN
     [_timer invalidate];
 }
 
-- (void)clickRecognized:(id)sender {
-    [_component statusBarComponentDidClickWithView:_view];
+- (CGFloat)minimumWidthIncludingIcon {
+    if (self.component.statusBarComponentIcon) {
+        return self.component.statusBarComponentMinimumWidth + iTermStatusBarViewControllerIconWidth + iTermStatusBarViewControllerMargin;
+    } else {
+        return self.component.statusBarComponentMinimumWidth + iTermStatusBarViewControllerMargin;
+    }
 }
 
-- (void)mouseDown:(NSEvent *)event {
-    if ([_component statusBarComponentHandlesClicks]) {
-        [_component statusBarComponentMouseDownWithView:_view];
-    }
+- (void)clickRecognized:(id)sender {
+    [_component statusBarComponentDidClickWithView:_view];
 }
 
 - (CGFloat)minX {

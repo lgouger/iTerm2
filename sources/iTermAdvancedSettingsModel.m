@@ -197,6 +197,7 @@ DEFINE_FLOAT(minimalTabStyleBackgroundColorDifference, 0.05, SECTION_TABS @"In m
 DEFINE_FLOAT(minimalTabStyleOutlineStrength, 0.2, SECTION_TABS @"In minimal tab style, how prominent should the tab outline be?\nTakes a value in 0 to 1, where 0 is invisible and 1 is very prominent");
 DEFINE_FLOAT(minimalSplitPaneDividerProminence, 0.15, SECTION_TABS @"In minimal tab style, how prominent should split pane dividers be?\nTakes a value in 0 to 1, where 0 is invisible and 1 is very prominent");
 DEFINE_FLOAT(coloredUnselectedTabTextProminence, 0.5, SECTION_TABS @"How prominent should the text in a non-selected tab be when there are colored tabs in a window?\nTakes a value in 0 to 1, the alpha value.");
+DEFINE_BOOL(minimalTabStyleTreatLeftInsetAsPartOfFirstTab, YES, SECTION_TABS @"In the minimal tab style, should the area left of the tab bar be treated as part of the first tab?");
 DEFINE_FLOAT(compactMinimalTabBarHeight, 40, SECTION_TABS @"Tab bar height (points) for compact windows with minimal theme.");
 DEFINE_FLOAT(defaultTabBarHeight, 24, SECTION_TABS @"Default tab bar height")
 
@@ -319,6 +320,7 @@ DEFINE_BOOL(alertsIndicateShortcuts, NO, SECTION_GENERAL @"Buttons in modal aler
 DEFINE_BOOL(showHintsInSplitPaneMenuItems, NO, SECTION_GENERAL @"Show hints in split pane menu items to indicate horizontal vs vertical semantics.\nYou must restart iTerm2 after changing this setting for it to take effect.");
 DEFINE_BOOL(useOldStyleDropDownViews, NO, SECTION_GENERAL @"Use old-style find and paste progress indicator views.\nThis change will only affect new windows.");
 DEFINE_BOOL(loadFromFindPasteboard, YES, SECTION_GENERAL @"Synchronize search queries across windows and applications.\nNormally, when you enter a search query in a Find field all find fields in all applications get updated to hold the same value. This is utter nonsense, and can be disabled by setting this preference to No.");
+DEFINE_STRING(dynamicProfilesPath, @"", SECTION_GENERAL @"Path to folder with dynamic profiles.\nWhen empty, ~/Library/Application Support/iTerm2/DynamicProfiles will be used. You must restart iTerm2 after modifying this setting.");
 
 #pragma mark - Drawing
 

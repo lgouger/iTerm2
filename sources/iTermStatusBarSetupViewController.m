@@ -9,6 +9,7 @@
 
 #import "iTermAPIHelper.h"
 #import "iTermFontPanel.h"
+#import "iTermStatusBarActionComponent.h"
 #import "iTermStatusBarComponent.h"
 #import "iTermStatusBarCPUUtilizationComponent.h"
 #import "iTermStatusBarClockComponent.h"
@@ -102,6 +103,7 @@ NS_ASSUME_NONNULL_BEGIN
                                  [iTermStatusBarNetworkUtilizationComponent class],
 
                                  [iTermStatusBarClockComponent class],
+                                 [iTermStatusBarActionComponent class],
 
                                  [iTermStatusBarGitComponent class],
                                  [iTermStatusBarHostnameComponent class],
@@ -128,6 +130,9 @@ NS_ASSUME_NONNULL_BEGIN
 }
 
 - (void)awakeFromNib {
+    _destinationViewController.defaultBackgroundColor = self.defaultBackgroundColor;
+    _destinationViewController.defaultTextColor = self.defaultTextColor;
+
     [self loadElements];
     for (ITMRPCRegistrationRequest *request in iTermAPIHelper.statusBarComponentProviderRegistrationRequests) {
         iTermStatusBarSetupElement *element = [self newElementForProviderRegistrationRequest:request];
