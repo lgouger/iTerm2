@@ -6,7 +6,7 @@
 //
 
 #import "PSMMinimalTabStyle.h"
-
+#import "PSMOverflowPopUpButton.h"
 
 @implementation NSColor(PSMMinimalTabStyle)
 
@@ -169,11 +169,14 @@
         NSRect containingFrame = cell.frame;
         const BOOL isHorizontal = bar.orientation == PSMTabBarHorizontalOrientation;
         if (isHorizontal) {
-            if (bar.cells.lastObject == cell) {
+            if (bar.cells.lastObject == cell && bar.stretchCellsToFit) {
                 containingFrame = NSMakeRect(NSMinX(cell.frame),
                                              0,
                                              bar.frame.size.width - NSMinX(cell.frame),
                                              bar.height);
+            }
+            if (bar.cells.firstObject == cell && self.treatLeftInsetAsPartOfFirstTab) {
+                containingFrame = NSMakeRect(0, 0, NSMaxX(containingFrame), NSHeight(containingFrame));
             }
             containingFrame.origin.x += 0.5;
             containingFrame.size.width -= 0.5;
@@ -276,7 +279,7 @@
         return;
     }
 
-    [super drawBackgroundInRect:rect color:backgroundColor horizontal:horizontal];
+    [super drawBackgroundInRect:rect color:[self nonSelectedTabColor] horizontal:horizontal];
 
     [self drawStartInset];
     [self drawEndInset];
@@ -313,9 +316,9 @@
 - (void)drawEndInset {
     NSColor *color;
     PSMTabBarControl *bar = self.tabBar;
-    const BOOL lastOfManyIsSelected = (self.lastTabIsSelected && !self.firstTabIsSelected);
-    const BOOL horizontal = (bar.orientation == PSMTabBarHorizontalOrientation);
-    if ((horizontal && self.lastTabIsSelected) || (!horizontal && lastOfManyIsSelected)) {
+    PSMTabBarCell *cell = [self selectedCellInTabBarControl:bar];
+    if (cell == nil || cell.isInOverflowMenu) {
+        // Must be one of the overflow tabs
         color = [self selectedTabColor];
     } else {
         color = [self nonSelectedTabColor];
@@ -373,6 +376,14 @@
                           self.tabBar.frame.size.width - NSMaxX(cell.frame),
                           cell.frame.size.height);
     } else {
+        // Vertical tab bar
+        if (!self.tabBar.overflowPopUpButton.isHidden) {
+            // Popup button visible, so end inset equals its frame
+            return NSMakeRect(0,
+                              NSHeight(self.tabBar.frame) - NSHeight(cell.frame),
+                              NSWidth(cell.frame),
+                              NSHeight(cell.frame));
+        }
         return NSMakeRect(0,
                           NSMaxY(cell.frame),
                           NSWidth(cell.frame),
@@ -532,6 +543,9 @@
 #pragma mark Draw outline around top tab bar
 
 - (void)drawOutlineAroundTopTabBarWithOneTab:(PSMTabBarControl *)bar {
+    if (!self.treatLeftInsetAsPartOfFirstTab) {
+        [self drawOutlineBeforeSelectedTabInTopTabBar:bar];
+    }
 }
 
 - (void)drawOutlineAroundTopTabBarWithFirstTabSelected:(PSMTabBarControl *)bar {
@@ -598,10 +612,16 @@
 #pragma mark Draw outline around vertical tab bar
 
 - (void)drawOutlineAroundVerticalTabBarWithOneTab:(PSMTabBarControl *)bar {
+    if (!self.treatLeftInsetAsPartOfFirstTab) {
+        [self drawOutlineAboveSelectedTabInVerticalTabBar:bar];
+    }
     [self drawOutlineAroundVerticalTabBarWithFirstTabSelected:bar];
 }
 
 - (void)drawOutlineAroundVerticalTabBarWithFirstTabSelected:(PSMTabBarControl *)bar {
+    if (!self.treatLeftInsetAsPartOfFirstTab) {
+        [self drawOutlineAboveSelectedTabInVerticalTabBar:bar];
+    }
     [self drawOutlineUnderSelectedTabInVerticalTabBar:bar];
 }
 

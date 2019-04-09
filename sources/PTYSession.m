@@ -31,6 +31,7 @@
 #import "iTermFindDriver.h"
 #import "iTermGraphicSource.h"
 #import "iTermNotificationController.h"
+#import "iTermHapticActuator.h"
 #import "iTermHistogram.h"
 #import "iTermHotKeyController.h"
 #import "iTermInitialDirectory.h"
@@ -39,6 +40,7 @@
 #import "iTermScriptConsole.h"
 #import "iTermScriptHistory.h"
 #import "iTermStandardKeyMapper.h"
+#import "iTermSoundPlayer.h"
 #import "iTermRawKeyMapper.h"
 #import "iTermTermkeyKeyMapper.h"
 #import "iTermLocalHostNameGuesser.h"
@@ -507,6 +509,8 @@ static const NSUInteger kMaxHosts = 100;
     BOOL _useLibTickit;
     NSString *_badgeFontName;
     iTermVariableScope *_variablesScope;
+    
+    BOOL _showingVisualIndicatorForEsc;
 }
 
 + (NSMapTable<NSString *, PTYSession *> *)sessionMap {
@@ -1741,45 +1745,50 @@ ITERM_WEAKLY_REFERENCEABLE
         return @[];
     }
 
-    NSArray<iTermProcessInfo *> *startingInfos;
+    NSInteger levelsToSkip = 0;
     if ([info.name isEqualToString:@"login"]) {
-        startingInfos = @[info];
-    } else {
-        startingInfos = info.children ?: @[];
+        levelsToSkip++;
     }
 
-    NSArray<iTermProcessInfo *> *allInfos = [startingInfos flatMapWithBlock:^id(iTermProcessInfo *info) {
-        return info.flattenedTree;
-    }];
+    NSArray<iTermProcessInfo *> *allInfos = [info descendantsSkippingLevels:levelsToSkip];
     return [allInfos mapWithBlock:^id(iTermProcessInfo *info) {
         return info.name;
     }];
 }
 
 - (iTermPromptOnCloseReason *)promptOnCloseReason {
+    DLog(@"entered");
     if (_exited) {
         return [iTermPromptOnCloseReason noReason];
     }
     switch ([[_profile objectForKey:KEY_PROMPT_CLOSE] intValue]) {
         case PROMPT_ALWAYS:
+            DLog(@"prompt always");
             return [iTermPromptOnCloseReason profileAlwaysPrompts:_profile];
 
         case PROMPT_NEVER:
+            DLog(@"prompt never");
             return [iTermPromptOnCloseReason noReason];
 
         case PROMPT_EX_JOBS: {
+            DLog(@"Prompt ex jobs");
             if (self.isTmuxClient) {
+                DLog(@"is tmux client");
                 return [iTermPromptOnCloseReason tmuxClientsAlwaysPromptBecauseJobsAreNotExposed];
             }
             NSMutableArray<NSString *> *blockingJobs = [NSMutableArray array];
             NSArray *jobsThatDontRequirePrompting = [_profile objectForKey:KEY_JOBS];
+            DLog(@"jobs that don't require prompting: %@", jobsThatDontRequirePrompting);
             for (NSString *childName in [self childJobNames]) {
+                DLog(@"Check child %@", childName);
                 if ([jobsThatDontRequirePrompting indexOfObject:childName] == NSNotFound) {
+                    DLog(@"    not on the ignore list");
                     // This job is not in the ignore list.
                     [blockingJobs addObject:childName];
                 }
             }
             if (blockingJobs.count > 0) {
+                DLog(@"Blocked by jobs: %@", blockingJobs);
                 return [iTermPromptOnCloseReason profile:_profile blockedByJobs:blockingJobs];
             } else {
                 // All jobs were in the ignore list.
@@ -1817,11 +1826,6 @@ ITERM_WEAKLY_REFERENCEABLE
 
 - (void)didMoveSession {
     [self.variablesScope setValue:self.sessionId forVariableNamed:iTermVariableKeySessionTermID];
-}
-
-- (void)didEvaluateAutoName:(NSString *)evaluated {
-    // This should be the only place that autoName is assigned to.
-    [self.variablesScope setValue:evaluated forVariableNamed:iTermVariableKeySessionAutoName];
 }
 
 - (void)triggerDidChangeNameTo:(NSString *)newName {
@@ -6893,9 +6897,89 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
         }
 }
 
+- (BOOL)eventNeedsMitigation:(NSEvent *)event {
+    if (event.keyCode != kVK_Escape) {
+        return NO;
+    }
+    // This isn't quite right because you might be using an external keyboard.
+    // Looks like you have to use an event tap to detect touches on the bar,
+    // which requires user consent.
+    if (!IsTouchBarAvailable()) {
+        return NO;
+    }
+
+    return YES;
+}
+
+- (void)actuateHapticFeedbackForEvent:(NSEvent *)event {
+    if (![iTermPreferences boolForKey:kPreferenceKeyEnableHapticFeedbackForEsc]) {
+        return;
+    }
+    if (event.type == NSEventTypeKeyDown) {
+        [[iTermHapticActuator sharedActuator] actuateTouchDownFeedback];
+        return;
+    }
+    if (event.type == NSEventTypeKeyUp && event.keyCode == kVK_Escape) {
+        [[iTermHapticActuator sharedActuator] actuateTouchUpFeedback];
+        return;
+    }
+}
+
+- (void)playSoundForEvent:(NSEvent *)event {
+    if (![iTermPreferences boolForKey:kPreferenceKeyEnableSoundForEsc]) {
+        return;
+    }
+    if (event.type == NSEventTypeKeyDown) {
+        [[iTermSoundPlayer keyClick] play];
+    }
+}
+
+- (void)showVisualIndicatorForEvent:(NSEvent *)event {
+    if (_showingVisualIndicatorForEsc) {
+        return;
+    }
+    if (![iTermPreferences boolForKey:kPreferenceKeyVisualIndicatorForEsc]) {
+        return;
+    }
+    _showingVisualIndicatorForEsc = YES;
+    
+    NSNumber *savedCursorTypeSetting = [iTermProfilePreferences objectForKey:KEY_CURSOR_TYPE inProfile:self.profile];
+    NSDictionary *dict = @{ KEY_CURSOR_TYPE: savedCursorTypeSetting };
+    
+    ITermCursorType temporaryType;
+    if (savedCursorTypeSetting.integerValue == CURSOR_BOX) {
+        temporaryType = CURSOR_UNDERLINE;
+    } else {
+        temporaryType = CURSOR_BOX;
+    }
+
+    [self setSessionSpecificProfileValues:@{ KEY_CURSOR_TYPE: @(temporaryType) }];
+    [_textview setCursorNeedsDisplay];
+    
+    [self retain];
+    [dict retain];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 / 15.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [self setSessionSpecificProfileValues:dict];
+        self->_showingVisualIndicatorForEsc = NO;
+        [dict release];
+        [self release];
+    });
+}
+
+- (void)mitigateTouchBarStupidityForEvent:(NSEvent *)event {
+    if (![self eventNeedsMitigation:event]) {
+        return;
+    }
+    [self actuateHapticFeedbackForEvent:event];
+    [self playSoundForEvent:event];
+    [self showVisualIndicatorForEvent:event];
+}
+
 // Handle bookmark- and global-scope keybindings. If there is no keybinding then
 // pass the keystroke as input.
 - (void)keyDown:(NSEvent *)event {
+    [self mitigateTouchBarStupidityForEvent:event];
+    
     if (event.charactersIgnoringModifiers.length == 0) {
         return;
     }
@@ -10940,7 +11024,32 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
     if (self.view.window.ptyWindow.it_terminalWindowUseMinimalStyle) {
         return nil;
     }
-    return _statusBarViewController.layout.advancedConfiguration.separatorColor;
+    NSColor *color = _statusBarViewController.layout.advancedConfiguration.separatorColor;
+    if (color) {
+        return color;
+    }
+
+    const CGFloat alpha = 0.25;
+    if (@available(macOS 10.14, *)) {
+        NSAppearance *appearance = nil;
+        switch ([iTermPreferences intForKey:kPreferenceKeyTabStyle]) {
+            case TAB_STYLE_DARK:
+            case TAB_STYLE_DARK_HIGH_CONTRAST:
+                appearance = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
+                break;
+            case TAB_STYLE_LIGHT:
+            case TAB_STYLE_LIGHT_HIGH_CONTRAST:
+                appearance = [NSAppearance appearanceNamed:NSAppearanceNameAqua];
+                break;
+            case TAB_STYLE_AUTOMATIC:
+            case TAB_STYLE_MINIMAL:  // shouldn't happen
+                appearance = [NSApp effectiveAppearance];
+                break;
+        }
+        return [[[self textColorForStatusBar] it_colorWithAppearance:appearance] colorWithAlphaComponent:alpha];
+    } else {
+        return [[self textColorForStatusBar] colorWithAlphaComponent:alpha];
+    }
 }
 
 - (NSColor *)statusBarBackgroundColor {

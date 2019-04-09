@@ -406,6 +406,8 @@ static NSRect iTermRectCenteredVerticallyWithinRect(NSRect frameToCenter, NSRect
     BOOL _lockTransientTitle;
 
     NSMutableArray *_toggleFullScreenModeCompletionBlocks;
+
+    BOOL _windowNeedsInitialSize;
 }
 
 @synthesize scope = _scope;
@@ -598,11 +600,13 @@ static NSRect iTermRectCenteredVerticallyWithinRect(NSRect frameToCenter, NSRect
 }
 
 - (void)finishInitializationWithSmartLayout:(BOOL)smartLayout
-                                 windowType:(iTermWindowType)windowType
-                            savedWindowType:(iTermWindowType)savedWindowType
+                                 windowType:(iTermWindowType)unsafeWindowType
+                            savedWindowType:(iTermWindowType)unsafeSavedWindowType
                                      screen:(int)screenNumber
                            hotkeyWindowType:(iTermHotkeyWindowType)hotkeyWindowType
                                     profile:(Profile *)profile {
+    iTermWindowType windowType = iTermSanitizedWindowType(unsafeWindowType);
+    iTermWindowType savedWindowType = iTermSanitizedWindowType(unsafeSavedWindowType);
     DLog(@"-[%p finishInitializationWithSmartLayout:%@ windowType:%d screen:%d hotkeyWindowType:%@ ",
          self,
          smartLayout ? @"YES" : @"NO",
@@ -882,6 +886,7 @@ static NSRect iTermRectCenteredVerticallyWithinRect(NSRect frameToCenter, NSRect
     _windowTitleOverrideSwiftyString.observer = ^(NSString * _Nonnull newValue) {
         [weakSelf setWindowTitle];
     };
+    _windowNeedsInitialSize = YES;
     DLog(@"Done initializing PseudoTerminal %@", self);
 }
 
@@ -3665,11 +3670,6 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (BOOL)tabBarAlwaysVisible {
-    if (@available(macOS 10.14, *)) {
-        if (togglingLionFullScreen_ || [self lionFullScreen]) {
-            return YES;
-        }
-    }
     return ![iTermPreferences boolForKey:kPreferenceKeyHideTabBar];
 }
 
@@ -4668,11 +4668,25 @@ ITERM_WEAKLY_REFERENCEABLE
     return YES;
 }
 
+// Returns whether a permanent (i.e., not flashing) tabbar ought to be drawn while in full screen.
+// It does not check if you're already in full screen.
+- (BOOL)shouldShowPermanentFullScreenTabBar {
+    if (![iTermPreferences boolForKey:kPreferenceKeyShowFullscreenTabBar]) {
+        return NO;
+    }
+
+    if ([iTermPreferences boolForKey:kPreferenceKeyHideTabBar] && self.tabs.count == 1) {
+        return NO;
+    }
+
+    return YES;
+}
+
 - (void)updateTabBarControlIsTitlebarAccessoryAssumingFullScreen:(BOOL)fullScreen NS_AVAILABLE_MAC(10_14) {
     const NSInteger index = [self.window.it_titlebarAccessoryViewControllers indexOfObject:_lionFullScreenTabBarViewController];
     if (fullScreen && [self shouldMoveTabBarToTitlebarAccessoryInLionFullScreen]) {
         NSTitlebarAccessoryViewController *viewController = [self lionFullScreenTabBarViewController];
-        if ([iTermPreferences boolForKey:kPreferenceKeyShowFullscreenTabBar]) {
+        if ([self shouldShowPermanentFullScreenTabBar]) {
             [viewController setFullScreenMinHeight:_contentView.tabBarControl.frame.size.height];
         } else {
             [viewController setFullScreenMinHeight:0];
@@ -5458,27 +5472,6 @@ ITERM_WEAKLY_REFERENCEABLE
                      fraction:1.0];
     [viewImage unlockFocus];
 
-    // Draw over where the tab bar would usually be.
-    [viewImage lockFocus];
-    [[NSColor windowBackgroundColor] set];
-    if ([iTermPreferences intForKey:kPreferenceKeyTabPosition] == PSMTab_TopTab) {
-        tabFrame.origin.y += viewRect.size.height;
-    }
-    NSRectFill(tabFrame);
-    // Draw the background flipped, which is actually the right way up
-    NSAffineTransform *transform = [NSAffineTransform transform];
-    [transform scaleXBy:1.0 yBy:-1.0];
-    [transform concat];
-    tabFrame.origin.y = -tabFrame.origin.y - tabFrame.size.height;
-    PSMTabBarControl *control = (PSMTabBarControl *)[aTabView delegate];
-    [(id <PSMTabStyle>)[control style] drawBackgroundInRect:tabFrame
-                                                      color:nil
-                                                 horizontal:isHorizontal];
-    [transform invert];
-    [transform concat];
-
-    [viewImage unlockFocus];
-
     return viewImage;
 }
 
@@ -5487,10 +5480,14 @@ ITERM_WEAKLY_REFERENCEABLE
     return viewImage;
 }
 
+- (BOOL)tabViewDragShouldExitWindow:(NSTabView *)tabView {
+    return [iTermAdvancedSettingsModel allowDragOfTabIntoNewWindow];
+}
+
 - (NSImage *)tabView:(NSTabView *)aTabView
-    imageForTabViewItem:(NSTabViewItem *)tabViewItem
-              styleMask:(unsigned int *)styleMask {
-    *styleMask = NSWindowStyleMaskBorderless;
+ imageForTabViewItem:(NSTabViewItem *)tabViewItem
+           styleMask:(NSWindowStyleMask *)styleMask {
+    *styleMask = self.window.styleMask;
 
     NSImage *viewImage;
     if (tabViewItem == [aTabView selectedTabViewItem]) {
@@ -5553,7 +5550,10 @@ ITERM_WEAKLY_REFERENCEABLE
         if (willShowTabBar && [iTermPreferences intForKey:kPreferenceKeyTabPosition] == PSMTab_LeftTab) {
             [_contentView willShowTabBar];
         }
-        if (![iTermPreferences boolForKey:kPreferenceKeyPreserveWindowSizeWhenTabBarVisibilityChanges]) {
+        if (_windowNeedsInitialSize || ![iTermPreferences boolForKey:kPreferenceKeyPreserveWindowSizeWhenTabBarVisibilityChanges]) {
+            if (_windowNeedsInitialSize) {
+                DLog(@"Perform initial fitWindowToTabs");
+            }
             [self fitWindowToTabs];
         }
         [self repositionWidgets];
@@ -5602,6 +5602,12 @@ ITERM_WEAKLY_REFERENCEABLE
 
     [[NSNotificationCenter defaultCenter] postNotificationName: @"iTermNumberOfSessionsDidChange" object: self userInfo: nil];
     [self invalidateRestorableState];
+    if (@available(macOS 10.14, *)) {
+        if ([iTermPreferences boolForKey:kPreferenceKeyHideTabBar] && (self.lionFullScreen || togglingLionFullScreen_)) {
+            // Hiding tabbar in fullscreen on 10.14 is extra work because it's a titlebar accessory.
+            [self updateTabBarStyle];
+        }
+    }
 }
 
 - (NSMenu *)tabView:(NSTabView *)tabView menuForTabViewItem:(NSTabViewItem *)tabViewItem
@@ -7146,6 +7152,7 @@ static CGFloat iTermDimmingAmount(PSMTabBarControl *tabView) {
 }
 
 - (void)fitWindowToTabsExcludingTmuxTabs:(BOOL)excludeTmux preservingHeight:(BOOL)preserveHeight {
+    _windowNeedsInitialSize = NO;
     if (togglingFullScreen_) {
         return;
     }

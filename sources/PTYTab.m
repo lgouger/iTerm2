@@ -208,6 +208,10 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 
     NSMutableArray<PTYSession *> *_sessionsWithDeferredFontChanges;
     iTermVariableScope<iTermTabScope> *_variablesScope;
+
+    // Capture of the session reading order when a session is maximized.
+    // Used so next/previous session will work consistently post-maximization.
+    NSArray<NSString *> *_orderedGUIDs;
 }
 
 @synthesize parentWindow = parentWindow_;
@@ -759,6 +763,11 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 
 - (NSArray *)orderedSessions {
     if ([iTermAdvancedSettingsModel navigatePanesInReadingOrder]) {
+        if (self.isMaximized) {
+            return [_orderedGUIDs mapWithBlock:^id(NSString *guid) {
+                return [self sessionWithGUID:guid];
+            }];
+        }
         BOOL useTrueReadingOrder = !root_.isVertical;
         return [[self sessions] sortedArrayUsingComparator:^NSComparisonResult(id obj1, id obj2) {
             NSPoint origin1 = [self rootRelativeOriginOfSession:obj1];
@@ -2181,32 +2190,11 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     }
     NSImage* viewImage = [[NSImage alloc] initWithSize:viewSize];
     [viewImage lockFocus];
-    [[NSColor windowBackgroundColor] set];
+    [[NSColor clearColor] set];
     NSRectFill(NSMakeRect(0, 0, viewSize.width, viewSize.height));
     [viewImage unlockFocus];
 
     [self _recursiveDrawSplit:root_ inImage:viewImage atOrigin:NSMakePoint(xOrigin, yOrigin)];
-
-    // Draw over where the tab bar would usually be
-    [viewImage lockFocus];
-    [[NSColor windowBackgroundColor] set];
-    tabFrame.origin.y += yOffset;
-    if (withSpaceForFrame) {
-        NSRectFill(tabFrame);
-
-        // Draw the background flipped, which is actually the right way up
-        NSAffineTransform *transform = [NSAffineTransform transform];
-        [transform scaleXBy:1.0 yBy:-1.0];
-        [transform concat];
-        tabFrame.origin.y = -tabFrame.origin.y - tabFrame.size.height;
-        PSMTabBarControl *control = (PSMTabBarControl *)[[realParentWindow_ tabView] delegate];
-        [(id <PSMTabStyle>)[control style] drawBackgroundInRect:tabFrame
-                                                          color:nil
-                                                     horizontal:horizontal];
-        [transform invert];
-        [transform concat];
-    }
-    [viewImage unlockFocus];
 
     return viewImage;
 }
@@ -3748,6 +3736,10 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     assert(!savedArrangement_);
     assert(!idMap_);
     assert(!isMaximized_);
+
+    _orderedGUIDs = [[self orderedSessions] mapWithBlock:^id(PTYSession *session) {
+        return session.guid;
+    }];
 
     SessionView* temp = [activeSession_ view];
     savedSize_ = [temp frame].size;
