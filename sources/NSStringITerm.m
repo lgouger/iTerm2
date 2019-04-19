@@ -926,6 +926,10 @@ int decode_utf8_char(const unsigned char *datap,
     }
 }
 
+- (NSString *)it_contentHash {
+    return [self dataUsingEncoding:NSUTF8StringEncoding].it_sha256.it_hexEncoded;
+}
+
 - (NSDate *)dateValueFromUTC {
     NSArray<NSString *> *formats = @[ @"E, d MMM yyyy HH:mm:ss zzz",
                                       @"yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
@@ -2152,6 +2156,15 @@ static TECObjectRef CreateTECConverterForUTF8Variants(TextEncodingVariant varian
                               [tokens addObject:[substring localizedLowercaseString]];
                           }];
     return tokens;
+}
+
+- (double)it_localizedDoubleValue {
+    NSScanner *scanner = [NSScanner localizedScannerWithString:self];
+    double d;
+    if (![scanner scanDouble:&d]) {
+        return 0;
+    }
+    return d;
 }
 
 @end

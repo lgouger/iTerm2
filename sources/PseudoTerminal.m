@@ -61,6 +61,7 @@
 #import "iTermTouchBarButton.h"
 #import "iTermVariableReference.h"
 #import "iTermVariableScope.h"
+#import "iTermVariableScope+Global.h"
 #import "iTermVariableScope+Tab.h"
 #import "iTermVariableScope+Window.h"
 #import "iTermWarning.h"
@@ -1416,6 +1417,11 @@ ITERM_WEAKLY_REFERENCEABLE
                      scope:self.scope];
 }
 
+- (void)tabSessionDidChangeTransparency:(PTYTab *)tab {
+    // In case the last pane just becamse opaque, we can drop the visual effect view in the fake window title bar.
+    [_contentView invalidateAutomaticTabBarBackingHiding];
+}
+
 - (BOOL)miniaturizedWindowShouldPreserveFrameUntilDeminiaturized {
     if (self.window.isMiniaturized) {
         switch (windowType_) {
@@ -2489,7 +2495,7 @@ ITERM_WEAKLY_REFERENCEABLE
 - (IBAction)editWindowTitle:(id)sender {
     NSAlert *alert = [[[NSAlert alloc] init] autorelease];
     alert.messageText = @"Set Window Title";
-    alert.informativeText = @"If this is empty, the window takes the active session’s title. Variables and function calls enclosed in \\(…) will replaced with their evaluation.";
+    alert.informativeText = @"If this is empty, the window takes the active session’s title. Variables and function calls enclosed in \\(…) will be replaced with their evaluation.";
     NSTextField *titleTextField = [[[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 400, 24 * 3)] autorelease];
     iTermFunctionCallTextFieldDelegate *delegate;
     delegate = [[[iTermFunctionCallTextFieldDelegate alloc] initWithPathSource:[iTermVariableHistory pathSourceForContext:iTermVariablesSuggestionContextWindow]
@@ -2540,6 +2546,7 @@ ITERM_WEAKLY_REFERENCEABLE
     [[self currentTmuxController] newWindowWithAffinity:nil
                                        initialDirectory:[iTermInitialDirectory initialDirectoryFromProfile:self.currentSession.profile
                                                                                                 objectType:iTermWindowObject]
+                                                  scope:[iTermVariableScope globalsScope]
                                              completion:nil];
 }
 
@@ -2551,6 +2558,7 @@ ITERM_WEAKLY_REFERENCEABLE
     [[self currentTmuxController] newWindowWithAffinity:[NSString stringWithFormat:@"%d", tmuxWindow]
                                        initialDirectory:[iTermInitialDirectory initialDirectoryFromProfile:self.currentSession.profile
                                                                                                 objectType:iTermTabObject]
+                                                  scope:[iTermVariableScope globalsScope]
                                              completion:nil];
 }
 
@@ -3995,6 +4003,7 @@ ITERM_WEAKLY_REFERENCEABLE
     [[self currentTab] recheckBlur];
     [self updateTabColors];  // Updates the window's background color as a side-effect
     [self updateWindowShadow:self.ptyWindow];
+    [_contentView invalidateAutomaticTabBarBackingHiding];
 }
 
 - (BOOL)anySessionInCurrentTabHasTransparency {
@@ -4645,6 +4654,7 @@ ITERM_WEAKLY_REFERENCEABLE
         }
         [self repositionWidgets];
     }
+    [_contentView invalidateAutomaticTabBarBackingHiding];
 }
 
 - (NSTitlebarAccessoryViewController *)lionFullScreenTabBarViewController NS_AVAILABLE_MAC(10_14) {
@@ -5517,7 +5527,7 @@ ITERM_WEAKLY_REFERENCEABLE
 
     const BOOL willShowTabBar = ([iTermPreferences boolForKey:kPreferenceKeyHideTabBar] &&
                                  [_contentView.tabView numberOfTabViewItems] > 1 &&
-                                 [_contentView.tabBarControl isHidden]);
+                                 ([_contentView.tabBarControl isHidden] || [self rootTerminalViewShouldLeaveEmptyAreaAtTop]));
     // check window size in case tabs have to be hidden or shown
     if (([_contentView.tabView numberOfTabViewItems] == 1) ||  // just decreased to 1 or increased above 1 and is hidden
         willShowTabBar) {
@@ -5919,11 +5929,22 @@ ITERM_WEAKLY_REFERENCEABLE
     alert.accessoryView = titleTextField;
     [alert addButtonWithTitle:@"OK"];
     [alert addButtonWithTitle:@"Cancel"];
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [titleTextField.window makeFirstResponder:titleTextField];
-    });
-    if ([alert runModal] == NSAlertFirstButtonReturn) {
-        self.currentTab.variablesScope.tabTitleOverrideFormat = titleTextField.stringValue.length ? titleTextField.stringValue : nil;
+    __weak __typeof(self) weakSelf = self;
+    [alert beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse returnCode) {
+        if (returnCode == NSAlertFirstButtonReturn) {
+            [weakSelf setCurrentTabTitle:titleTextField.stringValue];
+        }
+    }];
+    [titleTextField.window makeFirstResponder:titleTextField];
+}
+
+- (void)setCurrentTabTitle:(NSString *)title {
+    if (self.currentTab.tmuxTab) {
+        [self.currentTab.tmuxController renameWindowWithId:self.currentTab.tmuxWindow
+                                                 inSession:nil
+                                                    toName:title];
+    } else {
+        self.currentTab.variablesScope.tabTitleOverrideFormat = title.length ? title : nil;
     }
 }
 
@@ -7013,6 +7034,7 @@ static CGFloat iTermDimmingAmount(PSMTabBarControl *tabView) {
         [[targetSession tmuxController] selectPane:targetSession.tmuxPane];
         [[targetSession tmuxController] splitWindowPane:[targetSession tmuxPane]
                                              vertically:isVertical
+                                                  scope:[[self tabForSession:targetSession] variablesScope]
                                        initialDirectory:[iTermInitialDirectory initialDirectoryFromProfile:targetSession.profile objectType:iTermPaneObject]];
         return nil;
     }
@@ -7883,6 +7905,28 @@ static CGFloat iTermDimmingAmount(PSMTabBarControl *tabView) {
     return NO;
 }
 
+// Generally yes, but not when a fake titlebar is shown *and* the window has transparency.
+// Fake titlebars need a background because transparent windows won't give you one for free.
+- (BOOL)rootTerminalViewShouldHideTabBarBackingWhenTabBarIsHidden {
+    if (@available(macOS 10.14, *)) { } else {
+        // Doesn't matter but let's not think about 10.13 and earlier since it won't happen
+        return YES;
+    }
+    if (![PseudoTerminal windowTypeHasFullSizeContentView:windowType_]) {
+        return YES;
+    }
+    if ([self anyFullScreen]) {
+        return YES;
+    }
+    if (![self useTransparency]) {
+        return YES;
+    }
+    if (![self anyPaneIsTransparent]) {
+        return YES;
+    }
+    return NO;
+}
+
 - (void)updateTabBarStyle {
     id<PSMTabStyle> style = [[iTermTheme sharedInstance] tabStyleWithDelegate:self
                                                           effectiveAppearance:self.window.effectiveAppearance];
@@ -7890,6 +7934,7 @@ static CGFloat iTermDimmingAmount(PSMTabBarControl *tabView) {
     [self updateTabColors];
     if (@available(macOS 10.14, *)) {
         [self updateTabBarControlIsTitlebarAccessoryAssumingFullScreen:(self.lionFullScreen || togglingLionFullScreen_)];
+        self.tabBarControl.insets = [self tabBarInsets];
     }
 }
 

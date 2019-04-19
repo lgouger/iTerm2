@@ -3086,6 +3086,9 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     for (PTYSession *session in self.sessions) {
         [session.variablesScope setValue:tmuxWindowName forVariableNamed:iTermVariableKeySessionTmuxWindowTitle];
     }
+    if (tmuxWindowName != nil) {
+        self.variablesScope.tabTitleOverrideFormat = tmuxWindowName;
+    }
     [self updateTabTitle];
 }
 
@@ -3423,6 +3426,9 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
         [self.parentWindow fitWindowToTab:self];
     } else {
         [self recursiveAdjustSubviews:root_];
+        for (PTYSession *session in self.sessions) {
+            [self fitSessionToCurrentViewSize:session];
+        }
     }
 }
 
@@ -5176,10 +5182,11 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     return _isDraggingSplitInTmuxTab;
 }
 
-- (void)sessionDoubleClickOnTitleBar {
+- (void)sessionDoubleClickOnTitleBar:(PTYSession *)session {
     if (self.isMaximized) {
         [self unmaximize];
     } else {
+        [self setActiveSession:session];
         [self maximize];
     }
 }
@@ -5259,6 +5266,11 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     if (@available(macOS 10.11, *)) {
         [self updateUseMetal];
     }
+}
+
+- (void)sessionTransparencyDidChange {
+    [self sessionUpdateMetalAllowed];
+    [realParentWindow_ tabSessionDidChangeTransparency:self];
 }
 
 - (void)sessionDidClearScrollbackBuffer:(PTYSession *)session {

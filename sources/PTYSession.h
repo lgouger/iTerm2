@@ -187,7 +187,7 @@ typedef enum {
 - (BOOL)sessionBelongsToTabWhoseSplitsAreBeingDragged;
 
 // User double clicked on title bar
-- (void)sessionDoubleClickOnTitleBar;
+- (void)sessionDoubleClickOnTitleBar:(PTYSession *)session;
 
 // Returns the 0-based pane number to use in $ITERM_SESSION_ID.
 - (NSUInteger)sessionPaneNumber:(PTYSession *)session;
@@ -209,6 +209,9 @@ typedef enum {
 
 // Whether metal is allowed has changed
 - (void)sessionUpdateMetalAllowed;
+
+// Amount of transparency changed (perhaps to none!)
+- (void)sessionTransparencyDidChange;
 
 // Scrollback buffer cleared.
 - (void)sessionDidClearScrollbackBuffer:(PTYSession *)session;
@@ -795,6 +798,7 @@ typedef enum {
 - (BOOL)checkForCyclesInSwiftyStrings;
 - (void)applyAction:(iTermAction *)action;
 - (void)didUseShellIntegration;
+- (BOOL)copyModeConsumesEvent:(NSEvent *)event;
 
 #pragma mark - API
 

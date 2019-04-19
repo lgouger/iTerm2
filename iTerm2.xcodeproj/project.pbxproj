@@ -1235,6 +1235,8 @@
 		534690291C94FF0000B7E4E9 /* overflowImagePressed.png in Resources */ = {isa = PBXBuildFile; fileRef = 534690271C94FF0000B7E4E9 /* overflowImagePressed.png */; };
 		5346902A1C94FF0000B7E4E9 /* overflowImagePressed@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = 534690281C94FF0000B7E4E9 /* overflowImagePressed@2x.png */; };
 		5346902C1C94FF1900B7E4E9 /* overflowImage@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = 5346902B1C94FF1900B7E4E9 /* overflowImage@2x.png */; };
+		5357E41E22682B2100FE5A55 /* CPParser+Cache.h in Headers */ = {isa = PBXBuildFile; fileRef = 5357E41C22682B2100FE5A55 /* CPParser+Cache.h */; };
+		5357E41F22682B2100FE5A55 /* CPParser+Cache.m in Sources */ = {isa = PBXBuildFile; fileRef = 5357E41D22682B2100FE5A55 /* CPParser+Cache.m */; };
 		535B3BB92228DC5500D6D410 /* iTermAlertBuiltInFunction.h in Headers */ = {isa = PBXBuildFile; fileRef = 535B3BB72228DC5500D6D410 /* iTermAlertBuiltInFunction.h */; };
 		535B3BBA2228DC5500D6D410 /* iTermAlertBuiltInFunction.m in Sources */ = {isa = PBXBuildFile; fileRef = 535B3BB82228DC5500D6D410 /* iTermAlertBuiltInFunction.m */; };
 		535D0910224DBE7D00A79581 /* iTermPreferencesSearchTests.m in Sources */ = {isa = PBXBuildFile; fileRef = 535D090F224DBE7D00A79581 /* iTermPreferencesSearchTests.m */; };
@@ -1901,6 +1903,15 @@
 		A663013119D0864C004AF81C /* SCEvents.h in Headers */ = {isa = PBXBuildFile; fileRef = A663012619D0864C004AF81C /* SCEvents.h */; };
 		A663013219D0864C004AF81C /* SCEvents.h in Headers */ = {isa = PBXBuildFile; fileRef = A663012619D0864C004AF81C /* SCEvents.h */; };
 		A66444BA1DEEA534000AC615 /* iTermDisclosableView.h in Headers */ = {isa = PBXBuildFile; fileRef = A66444B81DEEA534000AC615 /* iTermDisclosableView.h */; };
+		A666130A225CFF5A00840E89 /* BetterFontPicker.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A6661309225CFF5A00840E89 /* BetterFontPicker.framework */; };
+		A666130B225CFF5A00840E89 /* BetterFontPicker.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A6661309225CFF5A00840E89 /* BetterFontPicker.framework */; };
+		A666130C225CFF5A00840E89 /* BetterFontPicker.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A6661309225CFF5A00840E89 /* BetterFontPicker.framework */; };
+		A666130D225CFF6900840E89 /* BetterFontPicker.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A6661309225CFF5A00840E89 /* BetterFontPicker.framework */; };
+		A666130E225CFF6900840E89 /* BetterFontPicker.framework in CopyFiles */ = {isa = PBXBuildFile; fileRef = A6661309225CFF5A00840E89 /* BetterFontPicker.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		A666130F225CFF7200840E89 /* BetterFontPicker.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A6661309225CFF5A00840E89 /* BetterFontPicker.framework */; };
+		A6661310225CFF7200840E89 /* BetterFontPicker.framework in CopyFiles */ = {isa = PBXBuildFile; fileRef = A6661309225CFF5A00840E89 /* BetterFontPicker.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		A6661311225CFF7A00840E89 /* BetterFontPicker.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A6661309225CFF5A00840E89 /* BetterFontPicker.framework */; };
+		A6661312225CFF7A00840E89 /* BetterFontPicker.framework in CopyFiles */ = {isa = PBXBuildFile; fileRef = A6661309225CFF5A00840E89 /* BetterFontPicker.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		A666D5E52219323D00D6184A /* iTermEventTap.m in Sources */ = {isa = PBXBuildFile; fileRef = A6FEA25E1CF0F20B00376F28 /* iTermEventTap.m */; };
 		A666D5E8221A191600D6184A /* iTermVariableScope+Session.h in Headers */ = {isa = PBXBuildFile; fileRef = A666D5E6221A191600D6184A /* iTermVariableScope+Session.h */; };
 		A666D5E9221A191600D6184A /* iTermVariableScope+Session.m in Sources */ = {isa = PBXBuildFile; fileRef = A666D5E7221A191600D6184A /* iTermVariableScope+Session.m */; };
@@ -2073,6 +2084,8 @@
 		A673BFE41E176AA400FA2386 /* PTYTextViewTest-golden-travis-testCustomUnderline.png in Resources */ = {isa = PBXBuildFile; fileRef = A673BFE01E1743F400FA2386 /* PTYTextViewTest-golden-travis-testCustomUnderline.png */; };
 		A673BFE51E176AA400FA2386 /* PTYTextViewTest-golden-travis-testUnderline.png in Resources */ = {isa = PBXBuildFile; fileRef = A673BFE11E1743F400FA2386 /* PTYTextViewTest-golden-travis-testUnderline.png */; };
 		A673BFEC1E1A13E600FA2386 /* iTermSetTitleTrigger.h in Headers */ = {isa = PBXBuildFile; fileRef = A673BFEA1E1A13E600FA2386 /* iTermSetTitleTrigger.h */; };
+		A673DEBE22624A90004EBF4D /* iTermCopyModeHandler.h in Headers */ = {isa = PBXBuildFile; fileRef = A673DEBC22624A90004EBF4D /* iTermCopyModeHandler.h */; };
+		A673DEBF22624A90004EBF4D /* iTermCopyModeHandler.m in Sources */ = {isa = PBXBuildFile; fileRef = A673DEBD22624A90004EBF4D /* iTermCopyModeHandler.m */; };
 		A675271D213DB6E800035F2B /* NSImageView+iTerm.h in Headers */ = {isa = PBXBuildFile; fileRef = A675271B213DB6E800035F2B /* NSImageView+iTerm.h */; };
 		A675271E213DB6E800035F2B /* NSImageView+iTerm.m in Sources */ = {isa = PBXBuildFile; fileRef = A675271C213DB6E800035F2B /* NSImageView+iTerm.m */; };
 		A6755F431D728FFA00F3726C /* iTermImage.h in Headers */ = {isa = PBXBuildFile; fileRef = A6755F411D728FFA00F3726C /* iTermImage.h */; };
@@ -2826,7 +2839,6 @@
 		A6C762C51B45C52B00E3C992 /* Coprocess.m in Sources */ = {isa = PBXBuildFile; fileRef = 1D9DDD9B142E5FBB00275650 /* Coprocess.m */; };
 		A6C762C61B45C52B00E3C992 /* DebugLogging.m in Sources */ = {isa = PBXBuildFile; fileRef = 1DD39B19180B82F5004E56D5 /* DebugLogging.m */; };
 		A6C762C71B45C52B00E3C992 /* iTermHotKeyController.m in Sources */ = {isa = PBXBuildFile; fileRef = 1DB9D8F1183FE9EF0029F0B5 /* iTermHotKeyController.m */; };
-		A6C762C81B45C52B00E3C992 /* ITAddressBookMgr.m in Sources */ = {isa = PBXBuildFile; fileRef = 20E74F4904E9089700000106 /* ITAddressBookMgr.m */; };
 		A6C762C91B45C52B00E3C992 /* iTermApplication.m in Sources */ = {isa = PBXBuildFile; fileRef = DDF0FD64062916F70080EF74 /* iTermApplication.m */; };
 		A6C762CA1B45C52B00E3C992 /* iTermApplicationDelegate.m in Sources */ = {isa = PBXBuildFile; fileRef = 20D5CC6404E7AA0500000106 /* iTermApplicationDelegate.m */; };
 		A6C762CB1B45C52B00E3C992 /* iTermController.m in Sources */ = {isa = PBXBuildFile; fileRef = E8A66F030272453F03A80106 /* iTermController.m */; };
@@ -3355,7 +3367,10 @@
 		A6F385DE1FA55E2000739939 /* iTermSmartCursorColor.h in Headers */ = {isa = PBXBuildFile; fileRef = A6F385DC1FA55E2000739939 /* iTermSmartCursorColor.h */; };
 		A6F385DF1FA55E2000739939 /* iTermSmartCursorColor.m in Sources */ = {isa = PBXBuildFile; fileRef = A6F385DD1FA55E2000739939 /* iTermSmartCursorColor.m */; };
 		A6F3E96E1D60E4F0000E97C4 /* iTermInitialDirectory.h in Headers */ = {isa = PBXBuildFile; fileRef = A6F3E96C1D60E4F0000E97C4 /* iTermInitialDirectory.h */; };
-		A6F3E96F1D60E4F0000E97C4 /* iTermInitialDirectory.m in Sources */ = {isa = PBXBuildFile; fileRef = A6F3E96D1D60E4F0000E97C4 /* iTermInitialDirectory.m */; };
+		A6F718B12263CC3C0053488E /* ITAddressBookMgr.m in Sources */ = {isa = PBXBuildFile; fileRef = 20E74F4904E9089700000106 /* ITAddressBookMgr.m */; };
+		A6F718B22263E8A20053488E /* iTermInitialDirectory.m in Sources */ = {isa = PBXBuildFile; fileRef = A6F3E96D1D60E4F0000E97C4 /* iTermInitialDirectory.m */; };
+		A6F718B5226438FC0053488E /* iTermInitialDirectory+Tmux.h in Headers */ = {isa = PBXBuildFile; fileRef = A6F718B3226438FC0053488E /* iTermInitialDirectory+Tmux.h */; };
+		A6F718B6226438FC0053488E /* iTermInitialDirectory+Tmux.m in Sources */ = {isa = PBXBuildFile; fileRef = A6F718B4226438FC0053488E /* iTermInitialDirectory+Tmux.m */; };
 		A6F7A707213CB143004DE961 /* StatusBarIconUser.png in Resources */ = {isa = PBXBuildFile; fileRef = A6F7A6EF213CB13D004DE961 /* StatusBarIconUser.png */; };
 		A6F7A708213CB143004DE961 /* StatusBarIconUser.png in Resources */ = {isa = PBXBuildFile; fileRef = A6F7A6EF213CB13D004DE961 /* StatusBarIconUser.png */; };
 		A6F7A709213CB143004DE961 /* StatusBarIconUser.png in Resources */ = {isa = PBXBuildFile; fileRef = A6F7A6EF213CB13D004DE961 /* StatusBarIconUser.png */; };
@@ -3555,6 +3570,7 @@
 			dstSubfolderSpec = 10;
 			files = (
 				A6184F8E1BAB3F090088EF3C /* ColorPicker.framework in CopyFiles */,
+				A6661312225CFF7A00840E89 /* BetterFontPicker.framework in CopyFiles */,
 				A605D4B419CF796F00D40343 /* NMSSH.framework in CopyFiles */,
 				1D6EDB0219AEA20D005A7799 /* Sparkle.framework in CopyFiles */,
 			);
@@ -3567,6 +3583,7 @@
 			dstSubfolderSpec = 10;
 			files = (
 				A6184F8D1BAB3EFB0088EF3C /* ColorPicker.framework in CopyFiles */,
+				A6661310225CFF7200840E89 /* BetterFontPicker.framework in CopyFiles */,
 				A605D4B319CF796800D40343 /* NMSSH.framework in CopyFiles */,
 				1DAAE593180FAD9A0061611B /* Sparkle.framework in CopyFiles */,
 			);
@@ -3582,6 +3599,7 @@
 				A6184F8C1BAB3EF30088EF3C /* ColorPicker.framework in CopyFiles */,
 				A624232619CF70DF00182C08 /* NMSSH.framework in CopyFiles */,
 				1D3452471451475D007B1ECD /* Sparkle.framework in CopyFiles */,
+				A666130E225CFF6900840E89 /* BetterFontPicker.framework in CopyFiles */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -4193,6 +4211,8 @@
 		534690271C94FF0000B7E4E9 /* overflowImagePressed.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = overflowImagePressed.png; sourceTree = "<group>"; };
 		534690281C94FF0000B7E4E9 /* overflowImagePressed@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "overflowImagePressed@2x.png"; sourceTree = "<group>"; };
 		5346902B1C94FF1900B7E4E9 /* overflowImage@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "overflowImage@2x.png"; sourceTree = "<group>"; };
+		5357E41C22682B2100FE5A55 /* CPParser+Cache.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "CPParser+Cache.h"; sourceTree = "<group>"; };
+		5357E41D22682B2100FE5A55 /* CPParser+Cache.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = "CPParser+Cache.m"; sourceTree = "<group>"; };
 		535B3BB72228DC5500D6D410 /* iTermAlertBuiltInFunction.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = iTermAlertBuiltInFunction.h; sourceTree = "<group>"; };
 		535B3BB82228DC5500D6D410 /* iTermAlertBuiltInFunction.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = iTermAlertBuiltInFunction.m; sourceTree = "<group>"; };
 		535D090F224DBE7D00A79581 /* iTermPreferencesSearchTests.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = iTermPreferencesSearchTests.m; sourceTree = "<group>"; };
@@ -4855,6 +4875,7 @@
 		A663012719D0864C004AF81C /* SCEvents.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = SCEvents.m; path = SCEvents/Source/SCEvents.m; sourceTree = "<group>"; };
 		A66444B81DEEA534000AC615 /* iTermDisclosableView.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = iTermDisclosableView.h; sourceTree = "<group>"; };
 		A66444B91DEEA534000AC615 /* iTermDisclosableView.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = iTermDisclosableView.m; sourceTree = "<group>"; };
+		A6661309225CFF5A00840E89 /* BetterFontPicker.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = BetterFontPicker.framework; path = BetterFontPicker/BetterFontPicker.framework; sourceTree = "<group>"; };
 		A666D5E6221A191600D6184A /* iTermVariableScope+Session.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "iTermVariableScope+Session.h"; sourceTree = "<group>"; };
 		A666D5E7221A191600D6184A /* iTermVariableScope+Session.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = "iTermVariableScope+Session.m"; sourceTree = "<group>"; };
 		A666D5EA221A1D9D00D6184A /* iTermVariableScope+Tab.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "iTermVariableScope+Tab.h"; sourceTree = "<group>"; };
@@ -4926,6 +4947,8 @@
 		A673BFE11E1743F400FA2386 /* PTYTextViewTest-golden-travis-testUnderline.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = "PTYTextViewTest-golden-travis-testUnderline.png"; path = "tests/Goldens/PTYTextViewTest-golden-travis-testUnderline.png"; sourceTree = "<group>"; };
 		A673BFEA1E1A13E600FA2386 /* iTermSetTitleTrigger.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = iTermSetTitleTrigger.h; sourceTree = "<group>"; };
 		A673BFEB1E1A13E600FA2386 /* iTermSetTitleTrigger.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = iTermSetTitleTrigger.m; sourceTree = "<group>"; };
+		A673DEBC22624A90004EBF4D /* iTermCopyModeHandler.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = iTermCopyModeHandler.h; sourceTree = "<group>"; };
+		A673DEBD22624A90004EBF4D /* iTermCopyModeHandler.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = iTermCopyModeHandler.m; sourceTree = "<group>"; };
 		A675271B213DB6E800035F2B /* NSImageView+iTerm.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "NSImageView+iTerm.h"; sourceTree = "<group>"; };
 		A675271C213DB6E800035F2B /* NSImageView+iTerm.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = "NSImageView+iTerm.m"; sourceTree = "<group>"; };
 		A6755F411D728FFA00F3726C /* iTermImage.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = iTermImage.h; sourceTree = "<group>"; };
@@ -5705,6 +5728,8 @@
 		A6F385DD1FA55E2000739939 /* iTermSmartCursorColor.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = iTermSmartCursorColor.m; sourceTree = "<group>"; };
 		A6F3E96C1D60E4F0000E97C4 /* iTermInitialDirectory.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = iTermInitialDirectory.h; sourceTree = "<group>"; };
 		A6F3E96D1D60E4F0000E97C4 /* iTermInitialDirectory.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = iTermInitialDirectory.m; sourceTree = "<group>"; };
+		A6F718B3226438FC0053488E /* iTermInitialDirectory+Tmux.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "iTermInitialDirectory+Tmux.h"; sourceTree = "<group>"; };
+		A6F718B4226438FC0053488E /* iTermInitialDirectory+Tmux.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = "iTermInitialDirectory+Tmux.m"; sourceTree = "<group>"; };
 		A6F7A6EF213CB13D004DE961 /* StatusBarIconUser.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = StatusBarIconUser.png; path = images/StatusBarIcons/StatusBarIconUser.png; sourceTree = "<group>"; };
 		A6F7A6F0213CB13E004DE961 /* StatusBarIconNetwork.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = StatusBarIconNetwork.png; path = images/StatusBarIcons/StatusBarIconNetwork.png; sourceTree = "<group>"; };
 		A6F7A6F1213CB13E004DE961 /* StatusBarIconJobs.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = StatusBarIconJobs.png; path = images/StatusBarIcons/StatusBarIconJobs.png; sourceTree = "<group>"; };
@@ -5842,9 +5867,11 @@
 			buildActionMask = 2147483647;
 			files = (
 				A667196A1DCE396A000CE608 /* libiTerm2SharedARC.a in Frameworks */,
+				A6661311225CFF7A00840E89 /* BetterFontPicker.framework in Frameworks */,
 				A690F7041B424EF8009F76D8 /* OpenDirectory.framework in Frameworks */,
 				A624231919CF6DE000182C08 /* NMSSH.framework in Frameworks */,
 				A624231219CF6B0C00182C08 /* Sparkle.framework in Frameworks */,
+				A666130C225CFF5A00840E89 /* BetterFontPicker.framework in Frameworks */,
 				530AB89B20AFF21300D2AA08 /* CoreParse.framework in Frameworks */,
 				A67D19512237045C00BD0D4D /* libsixel.a in Frameworks */,
 				1D6EDAF519AEA20D005A7799 /* Security.framework in Frameworks */,
@@ -5865,10 +5892,12 @@
 				A67D19502237045C00BD0D4D /* libsixel.a in Frameworks */,
 				A66719691DCE3965000CE608 /* libiTerm2SharedARC.a in Frameworks */,
 				530AB89A20AFF21300D2AA08 /* CoreParse.framework in Frameworks */,
+				A666130F225CFF7200840E89 /* BetterFontPicker.framework in Frameworks */,
 				A690F7051B424F15009F76D8 /* OpenDirectory.framework in Frameworks */,
 				A624232019CF6F2C00182C08 /* NMSSH.framework in Frameworks */,
 				A6184F8A1BAB3ED70088EF3C /* ColorPicker.framework in Frameworks */,
 				1DFA7C9F1923F77C00DF1410 /* Security.framework in Frameworks */,
+				A666130B225CFF5A00840E89 /* BetterFontPicker.framework in Frameworks */,
 				1D78B561183EEB9700014D49 /* ScriptingBridge.framework in Frameworks */,
 				1D9A55B9180FA93000B42CE9 /* AddressBook.framework in Frameworks */,
 				1D9A55B8180FA92100B42CE9 /* libncurses.dylib in Frameworks */,
@@ -5895,9 +5924,11 @@
 			buildActionMask = 2147483647;
 			files = (
 				A67D194F2237045C00BD0D4D /* libsixel.a in Frameworks */,
+				A666130D225CFF6900840E89 /* BetterFontPicker.framework in Frameworks */,
 				A60BD9191B3F5D76007D7F11 /* OpenDirectory.framework in Frameworks */,
 				A624231F19CF6F2000182C08 /* NMSSH.framework in Frameworks */,
 				1DFA7C9E1923F77100DF1410 /* Security.framework in Frameworks */,
+				A666130A225CFF5A00840E89 /* BetterFontPicker.framework in Frameworks */,
 				1D81F0BD183C3B0100910838 /* ScriptingBridge.framework in Frameworks */,
 				874206530564169600CFC3F1 /* AppKit.framework in Frameworks */,
 				A6184F891BAB3ED70088EF3C /* ColorPicker.framework in Frameworks */,
@@ -6802,6 +6833,8 @@
 				1DB67CEC14850D53005849A1 /* TmuxWindowOpener.m */,
 				1D0B613B14A7C76500C57C33 /* TmuxWindowsTable.m */,
 				1D3D21941483144600FAC8E7 /* TSVParser.m */,
+				A6F718B3226438FC0053488E /* iTermInitialDirectory+Tmux.h */,
+				A6F718B4226438FC0053488E /* iTermInitialDirectory+Tmux.m */,
 			);
 			name = tmux;
 			sourceTree = "<group>";
@@ -7031,6 +7064,7 @@
 		1DD39AD5180B8118004E56D5 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				A6661309225CFF5A00840E89 /* BetterFontPicker.framework */,
 				A67D194E2237045C00BD0D4D /* libsixel.a */,
 				A608CCF2214DE6E8007A7B87 /* XCTest.framework */,
 				530AB89820AFF21200D2AA08 /* CoreParse.framework */,
@@ -8328,6 +8362,8 @@
 				5300984B2259365B00A69348 /* iTermHapticActuator.m */,
 				5300984E2259A44D00A69348 /* iTermSoundPlayer.h */,
 				5300984F2259A44D00A69348 /* iTermSoundPlayer.m */,
+				A673DEBC22624A90004EBF4D /* iTermCopyModeHandler.h */,
+				A673DEBD22624A90004EBF4D /* iTermCopyModeHandler.m */,
 			);
 			name = Helpers;
 			sourceTree = "<group>";
@@ -8610,6 +8646,8 @@
 				531E71F22229A54500915960 /* iTermParsedExpression.h */,
 				531E71F32229A54500915960 /* iTermParsedExpression.m */,
 				531E71F62229A69C00915960 /* iTermExpressionParser+Private.h */,
+				5357E41C22682B2100FE5A55 /* CPParser+Cache.h */,
+				5357E41D22682B2100FE5A55 /* CPParser+Cache.m */,
 			);
 			name = Language;
 			sourceTree = "<group>";
@@ -9744,10 +9782,12 @@
 				A60C034E20881E5F00FE2F1F /* iTermAPIHelper.h in Headers */,
 				A667191F1DCE36C3000CE608 /* PSMDarkHighContrastTabStyle.h in Headers */,
 				A60BB37E1EB5149100D76C09 /* iTermCopyModeState.h in Headers */,
+				A6F718B5226438FC0053488E /* iTermInitialDirectory+Tmux.h in Headers */,
 				A6CD8A3C22344C78007C5B39 /* iTermAPIPermissionsWindowController.h in Headers */,
 				A6D4C26621E18CB5009CF11B /* iTermScriptInspector.h in Headers */,
 				A65D3ADB21D163B800384015 /* iTermBacktrace.h in Headers */,
 				A64AE5172084128500D02F06 /* NSThread+iTerm.h in Headers */,
+				A673DEBE22624A90004EBF4D /* iTermCopyModeHandler.h in Headers */,
 				A6153D5821F4EF1A002976FC /* iTermStatusBarTightlyPackedLayoutAlgorithm.h in Headers */,
 				530098502259A44D00A69348 /* iTermSoundPlayer.h in Headers */,
 				A69C9337212108E900531438 /* iTermsStatusBarComposerViewController.h in Headers */,
@@ -9888,6 +9928,7 @@
 				537BFDD52101B2500098C91F /* iTermStatusBarCPUUtilizationComponent.h in Headers */,
 				A699507721E33827009916BC /* iTermRawKeyMapper.h in Headers */,
 				A6D5985121B78B9700B59C94 /* iTermBroadcastInputHelper.h in Headers */,
+				5357E41E22682B2100FE5A55 /* CPParser+Cache.h in Headers */,
 				A66F52AD21045B7E00571168 /* iTermStatusBarNetworkUtilizationComponent.h in Headers */,
 				A69C93412121140100531438 /* iTermStatusBarLargeComposerViewController.h in Headers */,
 				5312269A20CB1D3A004831C6 /* iTermBuiltInFunctions.h in Headers */,
@@ -12056,6 +12097,7 @@
 				A65429BA20CE3C9400CE71B1 /* iTermFocusReportingTextField.m in Sources */,
 				A63935962103FD8B00A16D1C /* iTermMemoryUtilization.m in Sources */,
 				530AB8B020B201AB00D2AA08 /* iTermFunctionCallSuggester.m in Sources */,
+				5357E41F22682B2100FE5A55 /* CPParser+Cache.m in Sources */,
 				A6A4866820B6785400493302 /* iTermAdvancedSettingsViewController.m in Sources */,
 				A6A4867C20B67EFB00493302 /* ProfilesTextPreferencesViewController.m in Sources */,
 				A6DBC03D2003479400F1466D /* iTermImageRenderer.m in Sources */,
@@ -12190,9 +12232,11 @@
 				A6B4140A211A5AEA00D28207 /* iTermStandardWindowButtonsView.m in Sources */,
 				A65429BB20CE3C9F00CE71B1 /* iTermExpressionParser.m in Sources */,
 				5376CB0A2205337400FE7476 /* TmuxDashboardController.m in Sources */,
+				A6F718B22263E8A20053488E /* iTermInitialDirectory.m in Sources */,
 				A6566754219EA582005FE60E /* NSNull+iTerm.m in Sources */,
 				A629C706221016AA00E7D4AE /* iTermMoveTabToWindowBuiltInFunction.m in Sources */,
 				A66719641DCE3772000CE608 /* iTermSocket.m in Sources */,
+				A6F718B6226438FC0053488E /* iTermInitialDirectory+Tmux.m in Sources */,
 				A6180D7121A364EE0073F219 /* iTermMetalPerFrameStateConfiguration.m in Sources */,
 				53E9DFE3220D52B00070C9C0 /* ScriptTrigger.m in Sources */,
 				A6DBE76C22507D1600144200 /* NSView+iTerm.m in Sources */,
@@ -12237,6 +12281,7 @@
 				5300984D2259365B00A69348 /* iTermHapticActuator.m in Sources */,
 				A630117220E60DBF008114B7 /* iTermStatusBarView.m in Sources */,
 				533BDAC320DB5CE100E26F0A /* NSObject+iTerm.m in Sources */,
+				A673DEBF22624A90004EBF4D /* iTermCopyModeHandler.m in Sources */,
 				A6B540FB224838A100D3AD14 /* NSColor+PSM.m in Sources */,
 				530AB8BD20B3D3D000D2AA08 /* iTermWindowHacks.m in Sources */,
 				A6DBC0462005DC2B00F1466D /* iTermTuple.m in Sources */,
@@ -12304,6 +12349,7 @@
 				537BFDCA20FFB2590098C91F /* iTermProcessCache.m in Sources */,
 				A6F9EF3820850C41005530F7 /* iTermCompetentTableRowView.m in Sources */,
 				A630117720E6971D008114B7 /* iTermStatusBarTextComponent.m in Sources */,
+				A6F718B12263CC3C0053488E /* ITAddressBookMgr.m in Sources */,
 				A675271E213DB6E800035F2B /* NSImageView+iTerm.m in Sources */,
 				A6A4867020B67A3B00493302 /* iTermSizeRememberingView.m in Sources */,
 				A66F52B22105ABCA00571168 /* iTermStatusBarAttributedTextComponent.m in Sources */,
@@ -12464,7 +12510,6 @@
 				A6C7631D1B45C52B00E3C992 /* iTermSelectionScrollHelper.m in Sources */,
 				A6FC49881C3A44390061B3BA /* iTermPrintAccessoryViewController.m in Sources */,
 				A62C3B261BCC24AB00B5629D /* iTermCommandHistoryEntryMO.m in Sources */,
-				A6F3E96F1D60E4F0000E97C4 /* iTermInitialDirectory.m in Sources */,
 				A6C763CA1B45C52B00E3C992 /* VT100Terminal.m in Sources */,
 				A6C763541B45C52B00E3C992 /* iTermOpenQuicklyTableCellView.m in Sources */,
 				A62C3B2E1BCC24AB00B5629D /* iTermCommandHistoryCommandUseMO.m in Sources */,
@@ -12684,7 +12729,6 @@
 				A6C762DE1B45C52B00E3C992 /* PTYTabView.m in Sources */,
 				A6C762D81B45C52B00E3C992 /* PseudoTerminal.m in Sources */,
 				A6CEC1081DCE8146009F4FD2 /* GPBCodedInputStream.m in Sources */,
-				A6C762C81B45C52B00E3C992 /* ITAddressBookMgr.m in Sources */,
 				A6C763431B45C52B00E3C992 /* iTermImageWell.m in Sources */,
 				A6C763BA1B45C52B00E3C992 /* iTermTipCardViewController.m in Sources */,
 				A6C762BF1B45C52B00E3C992 /* NSScreen+iTerm.m in Sources */,
@@ -12866,6 +12910,7 @@
 		1809E7B11665E2CB0069C439 /* Nightly */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_OBJC_WEAK = YES;
 				CLANG_WARN_INT_CONVERSION = YES;
@@ -12881,6 +12926,7 @@
 					"$(PROJECT_DIR)",
 					"$(PROJECT_DIR)/ThirdParty",
 					"$(PROJECT_DIR)/ColorPicker",
+					"$(PROJECT_DIR)/BetterFontPicker",
 				);
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
 				GCC_OPTIMIZATION_LEVEL = 3;
@@ -12903,7 +12949,7 @@
 					ThirdParty,
 				);
 				INFOPLIST_FILE = plists/iTerm2.plist;
-				LD_RUNPATH_SEARCH_PATHS = "@loader_path/../Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = "@loader_path/../Frameworks @executable_path/../Frameworks";
 				LIBRARY_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(PROJECT_DIR)/ThirdParty/libsixel/lib",
@@ -12953,6 +12999,7 @@
 					"$(PROJECT_DIR)",
 					"$(PROJECT_DIR)/ThirdParty",
 					"$(PROJECT_DIR)/ColorPicker",
+					"$(PROJECT_DIR)/BetterFontPicker",
 				);
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
@@ -12975,7 +13022,7 @@
 					ThirdParty,
 				);
 				INFOPLIST_FILE = "plists/iTerm2ForApplescriptTesting-Info.plist";
-				LD_RUNPATH_SEARCH_PATHS = "@loader_path/../Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = "@loader_path/../Frameworks @executable_path/../Frameworks";
 				LIBRARY_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(PROJECT_DIR)/ThirdParty/libsixel/lib",
@@ -13022,6 +13069,7 @@
 					"$(PROJECT_DIR)",
 					"$(PROJECT_DIR)/ThirdParty",
 					"$(PROJECT_DIR)/ColorPicker",
+					"$(PROJECT_DIR)/BetterFontPicker",
 				);
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
 				GCC_OPTIMIZATION_LEVEL = 3;
@@ -13043,7 +13091,7 @@
 					ThirdParty,
 				);
 				INFOPLIST_FILE = "plists/iTerm2ForApplescriptTesting-Info.plist";
-				LD_RUNPATH_SEARCH_PATHS = "@loader_path/../Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = "@loader_path/../Frameworks @executable_path/../Frameworks";
 				LIBRARY_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(PROJECT_DIR)/ThirdParty/libsixel/lib",
@@ -13088,6 +13136,7 @@
 					"$(PROJECT_DIR)",
 					"$(PROJECT_DIR)/ThirdParty",
 					"$(PROJECT_DIR)/ColorPicker",
+					"$(PROJECT_DIR)/BetterFontPicker",
 				);
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
 				GCC_OPTIMIZATION_LEVEL = 3;
@@ -13109,7 +13158,7 @@
 					ThirdParty,
 				);
 				INFOPLIST_FILE = "plists/iTerm2ForApplescriptTesting-Info.plist";
-				LD_RUNPATH_SEARCH_PATHS = "@loader_path/../Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = "@loader_path/../Frameworks @executable_path/../Frameworks";
 				LIBRARY_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(PROJECT_DIR)/ThirdParty/libsixel/lib",
@@ -13164,6 +13213,7 @@
 					/Users/gnachman/iTerm2,
 					"$(PROJECT_DIR)/ThirdParty",
 					"$(PROJECT_DIR)/ColorPicker",
+					"$(PROJECT_DIR)/BetterFontPicker",
 				);
 				GCC_C_LANGUAGE_STANDARD = gnu99;
 				GCC_DYNAMIC_NO_PIC = NO;
@@ -13188,7 +13238,7 @@
 					ThirdParty,
 				);
 				INFOPLIST_FILE = "plists/iTermTests-Info.plist";
-				LD_RUNPATH_SEARCH_PATHS = "@loader_path/../Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = "@loader_path/../Frameworks @executable_path/../Frameworks";
 				LIBRARY_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(PROJECT_DIR)/ThirdParty/libsixel/lib",
@@ -13241,6 +13291,7 @@
 					/Users/gnachman/iTerm2,
 					"$(PROJECT_DIR)/ThirdParty",
 					"$(PROJECT_DIR)/ColorPicker",
+					"$(PROJECT_DIR)/BetterFontPicker",
 				);
 				GCC_C_LANGUAGE_STANDARD = gnu99;
 				GCC_ENABLE_OBJC_EXCEPTIONS = YES;
@@ -13258,7 +13309,7 @@
 					ThirdParty,
 				);
 				INFOPLIST_FILE = "plists/iTermTests-Info.plist";
-				LD_RUNPATH_SEARCH_PATHS = "@loader_path/../Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = "@loader_path/../Frameworks @executable_path/../Frameworks";
 				LIBRARY_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(PROJECT_DIR)/ThirdParty/libsixel/lib",
@@ -13311,6 +13362,7 @@
 					/Users/gnachman/iTerm2,
 					"$(PROJECT_DIR)/ThirdParty",
 					"$(PROJECT_DIR)/ColorPicker",
+					"$(PROJECT_DIR)/BetterFontPicker",
 				);
 				GCC_C_LANGUAGE_STANDARD = gnu99;
 				GCC_ENABLE_OBJC_EXCEPTIONS = YES;
@@ -13328,7 +13380,7 @@
 					ThirdParty,
 				);
 				INFOPLIST_FILE = "plists/iTermTests-Info.plist";
-				LD_RUNPATH_SEARCH_PATHS = "@loader_path/../Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = "@loader_path/../Frameworks @executable_path/../Frameworks";
 				LIBRARY_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(PROJECT_DIR)/ThirdParty/libsixel/lib",
@@ -13518,6 +13570,7 @@
 		A656E9891F970C7200158128 /* Beta */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_OBJC_WEAK = YES;
 				CLANG_WARN_INT_CONVERSION = YES;
@@ -13533,6 +13586,7 @@
 					"$(PROJECT_DIR)",
 					"$(PROJECT_DIR)/ThirdParty",
 					"$(PROJECT_DIR)/ColorPicker",
+					"$(PROJECT_DIR)/BetterFontPicker",
 				);
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
 				GCC_OPTIMIZATION_LEVEL = 3;
@@ -13554,7 +13608,7 @@
 					ThirdParty,
 				);
 				INFOPLIST_FILE = plists/iTerm2.plist;
-				LD_RUNPATH_SEARCH_PATHS = "@loader_path/../Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = "@loader_path/../Frameworks @executable_path/../Frameworks";
 				LIBRARY_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(PROJECT_DIR)/ThirdParty/libsixel/lib",
@@ -13616,6 +13670,7 @@
 					/Users/gnachman/iTerm2,
 					"$(PROJECT_DIR)/ThirdParty",
 					"$(PROJECT_DIR)/ColorPicker",
+					"$(PROJECT_DIR)/BetterFontPicker",
 				);
 				GCC_C_LANGUAGE_STANDARD = gnu99;
 				GCC_ENABLE_OBJC_EXCEPTIONS = YES;
@@ -13633,7 +13688,7 @@
 					ThirdParty,
 				);
 				INFOPLIST_FILE = "plists/iTermTests-Info.plist";
-				LD_RUNPATH_SEARCH_PATHS = "@loader_path/../Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = "@loader_path/../Frameworks @executable_path/../Frameworks";
 				LIBRARY_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(PROJECT_DIR)/ThirdParty/libsixel/lib",
@@ -13710,6 +13765,7 @@
 					"$(PROJECT_DIR)",
 					"$(PROJECT_DIR)/ThirdParty",
 					"$(PROJECT_DIR)/ColorPicker",
+					"$(PROJECT_DIR)/BetterFontPicker",
 				);
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
 				GCC_OPTIMIZATION_LEVEL = 3;
@@ -13731,7 +13787,7 @@
 					ThirdParty,
 				);
 				INFOPLIST_FILE = "plists/iTerm2ForApplescriptTesting-Info.plist";
-				LD_RUNPATH_SEARCH_PATHS = "@loader_path/../Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = "@loader_path/../Frameworks @executable_path/../Frameworks";
 				LIBRARY_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(PROJECT_DIR)/ThirdParty/libsixel/lib",
@@ -13932,6 +13988,7 @@
 					"$(inherited)",
 					"$(PROJECT_DIR)/ColorPicker",
 					"$(PROJECT_DIR)/ThirdParty",
+					"$(PROJECT_DIR)/BetterFontPicker",
 				);
 				GCC_C_LANGUAGE_STANDARD = gnu99;
 				GCC_ENABLE_OBJC_EXCEPTIONS = YES;
@@ -13980,6 +14037,7 @@
 					"$(inherited)",
 					"$(PROJECT_DIR)/ColorPicker",
 					"$(PROJECT_DIR)/ThirdParty",
+					"$(PROJECT_DIR)/BetterFontPicker",
 				);
 				GCC_C_LANGUAGE_STANDARD = gnu99;
 				GCC_DYNAMIC_NO_PIC = NO;
@@ -14040,6 +14098,7 @@
 					"$(inherited)",
 					"$(PROJECT_DIR)/ColorPicker",
 					"$(PROJECT_DIR)/ThirdParty",
+					"$(PROJECT_DIR)/BetterFontPicker",
 				);
 				GCC_C_LANGUAGE_STANDARD = gnu99;
 				GCC_ENABLE_OBJC_EXCEPTIONS = YES;
@@ -14089,6 +14148,7 @@
 					"$(inherited)",
 					"$(PROJECT_DIR)/ColorPicker",
 					"$(PROJECT_DIR)/ThirdParty",
+					"$(PROJECT_DIR)/BetterFontPicker",
 				);
 				GCC_C_LANGUAGE_STANDARD = gnu99;
 				GCC_ENABLE_OBJC_EXCEPTIONS = YES;
@@ -14580,6 +14640,7 @@
 		BB024D36096EE4080021E793 /* Development */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_OBJC_WEAK = YES;
 				CLANG_WARN_INT_CONVERSION = YES;
@@ -14596,6 +14657,7 @@
 					"$(PROJECT_DIR)",
 					"$(PROJECT_DIR)/ThirdParty",
 					"$(PROJECT_DIR)/ColorPicker",
+					"$(PROJECT_DIR)/BetterFontPicker",
 				);
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
@@ -14618,7 +14680,7 @@
 					ThirdParty,
 				);
 				INFOPLIST_FILE = plists/iTerm2.plist;
-				LD_RUNPATH_SEARCH_PATHS = "@loader_path/../Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = "@loader_path/../Frameworks @executable_path/../Frameworks";
 				LIBRARY_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(PROJECT_DIR)/ThirdParty/libsixel/lib",
@@ -14660,6 +14722,7 @@
 		BB024D37096EE4080021E793 /* Deployment */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_OBJC_WEAK = YES;
 				CLANG_WARN_INT_CONVERSION = YES;
@@ -14675,6 +14738,7 @@
 					"$(PROJECT_DIR)",
 					"$(PROJECT_DIR)/ThirdParty",
 					"$(PROJECT_DIR)/ColorPicker",
+					"$(PROJECT_DIR)/BetterFontPicker",
 				);
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
 				GCC_OPTIMIZATION_LEVEL = 3;
@@ -14696,7 +14760,7 @@
 					ThirdParty,
 				);
 				INFOPLIST_FILE = plists/iTerm2.plist;
-				LD_RUNPATH_SEARCH_PATHS = "@loader_path/../Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = "@loader_path/../Frameworks @executable_path/../Frameworks";
 				LIBRARY_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(PROJECT_DIR)/ThirdParty/libsixel/lib",

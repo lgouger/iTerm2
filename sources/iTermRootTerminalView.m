@@ -59,10 +59,18 @@ typedef struct {
 
 @end
 
-@interface iTermTabBarBacking : NSVisualEffectView
+@interface iTermTabBarBacking : NSVisualEffectView<iTermTabBarControlViewContainer>
+@property (nonatomic) BOOL hidesWhenTabBarHidden;
 @end
 
 @implementation iTermTabBarBacking
+
+- (void)tabBarControlViewWillHide:(BOOL)hidden {
+    if (_hidesWhenTabBarHidden || !hidden) {
+        [self setHidden:hidden];
+    }
+}
+
 @end
 
 @implementation iTermRootTerminalView {
@@ -89,7 +97,7 @@ typedef struct {
         _delegate = delegate;
 
         self.autoresizesSubviews = YES;
-        _leftTabBarPreferredWidth = [iTermPreferences doubleForKey:kPreferenceKeyLeftTabBarWidth];
+        _leftTabBarPreferredWidth = round([iTermPreferences doubleForKey:kPreferenceKeyLeftTabBarWidth]);
         [self setLeftTabBarWidthFromPreferredWidth];
 
         // Create the tab view.
@@ -109,9 +117,9 @@ typedef struct {
         // Create the tab bar.
         NSRect tabBarFrame = self.bounds;
         tabBarFrame.size.height = _tabBarControl.height;
-
         if (@available(macOS 10.14, *)) {
             _tabBarBacking = [[iTermTabBarBacking alloc] init];
+            _tabBarBacking.hidesWhenTabBarHidden = [delegate rootTerminalViewShouldHideTabBarBackingWhenTabBarIsHidden];
             _tabBarBacking.autoresizesSubviews = YES;
             _tabBarBacking.blendingMode = NSVisualEffectBlendingModeWithinWindow;
             _tabBarBacking.material = NSVisualEffectMaterialTitlebar;
@@ -196,6 +204,13 @@ typedef struct {
     _tabBarControl.itermTabBarDelegate = nil;
     _tabBarControl.delegate = nil;
     _leftTabBarDragHandle.delegate = nil;
+}
+
+- (void)invalidateAutomaticTabBarBackingHiding {
+    _tabBarBacking.hidesWhenTabBarHidden = [self.delegate rootTerminalViewShouldHideTabBarBackingWhenTabBarIsHidden];
+    if (_tabBarControl.isHidden) {
+        _tabBarBacking.hidden = _tabBarBacking.hidesWhenTabBarHidden;
+    }
 }
 
 - (NSView *)hitTest:(NSPoint)point {
@@ -1098,7 +1113,7 @@ typedef struct {
 
 - (CGFloat)leftTabBarWidthForPreferredWidth:(CGFloat)preferredWidth contentWidth:(CGFloat)contentWidth {
     const CGFloat minimumWidth = 50;
-    const CGFloat maximumWidth = contentWidth / 3;
+    const CGFloat maximumWidth = round(contentWidth / 3);
     return MAX(MIN(maximumWidth, preferredWidth), minimumWidth);
 }
 
@@ -1119,7 +1134,7 @@ typedef struct {
     // T <= T/3 + C/3
     // 2/3T <= C/3
     // T <= C/2
-    const CGFloat maximumWidth = self.bounds.size.width / 2;
+    const CGFloat maximumWidth = round(self.bounds.size.width / 2);
     _leftTabBarWidth = MAX(MIN(maximumWidth, _leftTabBarPreferredWidth), minimumWidth);
 }
 
@@ -1189,7 +1204,12 @@ typedef struct {
             _statusBarContainer = [[iTermGenericStatusBarContainer alloc] initWithFrame:statusBarFrame];
             _statusBarContainer.autoresizesSubviews = YES;
             _statusBarContainer.delegate = self;
-            [self addSubview:_statusBarContainer];
+            NSInteger index = [self.subviews indexOfObject:_stoplightHotbox];
+            if (index == NSNotFound) {
+                [self addSubview:_statusBarContainer];
+            } else {
+                [self insertSubview:_statusBarContainer atIndex:index];
+            }
         }
         if (_statusBarViewController.view.superview == _statusBarContainer) {
             [_statusBarViewController.view removeFromSuperview];
@@ -1259,7 +1279,7 @@ typedef struct {
 // For the left-side tab bar.
 - (CGFloat)dragHandleView:(iTermDragHandleView *)dragHandle didMoveBy:(CGFloat)delta {
     CGFloat originalValue = _leftTabBarPreferredWidth;
-    _leftTabBarPreferredWidth = [self leftTabBarWidthForPreferredWidth:_leftTabBarPreferredWidth + delta];
+    _leftTabBarPreferredWidth = round([self leftTabBarWidthForPreferredWidth:_leftTabBarPreferredWidth + delta]);
     [self layoutSubviews];  // This may modify _leftTabBarWidth if it's too big or too small.
     [[NSUserDefaults standardUserDefaults] setDouble:_leftTabBarPreferredWidth
                                               forKey:kPreferenceKeyLeftTabBarWidth];

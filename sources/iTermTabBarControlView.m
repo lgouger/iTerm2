@@ -110,8 +110,9 @@ typedef NS_ENUM(NSInteger, iTermTabBarFlashState) {
 
 - (void)setHidden:(BOOL)hidden {
     if (!hidden || [self.itermTabBarDelegate iTermTabBarShouldHideBacking]) {
-        if ([self.superview isKindOfClass:[NSVisualEffectView class]]) {
-            self.superview.hidden = hidden;
+        if ([self.superview conformsToProtocol:@protocol(iTermTabBarControlViewContainer)]) {
+            id<iTermTabBarControlViewContainer> container = (id<iTermTabBarControlViewContainer>)self.superview;
+            [container tabBarControlViewWillHide:hidden];
         }
     }
     [super setHidden:hidden];
@@ -274,6 +275,25 @@ typedef NS_ENUM(NSInteger, iTermTabBarFlashState) {
     }
     
     [super mouseDown:event];
+}
+
+- (BOOL)clickedInCell:(NSEvent *)event {
+    const NSPoint clickPoint = [self convertPoint:event.locationInWindow
+                                         fromView:nil];
+    NSRect cellFrame;
+    PSMTabBarCell *const cell = [self cellForPoint:clickPoint
+                                         cellFrame:&cellFrame];
+    return cell != nil;
+}
+
+- (void)mouseUp:(NSEvent *)event {
+    if (event.clickCount == 2 &&
+        [self.itermTabBarDelegate iTermTabBarCanDragWindow] &&
+        ![self clickedInCell:event]) {
+        [self.window performZoom:nil];
+        return;
+    }
+    [super mouseUp:event];
 }
 
 @end
