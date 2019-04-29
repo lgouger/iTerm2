@@ -46,7 +46,9 @@
                                                  makeKey:YES
                                              canActivate:NO
                                                  command:command
-                                                   block:nil];
+                                                   block:nil
+                                             synchronous:YES
+                                              completion:nil];
     return [self.ptyDelegate tabForSession:session];
 }
 
@@ -69,7 +71,9 @@
                                                  makeKey:YES
                                              canActivate:NO
                                                  command:command
-                                                   block:nil];
+                                                   block:nil
+                                             synchronous:YES
+                                              completion:nil];
     return [self.ptyDelegate tabForSession:session];
 }
 

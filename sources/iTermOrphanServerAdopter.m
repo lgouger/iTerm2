@@ -67,7 +67,9 @@
 
 - (void)openWindowWithOrphans {
     for (NSString *path in _pathsToOrphanedServerSockets) {
+        NSLog(@"--- Begin orphan %@", path);
         [self adoptOrphanWithPath:path];
+        NSLog(@"--- End orphan");
     }
     _window = nil;
 }
@@ -124,9 +126,12 @@
                                                                           isUTF8:nil
                                                                    substitutions:nil
                                                                 windowController:term
+                                                                     synchronous:NO
                                                                       completion:nil];
              return ok ? session : nil;
-         }];
+         }
+                                             synchronous:NO
+                                              completion:nil];
     NSLog(@"restored an orphan");
     [aSession showOrphanAnnouncement];
     return aSession;

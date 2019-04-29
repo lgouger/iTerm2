@@ -7,6 +7,7 @@
 
 #import <Cocoa/Cocoa.h>
 
+#import "DebugLogging.h"
 #import "iTermLSOF.h"
 #import "iTermProcessCache.h"
 #import "iTermRateLimitedUpdate.h"
@@ -27,6 +28,7 @@
     _Atomic bool _needsUpdate;
     NSMutableSet<NSNumber *> *_trackedPids;  // _queue
     iTermRateLimitedUpdate *_rateLimit;  // keeps updateIfNeeded from eating all the CPU
+    NSMutableArray<void (^)(void)> *_blocks; // Any queue. @synchronized(_blocks)
 }
 
 + (instancetype)sharedInstance {
@@ -46,6 +48,7 @@
         _rateLimit.minimumInterval = 0.5;
         _trackedPids = [NSMutableSet set];
         [self setNeedsUpdate:YES];
+        _blocks = [NSMutableArray array];
         [[NSNotificationCenter defaultCenter] addObserver:self
                                                  selector:@selector(applicationDidBecomeActive:)
                                                      name:NSApplicationDidBecomeActiveNotification
@@ -61,10 +64,57 @@
 #pragma mark - APIs
 
 - (void)setNeedsUpdate:(BOOL)needsUpdate {
+    DLog(@"setNeedsUpdate:%@", @(needsUpdate));
     self.needsUpdateFlag = needsUpdate;
     if (needsUpdate) {
         [_rateLimit performRateLimitedSelector:@selector(updateIfNeeded) onTarget:self withObject:nil];
     }
+}
+
+// main queue
+- (void)requestImmediateUpdateWithCompletionBlock:(void (^)(void))completion {
+    BOOL needsUpdate;
+    @synchronized (_blocks) {
+        [_blocks addObject:[completion copy]];
+        needsUpdate = _blocks.count == 1;
+    }
+    if (!needsUpdate) {
+        DLog(@"request immediate update just added block to queue");
+        return;
+    }
+    DLog(@"request immediate update scheduling update");
+    __weak __typeof(self) weakSelf = self;
+    dispatch_async(_queue, ^{
+        [weakSelf collectBlocksAndUpdate];
+    });
+}
+
+// _queue
+- (void)collectBlocksAndUpdate {
+    NSMutableArray<void (^)(void)> *blocks;
+    @synchronized (_blocks) {
+        blocks = _blocks.copy;
+        [_blocks removeAllObjects];
+    }
+    assert(blocks.count > 0);
+    DLog(@"collecting blocks and updating");
+    [self reallyUpdate];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        for (void (^block)(void) in blocks) {
+            block();
+        }
+    });
+}
+
+- (void)updateSynchronouslyWithTimeout:(NSTimeInterval)timeout {
+    dispatch_group_t group = dispatch_group_create();
+    dispatch_group_enter(group);
+    __weak __typeof(self) weakSelf = self;
+    dispatch_async(_queue, ^{
+        [weakSelf reallyUpdate];
+        dispatch_group_leave(group);
+    });
+    dispatch_group_wait(group, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(timeout * NSEC_PER_SEC)));
 }
 
 - (iTermProcessInfo *)processInfoForPid:(pid_t)pid {
@@ -95,12 +145,20 @@
 #pragma mark - Private
 
 - (void)updateIfNeeded {
+    DLog(@"updateIfNeeded");
     if (!self.needsUpdateFlag) {
+        DLog(@"** Returning early!");
         return;
     }
+    __weak __typeof(self) weakSelf = self;
+    dispatch_async(_queue, ^{
+        [weakSelf reallyUpdate];
+    });
+}
 
+- (void)reallyUpdate {
+    DLog(@"Process cache reallyUpdate starting");
     NSArray<NSNumber *> *allPids = [iTermLSOF allPids];
-
     // pid -> ppid
     NSMutableDictionary<NSNumber *, NSNumber *> *parentmap = [NSMutableDictionary dictionary];
     iTermProcessCollection *collection = [[iTermProcessCollection alloc] init];

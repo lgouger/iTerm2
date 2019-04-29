@@ -63,6 +63,7 @@
 #import "iTermRestorableSession.h"
 #import "iTermSetCurrentTerminalHelper.h"
 #import "iTermSystemVersion.h"
+#import "iTermUserDefaults.h"
 #import "iTermWarning.h"
 #import "PTYWindow.h"
 #include <objc/runtime.h>
@@ -72,7 +73,6 @@
 @end
 
 // Pref keys
-static NSString *const kSelectionRespectsSoftBoundariesKey = @"Selection Respects Soft Boundaries";
 static iTermController *gSharedInstance;
 
 @interface iTermController()<iTermSetCurrentTerminalHelperDelegate>
@@ -942,7 +942,7 @@ static iTermController *gSharedInstance;
 
 - (iTermWindowType)windowTypeForBookmark:(Profile *)aDict {
     if ([aDict objectForKey:KEY_WINDOW_TYPE]) {
-        int windowType = iTermSanitizedWindowType([[aDict objectForKey:KEY_WINDOW_TYPE] intValue]);
+        const iTermWindowType windowType = iTermThemedWindowType([[aDict objectForKey:KEY_WINDOW_TYPE] intValue]);
         if (windowType == WINDOW_TYPE_TRADITIONAL_FULL_SCREEN &&
             [iTermPreferences boolForKey:kPreferenceKeyLionStyleFullscreen]) {
             return WINDOW_TYPE_LION_FULL_SCREEN;
@@ -950,7 +950,7 @@ static iTermController *gSharedInstance;
             return windowType;
         }
     } else {
-        return WINDOW_TYPE_NORMAL;
+        return iTermWindowDefaultType();
     }
 }
 
@@ -980,7 +980,7 @@ static iTermController *gSharedInstance;
     if ([iTermAdvancedSettingsModel serializeOpeningMultipleFullScreenWindows]) {
         windowType = [self windowTypeForBookmark:profile];
     } else {
-        windowType = [iTermProfilePreferences intForKey:KEY_WINDOW_TYPE inProfile:profile];
+        windowType = iTermThemedWindowType([iTermProfilePreferences intForKey:KEY_WINDOW_TYPE inProfile:profile]);
     }
     PseudoTerminal *term =
         [[[PseudoTerminal alloc] initWithSmartLayout:YES
@@ -1018,7 +1018,9 @@ static iTermController *gSharedInstance;
                         makeKey:YES
                     canActivate:YES
                         command:nil
-                          block:nil];
+                          block:nil
+                    synchronous:NO
+                     completion:nil];
 }
 
 - (NSString *)validatedAndShellEscapedUsername:(NSString *)username {
@@ -1154,8 +1156,10 @@ static iTermController *gSharedInstance;
                        makeKey:(BOOL)makeKey
                    canActivate:(BOOL)canActivate
                        command:(NSString *)command
-                         block:(PTYSession *(^)(Profile *, PseudoTerminal *))block {
-    DLog(@"launchBookmark:inTerminal:withUrl:isHotkey:makeKey:canActivate:command:block:");
+                         block:(PTYSession *(^)(Profile *, PseudoTerminal *))block
+                   synchronous:(BOOL)synchronous
+                    completion:(void (^ _Nullable)(BOOL))completion {
+    DLog(@"launchBookmark:inTerminal:withUrl:isHotkey:makeKey:canActivate:command:block:synchronous:completion:");
     DLog(@"Profile:\n%@", bookmarkData);
     DLog(@"URL: %@", url);
     DLog(@"hotkey window type: %@", @(hotkeyWindowType));
@@ -1179,6 +1183,9 @@ static iTermController *gSharedInstance;
         aDict = [self profile:aDict modifiedToOpenURL:url forObjectType:objectType];
         if (aDict == nil) {
             // Bogus hostname detected
+            if (completion != nil) {
+                completion(NO);
+            }
             return nil;
         }
     }
@@ -1202,7 +1209,7 @@ static iTermController *gSharedInstance;
             term = theTerm;
             [term finishInitializationWithSmartLayout:YES
                                            windowType:windowType
-                                      savedWindowType:WINDOW_TYPE_NORMAL
+                                      savedWindowType:iTermWindowDefaultType()
                                                screen:[aDict objectForKey:KEY_SCREEN] ? [[aDict objectForKey:KEY_SCREEN] intValue] : -1
                                      hotkeyWindowType:hotkeyWindowType
                                               profile:aDict];
@@ -1232,6 +1239,7 @@ static iTermController *gSharedInstance;
 
     PTYSession* session = nil;
 
+    BOOL callCompletionBlock = (completion != nil);
     if (block) {
         DLog(@"Create a session via callback");
         session = block(aDict, term);
@@ -1239,6 +1247,7 @@ static iTermController *gSharedInstance;
         DLog(@"Creating a new session");
         session = [[term.sessionFactory newSessionWithProfile:aDict] autorelease];
         [term addSessionInNewTab:session];
+        callCompletionBlock = NO;
         const BOOL ok = [term.sessionFactory attachOrLaunchCommandInSession:session
                                                                   canPrompt:YES
                                                                  objectType:objectType
@@ -1252,15 +1261,25 @@ static iTermController *gSharedInstance;
                                                                      isUTF8:nil
                                                               substitutions:nil
                                                            windowController:term
-                                                                 completion:nil];
+                                                                synchronous:synchronous
+                                                                 completion:completion];
         if (!ok) {
+            completion(NO);
             session = nil;
         }
     } else {
-        session = [term createTabWithProfile:aDict withCommand:command environment:nil];
+        callCompletionBlock = NO;
+        session = [term createTabWithProfile:aDict
+                                 withCommand:command
+                                 environment:nil
+                                 synchronous:synchronous
+                                  completion:completion];
     }
     if (!session && term.numberOfTabs == 0) {
         [[term window] close];
+        if (callCompletionBlock) {
+            completion(NO);
+        }
         return nil;
     }
 
@@ -1290,6 +1309,9 @@ static iTermController *gSharedInstance;
         }
     }
 
+    if (callCompletionBlock) {
+        completion(YES);
+    }
     return session;
 }
 
@@ -1586,7 +1608,7 @@ static iTermController *gSharedInstance;
     MutableProfile *windowProfile = [[[self defaultBookmark] mutableCopy] autorelease];
     if ([windowProfile[KEY_WINDOW_TYPE] integerValue] == WINDOW_TYPE_TRADITIONAL_FULL_SCREEN ||
         [windowProfile[KEY_WINDOW_TYPE] integerValue] == WINDOW_TYPE_LION_FULL_SCREEN) {
-        windowProfile[KEY_WINDOW_TYPE] = @(WINDOW_TYPE_NORMAL);
+        windowProfile[KEY_WINDOW_TYPE] = @(iTermWindowDefaultType());
     }
     if (initialPWD) {
         windowProfile[KEY_WORKING_DIRECTORY] = initialPWD;
@@ -1612,7 +1634,11 @@ static iTermController *gSharedInstance;
         if (shortLived) {
             profile = [profile dictionaryBySettingObject:@0 forKey:KEY_UNDO_TIMEOUT];
         }
-        PTYSession *session = [term createTabWithProfile:profile withCommand:command environment:environment];
+        PTYSession *session = [term createTabWithProfile:profile
+                                             withCommand:command
+                                             environment:environment
+                                             synchronous:NO
+                                              completion:nil];
         if (shortLived) {
             session.shortLivedSingleUse = YES;
         }
@@ -1642,7 +1668,9 @@ static iTermController *gSharedInstance;
                                        makeKey:YES
                                    canActivate:YES
                                        command:command
-                                         block:makeSession];
+                                         block:makeSession
+                                   synchronous:NO
+                                    completion:nil];
 
     if (bury) {
         [session bury];

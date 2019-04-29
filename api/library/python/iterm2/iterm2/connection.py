@@ -269,11 +269,34 @@ class Connection:
                     except Exception as _err:
                         traceback.print_exc()
                         sys.exit(1)
-            except OSError as e:
+            except websockets.exceptions.InvalidMessage:
+                # This is a temporary workaround for this issue:
+                #
+                # https://gitlab.com/gnachman/iterm2/issues/7681#note_163548399
+                # https://github.com/aaugustin/websockets/issues/604
+                #
+                # I'm leaving the print statement in because I'm worried this might
+                # have unexpected consequences, as InvalidMessage is certainly
+                # not very specific.
+                print("websockets.connect failed with InvalidMessage. Retrying.")
+            except (ConnectionRefusedError, OSError) as e:
                 # https://github.com/aaugustin/websockets/issues/593
                 if retry:
                     await asyncio.sleep(0.5)
                 else:
+                    print("""
+There was a problem connecting to iTerm2.
+
+Please check the following:
+  * Ensure the Python API is enabled in iTerm2's preferences
+  * Ensure iTerm2 is running
+  * Ensure script is running on the same machine as iTerm2
+
+If you'd prefer to retry connecting automatically instead of
+raising an exception, pass retry=true to run_until_complete()
+or run_forever()
+
+""", file=sys.stderr)
                     done = True
                     raise
 

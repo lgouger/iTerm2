@@ -21,21 +21,17 @@ static NSString *const iTermOnboardingWindowControllerHasBeenShown = @"NoSyncOnb
 static void iTermTryMinimalCompact(NSWindow *window) {
     const iTermPreferencesTabStyle savedTabStyle = [iTermPreferences intForKey:kPreferenceKeyTabStyle];
     [iTermPreferences setInt:TAB_STYLE_MINIMAL forKey:kPreferenceKeyTabStyle];
-
-    ProfileModel *model = [ProfileModel sharedInstance];
-    Profile *profile = [model defaultBookmark];
-
-    const iTermWindowType savedWindowType = [iTermProfilePreferences integerForKey:KEY_WINDOW_TYPE inProfile:profile];
-    [iTermProfilePreferences setInteger:WINDOW_TYPE_COMPACT forKey:KEY_WINDOW_TYPE inProfile:profile model:model];
-
+    [[NSNotificationCenter defaultCenter] postNotificationName:kRefreshTerminalNotification
+                                                        object:nil
+                                                      userInfo:nil];
     PTYSession *session = [[iTermController sharedInstance] launchBookmark:nil inTerminal:nil];
     [session.view.window performZoom:nil];
 
     NSAlert *alert = [[NSAlert alloc] init];
-    [alert setMessageText:@"Minimal Theme & Compact Windows"];
-    [alert setInformativeText:@"The theme has been changed to minimal and your default profile’s window type has been changed to Compact."];
+    [alert setMessageText:@"Minimal Theme"];
+    [alert setInformativeText:@"The theme has been changed to minimal. Want to keep it?"];
     [alert addButtonWithTitle:@"Save"];
-    [alert addButtonWithTitle:@"Restore"];
+    [alert addButtonWithTitle:@"Undo"];
     [alert setAlertStyle:NSAlertStyleInformational];
 
     [alert beginSheetModalForWindow:window completionHandler:^(NSModalResponse returnCode) {
@@ -43,7 +39,9 @@ static void iTermTryMinimalCompact(NSWindow *window) {
             return;
         };
         [iTermPreferences setInt:savedTabStyle forKey:kPreferenceKeyTabStyle];
-        [iTermProfilePreferences setInteger:savedWindowType forKey:KEY_WINDOW_TYPE inProfile:profile model:model];
+        [[NSNotificationCenter defaultCenter] postNotificationName:kRefreshTerminalNotification
+                                                            object:nil
+                                                          userInfo:nil];
     }];
 }
 
@@ -192,6 +190,8 @@ static void iTermOpenWhatsNewURL(NSString *path, NSWindow *window) {
 
 - (void)awakeFromNib {
     NSMutableAttributedString *attributedString;
+    // LOL the IB setting is not respected in 10.12 so you have to do it in code.
+    self.window.titlebarAppearsTransparent = YES;
     if (@available(macOS 10.14, *)) {
         NSString *url1 = @"iterm2whatsnew:/minimal-compact";
         NSMutableAttributedString *attributedString = _textField1.attributedStringValue.mutableCopy;

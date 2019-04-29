@@ -1,4 +1,5 @@
 #import "PTYSession.h"
+#import "PTYSession+ARC.h"
 
 #import "Coprocess.h"
 #import "CVector.h"
@@ -52,6 +53,7 @@
 #import "iTermNotificationCenter.h"
 #import "iTermPasteHelper.h"
 #import "iTermPreferences.h"
+#import "iTermPrintGuard.h"
 #import "iTermProcessCache.h"
 #import "iTermProfilePreferences.h"
 #import "iTermPromptOnCloseReason.h"
@@ -92,6 +94,7 @@
 #import "NSArray+iTerm.h"
 #import "NSColor+iTerm.h"
 #import "NSData+iTerm.h"
+#import "NSDate+iTerm.h"
 #import "NSDictionary+iTerm.h"
 #import "NSFont+iTerm.h"
 #import "NSImage+iTerm.h"
@@ -513,6 +516,8 @@ static const NSUInteger kMaxHosts = 100;
     iTermVariableScope *_variablesScope;
     
     BOOL _showingVisualIndicatorForEsc;
+
+    iTermPrintGuard *_printGuard;
 }
 
 + (NSMapTable<NSString *, PTYSession *> *)sessionMap {
@@ -842,6 +847,7 @@ ITERM_WEAKLY_REFERENCEABLE
     [_keyMapper release];
     [_badgeFontName release];
     [_variablesScope release];
+    [_printGuard release];
 
     [super dealloc];
 }
@@ -1062,7 +1068,6 @@ ITERM_WEAKLY_REFERENCEABLE
                                    shouldEnterTmuxMode:(BOOL)shouldEnterTmuxMode
                                                  state:(NSDictionary *)state
                                      tmuxDCSIdentifier:(NSString *)tmuxDCSIdentifier
-                                        tmuxPaneNumber:(NSNumber *)tmuxPaneNumber
                                         missingProfile:(BOOL)missingProfile {
     if (needDivorce) {
         [aSession divorceAddressBookEntryFromPreferences];
@@ -1077,10 +1082,6 @@ ITERM_WEAKLY_REFERENCEABLE
         [aSession setSessionSpecificProfileValues:@{ KEY_SESSION_HOTKEY: shortcutDictionary }];
     }
 
-
-    if (tmuxPaneNumber) {
-        [aSession setTmuxPane:[tmuxPaneNumber intValue]];
-    }
     NSArray *history = [arrangement objectForKey:SESSION_ARRANGEMENT_TMUX_HISTORY];
     if (history) {
         [[aSession screen] setHistory:history];
@@ -1356,7 +1357,7 @@ ITERM_WEAKLY_REFERENCEABLE
     BOOL attachedToServer = NO;
     typedef void (^iTermBooleanCompletionBlock)(BOOL ok);
     void (^runCommandBlock)(iTermBooleanCompletionBlock) = ^(void (^completion)(BOOL)) { completion(YES); };
-
+    BOOL startAutoLog = NO;
     if (!tmuxPaneNumber) {
         DLog(@"No tmux pane ID during session restoration");
         // |contents| will be non-nil when using system window restoration.
@@ -1465,6 +1466,7 @@ ITERM_WEAKLY_REFERENCEABLE
                                                  isUTF8:isUTF8Arg
                                           substitutions:substitutionsArg
                                        windowController:(PseudoTerminal *)aSession.delegate.realParentWindow
+                                            synchronous:NO
                                              completion:completion];
             };
         }
@@ -1475,11 +1477,11 @@ ITERM_WEAKLY_REFERENCEABLE
             [aSession setTmuxWindowTitle:title];
         }
         if ([aSession.profile[KEY_AUTOLOG] boolValue]) {
-            [aSession.shell startLoggingToFileWithPath:[aSession autoLogFilename]
-                                          shouldAppend:NO];
+            startAutoLog = YES;
         }
+        [aSession setTmuxPane:[tmuxPaneNumber intValue]];
     }
-    void (^finish)(BOOL) = ^(BOOL ok){
+    void (^finish)(BOOL) = ^(BOOL ok) {
         if (!ok) {
             return;
         }
@@ -1494,11 +1496,24 @@ ITERM_WEAKLY_REFERENCEABLE
                                          shouldEnterTmuxMode:shouldEnterTmuxMode
                                                        state:state
                                            tmuxDCSIdentifier:tmuxDCSIdentifier
-                                              tmuxPaneNumber:tmuxPaneNumber
                                               missingProfile:missingProfile];
         [aSession didFinishInitialization:YES];
     };
-    runCommandBlock(finish);
+    if (startAutoLog) {
+        [aSession retain];
+        [aSession fetchAutoLogFilenameSynchronously:NO
+                                         completion:
+         ^(NSString * _Nonnull filename) {
+             if (filename) {
+                 [aSession.shell startLoggingToFileWithPath:filename
+                                               shouldAppend:NO];
+             }
+             [aSession autorelease];
+             runCommandBlock(finish);
+         }];
+    } else {
+        runCommandBlock(finish);
+    }
 
     return aSession;
 }
@@ -1517,16 +1532,16 @@ ITERM_WEAKLY_REFERENCEABLE
 - (void)showOrphanAnnouncement {
     NSString *notice = @"This already-running session was restored but its contents were not saved.";
     iTermAnnouncementViewController *announcement =
-        [iTermAnnouncementViewController announcementWithTitle:notice
-                                                         style:kiTermAnnouncementViewStyleQuestion
-                                                   withActions:@[ @"Why?" ]
-                                                    completion:^(int selection) {
-                                                        if (selection == 0) {
-                                                            // Why?
-                                                            NSURL *whyUrl = [NSURL URLWithString:@"https://iterm2.com/why_no_content.html"];
-                                                            [[NSWorkspace sharedWorkspace] openURL:whyUrl];
-                                                        }
-                                                    }];
+    [iTermAnnouncementViewController announcementWithTitle:notice
+                                                     style:kiTermAnnouncementViewStyleQuestion
+                                               withActions:@[ @"Why?" ]
+                                                completion:^(int selection) {
+                                                    if (selection == 0) {
+                                                        // Why?
+                                                        NSURL *whyUrl = [NSURL URLWithString:@"https://iterm2.com/why_no_content.html"];
+                                                        [[NSWorkspace sharedWorkspace] openURL:whyUrl];
+                                                    }
+                                                }];
     announcement.dismissOnKeyDown = YES;
     [self queueAnnouncement:announcement identifier:kReopenSessionWarningIdentifier];
 }
@@ -1779,17 +1794,6 @@ ITERM_WEAKLY_REFERENCEABLE
     return [iTermPromptOnCloseReason profileAlwaysPrompts:_profile];
 }
 
-- (NSString *)autoLogFilename {
-    NSDateFormatter *dateFormatter = [[[NSDateFormatter alloc] init] autorelease];
-    dateFormatter.dateFormat = @"yyyyMMdd_HHmmss";
-    NSString *format = [iTermAdvancedSettingsModel autoLogFormat];
-    NSString *name = [[format stringByReplacingVariableReferencesWithVariablesFromScope:self.variablesScope
-                                                                nonVariableReplacements:@{}] stringByReplacingOccurrencesOfString:@"/" withString:@"__"];
-    NSString *filename = [[iTermProfilePreferences stringForKey:KEY_LOGDIR inProfile:_profile] stringByAppendingPathComponent:name];
-    DLog(@"Using autolog filename %@ from format %@", filename, format);
-    return filename;
-}
-
 - (BOOL)shouldSetCtype {
     return ![iTermAdvancedSettingsModel doNotSetCtype];
 }
@@ -1934,18 +1938,11 @@ ITERM_WEAKLY_REFERENCEABLE
     completion(env);
 }
 
-- (NSString *)autoLogFilenameIfEnabled {
-    if ([_profile[KEY_AUTOLOG] boolValue]) {
-        return [self autoLogFilename];
-    } else {
-        return nil;
-    }
-}
-
 - (void)startProgram:(NSString *)command
          environment:(NSDictionary *)environment
               isUTF8:(BOOL)isUTF8
        substitutions:(NSDictionary *)substitutions
+         synchronous:(BOOL)synchronous
           completion:(void (^)(BOOL))completion {
     DLog(@"startProgram:%@ environment:%@ isUTF8:%@ substitutions:%@",
          command, environment, @(isUTF8), substitutions);
@@ -1955,26 +1952,29 @@ ITERM_WEAKLY_REFERENCEABLE
     self.isUTF8 = isUTF8;
     self.substitutions = substitutions ?: @{};
 
-    [self computeArgvForCommand:command substitutions:substitutions synchronous:(completion == nil) completion:^(NSArray<NSString *> *argv) {
+    [self computeArgvForCommand:command substitutions:substitutions synchronous:synchronous completion:^(NSArray<NSString *> *argv) {
         DLog(@"argv=%@", argv);
-        [self computeEnvironmentForNewJobFromEnvironment:environment ?: @{} substitutions:substitutions synchronous:(completion == nil) completion:^(NSDictionary *env) {
+        [self computeEnvironmentForNewJobFromEnvironment:environment ?: @{} substitutions:substitutions synchronous:synchronous completion:^(NSDictionary *env) {
             @synchronized(self) {
                 _registered = YES;
             }
-            [_shell launchWithPath:argv[0]
-                         arguments:[argv subarrayFromIndex:1]
-                       environment:env
-                             width:[_screen width]
-                            height:[_screen height]
-                            isUTF8:isUTF8
-                       autologPath:[self autoLogFilenameIfEnabled]
-                       synchronous:(completion == nil)
-                        completion:^{
-                            [self sendInitialText];
-                            if (completion) {
-                                completion(YES);
-                            }
-                        }];
+            [self fetchAutoLogFilenameSynchronously:synchronous
+                                         completion:^(NSString * _Nonnull autoLogFilename) {
+                [_shell launchWithPath:argv[0]
+                             arguments:[argv subarrayFromIndex:1]
+                           environment:env
+                                 width:[_screen width]
+                                height:[_screen height]
+                                isUTF8:isUTF8
+                           autologPath:autoLogFilename
+                           synchronous:synchronous
+                            completion:^{
+                                [self sendInitialText];
+                                if (completion) {
+                                    completion(YES);
+                                }
+                            }];
+            }];
         }];
     }];
 }
@@ -1988,8 +1988,7 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (void)launchProfileInCurrentTerminal:(Profile *)profile
-                               withURL:(NSString *)url
-{
+                               withURL:(NSString *)url {
     PseudoTerminal *term = [[iTermController sharedInstance] currentTerminal];
     [[iTermController sharedInstance] launchBookmark:profile
                                           inTerminal:term
@@ -1998,31 +1997,28 @@ ITERM_WEAKLY_REFERENCEABLE
                                              makeKey:NO
                                          canActivate:NO
                                              command:nil
-                                               block:nil];
+                                               block:nil
+                                         synchronous:NO
+                                          completion:nil];
 }
 
-- (void)selectPaneLeftInCurrentTerminal
-{
+- (void)selectPaneLeftInCurrentTerminal {
     [[[iTermController sharedInstance] currentTerminal] selectPaneLeft:nil];
 }
 
-- (void)selectPaneRightInCurrentTerminal
-{
+- (void)selectPaneRightInCurrentTerminal {
     [[[iTermController sharedInstance] currentTerminal] selectPaneRight:nil];
 }
 
-- (void)selectPaneAboveInCurrentTerminal
-{
+- (void)selectPaneAboveInCurrentTerminal {
     [[[iTermController sharedInstance] currentTerminal] selectPaneUp:nil];
 }
 
-- (void)selectPaneBelowInCurrentTerminal
-{
+- (void)selectPaneBelowInCurrentTerminal {
     [[[iTermController sharedInstance] currentTerminal] selectPaneDown:nil];
 }
 
-- (void)_maybeWarnAboutShortLivedSessions
-{
+- (void)_maybeWarnAboutShortLivedSessions {
     if ([iTermApplication.sharedApplication delegate].isAppleScriptTestApp) {
         // The applescript test driver doesn't care about short-lived sessions.
         return;
@@ -2587,7 +2583,9 @@ ITERM_WEAKLY_REFERENCEABLE
     // Make sure the screen gets redrawn soonish
     self.active = YES;
 
-    [[iTermProcessCache sharedInstance] setNeedsUpdate:YES];
+    if (self.shell.pid > 0 || [[[self variablesScope] valueForVariableName:@"jobName"] length] > 0) {
+        [[iTermProcessCache sharedInstance] setNeedsUpdate:YES];
+    }
 }
 
 - (void)checkTriggers {
@@ -2827,6 +2825,7 @@ ITERM_WEAKLY_REFERENCEABLE
            environment:_environment
                 isUTF8:_isUTF8
          substitutions:_substitutions
+           synchronous:YES
             completion:nil];
 }
 
@@ -3187,6 +3186,9 @@ ITERM_WEAKLY_REFERENCEABLE
         return;
     }
 
+    // NOTE: The synchronous API is used here because this is a user-initiated action. We don't want
+    // things to change out from under us. It's ok to block the UI while waiting for disk access
+    // to complete.
     NSString *rawFilename =
         [semanticHistoryController pathOfExistingFileFoundWithPrefix:selection
                                                               suffix:@""
@@ -3203,17 +3205,26 @@ ITERM_WEAKLY_REFERENCEABLE
                                                               workingDirectory:workingDirectory
                                                            extractedLineNumber:&lineNumber
                                                                   columnNumber:&columnNumber];
-        if ([_textview openSemanticHistoryPath:cleanedup
-                                 orRawFilename:rawFilename
-                              workingDirectory:workingDirectory
-                                    lineNumber:lineNumber
-                                  columnNumber:columnNumber
-                                        prefix:selection
-                                        suffix:@""]) {
-            return;
-        }
+        __weak __typeof(self) weakSelf = self;
+        [_textview openSemanticHistoryPath:cleanedup
+                             orRawFilename:rawFilename
+                          workingDirectory:workingDirectory
+                                lineNumber:lineNumber
+                              columnNumber:columnNumber
+                                    prefix:selection
+                                    suffix:@""
+                                completion:^(BOOL ok) {
+                                    if (!ok) {
+                                        [weakSelf tryOpenStringAsURL:selection];
+                                    }
+                                }];
+        return;
     }
 
+    [self tryOpenStringAsURL:selection];
+}
+
+- (void)tryOpenStringAsURL:(NSString *)selection {
     // Try to open it as a URL.
     NSURL *url =
         [NSURL URLWithUserSuppliedString:[selection stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]];
@@ -4323,7 +4334,7 @@ ITERM_WEAKLY_REFERENCEABLE
         }
     } else {
         int pid;
-        NSString *name = [_shell currentJob:NO pid:&pid];
+        NSString *name = [_shell currentJob:NO pid:&pid completion:nil];
         [self setJobName:name pid:pid];
         [self.view setTitle:_nameController.presentationSessionTitle];
     }
@@ -4348,12 +4359,18 @@ ITERM_WEAKLY_REFERENCEABLE
 
 // Update the tab, session view, and window title.
 - (void)updateTitles {
-    int pid;
-    NSString *newJobName = [_shell currentJob:NO pid:&pid];
+    int pid = 0;
+    __weak __typeof(self) weakSelf = self;
+    NSString *newJobName = [_shell currentJob:NO pid:&pid completion:^{
+        DLog(@"** completion block recursing **");
+        [weakSelf updateTitles];
+    }];
+    DLog(@"Job for pid %@ is %@, pid=%@", @(_shell.pid), newJobName, @(pid));
     [self setJobName:newJobName pid:pid];
 
     if ([_delegate sessionBelongsToVisibleTab]) {
         // Revert to the permanent tab title.
+        DLog(@"Session asking to set window title. Parent window is %@", [_delegate parentWindow]);
         [[_delegate parentWindow] setWindowTitle];
     }
 }
@@ -6541,10 +6558,14 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
             [[_delegate realParentWindow] newTabWithBookmarkGuid:keyBindingText];
             break;
         case KEY_ACTION_SPLIT_HORIZONTALLY_WITH_PROFILE:
-            [[_delegate realParentWindow] splitVertically:NO withBookmarkGuid:keyBindingText];
+            [[_delegate realParentWindow] splitVertically:NO
+                                         withBookmarkGuid:keyBindingText
+                                              synchronous:NO];
             break;
         case KEY_ACTION_SPLIT_VERTICALLY_WITH_PROFILE:
-            [[_delegate realParentWindow] splitVertically:YES withBookmarkGuid:keyBindingText];
+            [[_delegate realParentWindow] splitVertically:YES
+                                         withBookmarkGuid:keyBindingText
+                                              synchronous:NO];
             break;
         case KEY_ACTION_SET_PROFILE: {
             Profile *newProfile = [[ProfileModel sharedInstance] bookmarkWithGuid:keyBindingText];
@@ -7296,7 +7317,8 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
     }
     [[_delegate realParentWindow] splitVertically:vertically
                                      withBookmark:profile
-                                    targetSession:self];
+                                    targetSession:self
+                                      synchronous:NO];
 }
 
 - (void)textViewSelectNextTab
@@ -7878,6 +7900,10 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
     return [iTermProfilePreferences floatForKey:KEY_BADGE_RIGHT_MARGIN inProfile:self.profile];
 }
 
+- (iTermVariableScope *)textViewVariablesScope {
+    return self.variablesScope;
+}
+
 - (void)bury {
     if (self.isTmuxClient) {
         if (!self.delegate) {
@@ -8251,8 +8277,10 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
 }
 
 - (BOOL)screenShouldBeginPrinting {
-
-    return ![[[self profile] objectForKey:KEY_DISABLE_PRINTING] boolValue];
+    if (!_printGuard) {
+        _printGuard = [[iTermPrintGuard alloc] init];
+    }
+    return [_printGuard shouldPrintWithProfile:self.profile inWindow:self.view.window];
 }
 
 - (void)screenSetWindowTitle:(NSString *)title {
@@ -9884,15 +9912,20 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
 
     void (^originalCompletion)(int) = [announcement.completion copy];
     NSString *identifierCopy = [identifier copy];
+    __weak __typeof(self) weakSelf = self;
     announcement.completion = ^(int selection) {
         originalCompletion(selection);
         if (selection == -2) {
-            [_announcements removeObjectForKey:identifierCopy];
+            [weakSelf removeAnnouncementWithIdentifier:identifierCopy];
             [identifierCopy release];
             [originalCompletion release];
         }
     };
     [_view addAnnouncement:announcement];
+}
+
+- (void)removeAnnouncementWithIdentifier:(NSString *)identifier {
+    [_announcements removeObjectForKey:identifier];
 }
 
 #pragma mark - PopupDelegate
@@ -10679,9 +10712,12 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
     return response;
 }
 
-- (ITMSetProfilePropertyResponse_Status)handleSetProfilePropertyForKey:(NSString *)key value:(id)value {
+- (ITMSetProfilePropertyResponse_Status)handleSetProfilePropertyForKey:(NSString *)key
+                                                                 value:(id)value
+                                                    scriptHistoryEntry:(iTermScriptHistoryEntry *)scriptHistoryEntry {
     if (![iTermProfilePreferences valueIsLegal:value forKey:key]) {
         XLog(@"Value %@ is not legal for key %@", value, key);
+        [scriptHistoryEntry addOutput:[NSString stringWithFormat:@"Value %@ is not legal type for key %@\n", value, key]];
         return ITMSetProfilePropertyResponse_Status_RequestMalformed;
     }
 
@@ -10767,7 +10803,11 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
 #pragma mark - Variable Change Handlers
 
 - (void)jobPidDidChange {
-    [[iTermProcessCache sharedInstance] setNeedsUpdate:YES];
+    // Avoid requesting an update before we know the name because doing so delays updating it when
+    // we finally get the name since it's rate-limited.
+    if (self.shell.pid > 0 || [[[self variablesScope] valueForVariableName:@"jobName"] length] > 0) {
+        [[iTermProcessCache sharedInstance] setNeedsUpdate:YES];
+    }
     if ([_graphicSource updateImageForProcessID:self.shell.pid enabled:[self shouldShowTabGraphic]]) {
         [self.delegate sessionDidChangeGraphic:self shouldShow:self.shouldShowTabGraphic image:self.tabGraphic];
     }
@@ -10860,7 +10900,7 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
     const CGFloat alpha = 0.25;
     if (@available(macOS 10.14, *)) {
         NSAppearance *appearance = nil;
-        switch ([iTermPreferences intForKey:kPreferenceKeyTabStyle]) {
+        switch ((iTermPreferencesTabStyle)[iTermPreferences intForKey:kPreferenceKeyTabStyle]) {
             case TAB_STYLE_DARK:
             case TAB_STYLE_DARK_HIGH_CONTRAST:
                 appearance = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
@@ -10870,6 +10910,7 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
                 appearance = [NSAppearance appearanceNamed:NSAppearanceNameAqua];
                 break;
             case TAB_STYLE_AUTOMATIC:
+            case TAB_STYLE_COMPACT:
             case TAB_STYLE_MINIMAL:  // shouldn't happen
                 appearance = [NSApp effectiveAppearance];
                 break;

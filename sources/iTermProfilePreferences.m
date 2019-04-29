@@ -172,7 +172,8 @@ NSString *const kProfilePreferenceInitialDirectoryAdvancedValue = @"Advanced";
 #pragma mark - Private
 
 + (BOOL)valueIsLegal:(id)value forKey:(NSString *)key {
-    NSArray *string = @[ KEY_NAME, KEY_BADGE_FORMAT, KEY_ANSWERBACK_STRING ];
+    NSArray *string = @[ KEY_NAME, KEY_BADGE_FORMAT, KEY_ANSWERBACK_STRING, KEY_NORMAL_FONT,
+                         KEY_NON_ASCII_FONT, KEY_AWDS_TAB_OPTION, KEY_AWDS_PANE_OPTION, KEY_AWDS_WIN_OPTION ];
 
     NSArray *color = @[ KEY_FOREGROUND_COLOR, KEY_BACKGROUND_COLOR, KEY_BOLD_COLOR,
                         KEY_LINK_COLOR, KEY_SELECTION_COLOR, KEY_SELECTED_TEXT_COLOR,
@@ -371,7 +372,10 @@ NSString *const kProfilePreferenceInitialDirectoryAdvancedValue = @"Advanced";
                   KEY_TITLE_FUNC: [NSNull null],
                   KEY_SHOW_STATUS_BAR: @NO,
                   KEY_STATUS_BAR_LAYOUT: @{},
-                  KEY_TRIGGERS_USE_INTERPOLATED_STRINGS: @NO
+                  KEY_TRIGGERS_USE_INTERPOLATED_STRINGS: @NO,
+                  KEY_AWDS_TAB_OPTION: kProfilePreferenceInitialDirectoryHomeValue,
+                  KEY_AWDS_PANE_OPTION: kProfilePreferenceInitialDirectoryHomeValue,
+                  KEY_AWDS_WIN_OPTION: kProfilePreferenceInitialDirectoryHomeValue,
                   // Remember to update valueIsLegal:forKey: and the websocket
                   // README.md when adding a new value that should be
                   // API-settable.
@@ -590,7 +594,7 @@ NSString *const kProfilePreferenceInitialDirectoryAdvancedValue = @"Advanced";
     if (!number) {
         return nil;
     }
-    return @(iTermSanitizedWindowType(number.intValue));
+    return @(iTermThemedWindowType(number.intValue));
 }
 
 + (id)badgeFont:(Profile *)profile {
