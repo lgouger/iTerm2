@@ -59,6 +59,7 @@ NSString *const iTermVariableKeySessionWindowName = @"terminalWindowName";
 NSString *const iTermVariableKeySessionJob = @"jobName";
 NSString *const iTermVariableKeySessionPresentationName = @"presentationName";
 NSString *const iTermVariableKeySessionTmuxWindowTitle = @"tmuxWindowTitle";
+NSString *const iTermVariableKeySessionTmuxWindowTitleEval = @"tmuxWindowTitleEval";
 NSString *const iTermVariableKeySessionTmuxRole = @"tmuxRole";
 NSString *const iTermVariableKeySessionTmuxClientName = @"tmuxClientName";
 NSString *const iTermVariableKeySessionAutoNameFormat = @"autoNameFormat";
@@ -322,7 +323,9 @@ NSString *const iTermVariableKeyWindowCurrentTab = @"currentTab";
 }
 
 - (nullable iTermVariables *)setValue:(id)value forVariableNamed:(NSString *)name withSideEffects:(BOOL)sideEffects weak:(BOOL)weak {
-    assert(name.length > 0);
+    if (name.length == 0) {
+        return nil;
+    }
 
     // If name refers to a variable of a child, go down a level.
     NSArray<NSString *> *parts = [name componentsSeparatedByString:@"."];

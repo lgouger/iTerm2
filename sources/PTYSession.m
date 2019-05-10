@@ -497,7 +497,8 @@ static const NSUInteger kMaxHosts = 100;
     iTermVariables *_userVariables;
     iTermSwiftyString *_badgeSwiftyString;
     iTermSwiftyString *_autoNameSwiftyString;
-    
+    iTermSwiftyString *_tmuxWindowTitleSwiftyString;
+
     iTermBackgroundDrawingHelper *_backgroundDrawingHelper;
     iTermMetaFrustrationDetector *_metaFrustrationDetector;
 
@@ -625,11 +626,28 @@ static const NSUInteger kMaxHosts = 100;
         _autoNameSwiftyString = [[iTermSwiftyString alloc] initWithScope:self.variablesScope
                                                               sourcePath:iTermVariableKeySessionAutoNameFormat
                                                          destinationPath:iTermVariableKeySessionAutoName];
-        _autoNameSwiftyString.observer = ^(NSString * _Nonnull newValue) {
+        _autoNameSwiftyString.observer = ^NSString *(NSString * _Nonnull newValue, NSError *error) {
             if ([weakSelf checkForCyclesInSwiftyStrings]) {
                 weakSelf.variablesScope.autoNameFormat = @"[Cycle detected]";
             }
+            return newValue;
         };
+
+        [_tmuxWindowTitleSwiftyString invalidate];
+        [_tmuxWindowTitleSwiftyString autorelease];
+        _tmuxWindowTitleSwiftyString = [[iTermSwiftyString alloc] initWithScope:self.variablesScope
+                                                                     sourcePath:iTermVariableKeySessionTmuxWindowTitle
+                                                                destinationPath:iTermVariableKeySessionTmuxWindowTitleEval];
+        _tmuxWindowTitleSwiftyString.contextProvider = ^iTermVariableScope *{
+            return weakSelf.delegate.sessionTabScope;
+        };
+        _tmuxWindowTitleSwiftyString.observer = ^NSString *(NSString * _Nonnull newValue, NSError *error) {
+            if ([weakSelf checkForCyclesInSwiftyStrings]) {
+                weakSelf.variablesScope.tmuxWindowTitleEval = @"[Cycle detected]";
+            }
+            return newValue;
+        };
+        
         _tmuxSecureLogging = NO;
         _tailFindContext = [[FindContext alloc] init];
         _commandRange = VT100GridCoordRangeMake(-1, -1, -1, -1);
@@ -819,6 +837,7 @@ ITERM_WEAKLY_REFERENCEABLE
     [_metalDisabledTokens release];
     [_badgeSwiftyString release];
     [_autoNameSwiftyString release];
+    [_tmuxWindowTitleSwiftyString release];
     [_statusBarViewController release];
     [_echoProbe release];
     [_backgroundDrawingHelper release];
@@ -3670,8 +3689,12 @@ ITERM_WEAKLY_REFERENCEABLE
     [_badgeSwiftyString autorelease];
     _badgeSwiftyString = [[iTermSwiftyString alloc] initWithString:badgeFormat
                                                              scope:self.variablesScope
-                                                          observer:^(NSString * _Nonnull newValue) {
+                                                          observer:^NSString *(NSString * _Nonnull newValue, NSError *error) {
+                                                              if (error) {
+                                                                  return [NSString stringWithFormat:@"🐞 %@", error.localizedDescription];
+                                                              }
                                                               [weakSelf updateBadgeLabel:newValue];
+                                                              return newValue;
                                                           }];
 
 }
@@ -3723,6 +3746,10 @@ ITERM_WEAKLY_REFERENCEABLE
 
 - (BOOL)checkForCyclesInSwiftyStrings {
     iTermSwiftyStringGraph *graph = [[[iTermSwiftyStringGraph alloc] init] autorelease];
+    [graph addSwiftyString:_tmuxWindowTitleSwiftyString
+            withFormatPath:iTermVariableKeySessionTmuxWindowTitle
+            evaluationPath:iTermVariableKeySessionTmuxWindowTitleEval
+                     scope:self.variablesScope];
     [graph addSwiftyString:_autoNameSwiftyString
             withFormatPath:iTermVariableKeySessionAutoNameFormat
             evaluationPath:iTermVariableKeySessionAutoName
@@ -9083,6 +9110,7 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
 }
 
 - (void)screenCurrentHostDidChange:(VT100RemoteHost *)host {
+    DLog(@"Current host did change to %@ %@", host, self);
     const BOOL hadHost = (_currentHost != nil);
 
     NSNull *null = [NSNull null];

@@ -412,6 +412,9 @@ static NSRect iTermRectCenteredVerticallyWithinRect(NSRect frameToCenter, NSRect
     NSMutableArray *_toggleFullScreenModeCompletionBlocks;
 
     BOOL _windowNeedsInitialSize;
+
+    iTermFunctionCallTextFieldDelegate *_currentTabTitleTextFieldDelegate;
+    iTermVariables *_userVariables;
 }
 
 @synthesize scope = _scope;
@@ -617,6 +620,13 @@ static NSRect iTermRectCenteredVerticallyWithinRect(NSRect frameToCenter, NSRect
          windowType,
          screenNumber,
          @(hotkeyWindowType));
+
+    _scope = [iTermVariableScope newWindowScopeWithVariables:self.variables
+                                                tabVariables:[[[iTermVariables alloc] initWithContext:iTermVariablesSuggestionContextNone
+                                                                                               owner:self] autorelease]];
+    _userVariables = [[iTermVariables alloc] initWithContext:iTermVariablesSuggestionContextNone
+                                                       owner:self];
+    [_scope setValue:_userVariables forVariableNamed:@"user"];
 
     _toggleFullScreenModeCompletionBlocks = [[NSMutableArray alloc] init];
     _windowWasJustCreated = YES;
@@ -895,8 +905,12 @@ static NSRect iTermRectCenteredVerticallyWithinRect(NSRect frameToCenter, NSRect
         [[iTermSwiftyString alloc] initWithScope:self.scope
                                       sourcePath:iTermVariableKeyWindowTitleOverrideFormat
                                  destinationPath:iTermVariableKeyWindowTitleOverride];
-    _windowTitleOverrideSwiftyString.observer = ^(NSString * _Nonnull newValue) {
+    _windowTitleOverrideSwiftyString.observer = ^NSString *(NSString * _Nonnull newValue, NSError *error) {
+        if (error) {
+            return [NSString stringWithFormat:@"🐞 %@", error.localizedDescription];
+        }
         [weakSelf setWindowTitle];
+        return newValue;
     };
     _windowNeedsInitialSize = YES;
     DLog(@"Done initializing PseudoTerminal %@", self);
@@ -1025,9 +1039,11 @@ ITERM_WEAKLY_REFERENCEABLE
     [_sessionFactory release];
     [_variables release];
     [_scope release];
+    [_userVariables release];
     [_windowTitleOverrideSwiftyString release];
     [_initialProfile release];
     [_toggleFullScreenModeCompletionBlocks release];
+    [_currentTabTitleTextFieldDelegate release];
 
     [super dealloc];
 }
@@ -2575,10 +2591,6 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (iTermVariableScope<iTermWindowScope> *)scope {
-    if (!_scope) {
-        _scope = [iTermVariableScope newWindowScopeWithVariables:self.variables
-                                                    tabVariables:self.currentTab.variables];
-    }
     return _scope;
 }
 
@@ -6037,7 +6049,7 @@ ITERM_WEAKLY_REFERENCEABLE
 - (NSString *)tabView:(NSTabView *)aTabView toolTipForTabViewItem:(NSTabViewItem *)aTabViewItem {
     PTYSession *session = [[aTabViewItem identifier] activeSession];
     return [NSString stringWithFormat:@"Name: %@\nProfile: %@\nCommand: %@",
-            session.name,
+            aTabViewItem.label,
             [[session profile] objectForKey:KEY_NAME],
             [session.shell originalCommand] ?: @"None"];
 }
@@ -6047,7 +6059,9 @@ ITERM_WEAKLY_REFERENCEABLE
         return;
     }
     [tabView selectTabViewItem:tabViewItem];
-    [self openEditTabTitleWindow];
+    if ([iTermAdvancedSettingsModel doubleClickTabToEdit]) {
+        [self openEditTabTitleWindow];
+    }
 }
 
 - (IBAction)editTabTitle:(id)sender {
@@ -6059,11 +6073,10 @@ ITERM_WEAKLY_REFERENCEABLE
     alert.messageText = @"Set Tab Title";
     alert.informativeText = @"If this is empty, the tab takes the active session’s title. Variables and function calls enclosed in \\(…) will replaced with their evaluation.";
     NSTextField *titleTextField = [[[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 400, 24 * 3)] autorelease];
-    iTermFunctionCallTextFieldDelegate *delegate;
-    delegate = [[[iTermFunctionCallTextFieldDelegate alloc] initWithPathSource:[iTermVariableHistory pathSourceForContext:iTermVariablesSuggestionContextTab]
-                                                                   passthrough:nil
-                                                                 functionsOnly:NO] autorelease];
-    titleTextField.delegate = delegate;
+    _currentTabTitleTextFieldDelegate = [[iTermFunctionCallTextFieldDelegate alloc] initWithPathSource:[iTermVariableHistory pathSourceForContext:iTermVariablesSuggestionContextTab]
+                                                                                           passthrough:nil
+                                                                                         functionsOnly:NO];
+    titleTextField.delegate = _currentTabTitleTextFieldDelegate;
     titleTextField.editable = YES;
     titleTextField.selectable = YES;
     titleTextField.stringValue = self.currentTab.variablesScope.tabTitleOverrideFormat ?: @"";
@@ -6072,6 +6085,7 @@ ITERM_WEAKLY_REFERENCEABLE
     [alert addButtonWithTitle:@"Cancel"];
     __weak __typeof(self) weakSelf = self;
     [alert beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse returnCode) {
+        [weakSelf releaseTabTitleTextFieldDelegate];
         if (returnCode == NSAlertFirstButtonReturn) {
             [weakSelf setCurrentTabTitle:titleTextField.stringValue];
         }
@@ -6079,14 +6093,13 @@ ITERM_WEAKLY_REFERENCEABLE
     [titleTextField.window makeFirstResponder:titleTextField];
 }
 
+- (void)releaseTabTitleTextFieldDelegate {
+    [_currentTabTitleTextFieldDelegate release];
+    _currentTabTitleTextFieldDelegate = nil;
+}
+
 - (void)setCurrentTabTitle:(NSString *)title {
-    if (self.currentTab.tmuxTab) {
-        [self.currentTab.tmuxController renameWindowWithId:self.currentTab.tmuxWindow
-                                                 inSession:nil
-                                                    toName:title];
-    } else {
-        self.currentTab.variablesScope.tabTitleOverrideFormat = title.length ? title : nil;
-    }
+    [self.currentTab setTitleOverride:title];
 }
 
 - (void)tabViewDoubleClickTabBar:(NSTabView *)tabView {

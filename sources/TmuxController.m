@@ -93,6 +93,7 @@ static NSString *kListWindowsFormat = @"\"#{session_name}\t#{window_id}\t"
     ProfileModel *_profileModel;
     // Maps the window ID of an about to be opened window to a completion block to invoke when it opens.
     NSMutableDictionary<NSNumber *, void(^)(int)> *_pendingWindows;
+    BOOL _hasStatusBar;
 }
 
 @synthesize gateway = gateway_;
@@ -359,7 +360,7 @@ static NSString *kListWindowsFormat = @"\"#{session_name}\t#{window_id}\t"
         DLog(@"Open window %@", record);
         int wid = [self windowIdFromString:[doc valueInRecord:record forField:@"window_id"]];
         [self openWindowWithIndex:wid
-                             name:[doc valueInRecord:record forField:@"window_name"]
+                             name:[[doc valueInRecord:record forField:@"window_name"] it_unescapedTmuxWindowName]
                              size:NSMakeSize([[doc valueInRecord:record forField:@"window_width"] intValue],
                                              [[doc valueInRecord:record forField:@"window_height"] intValue])
                            layout:[doc valueInRecord:record forField:@"window_layout"]
@@ -407,7 +408,7 @@ static NSString *kListWindowsFormat = @"\"#{session_name}\t#{window_id}\t"
     NSString *getSessionGuidCommand = [NSString stringWithFormat:@"show -v -q -t $%d @iterm2_id",
                                        sessionId_];
     NSString *setSizeCommand = [NSString stringWithFormat:@"refresh-client -C %d,%d",
-             size.width, size.height];
+                                size.width, [self adjustHeightForStatusBar:size.height]];
     NSString *listWindowsCommand = [NSString stringWithFormat:@"list-windows -F %@", kListWindowsFormat];
     NSString *listSessionsCommand = @"list-sessions -F \"#{session_name}\"";
     NSString *getAffinitiesCommand = [NSString stringWithFormat:@"show -v -q -t $%d @affinities", sessionId_];
@@ -608,6 +609,16 @@ static NSString *kListWindowsFormat = @"\"#{session_name}\t#{window_id}\t"
     [self setClientSize:minSize];
 }
 
+- (int)adjustHeightForStatusBar:(int)height {
+    // See here for the bug fix: https://github.com/tmux/tmux/pull/1731
+    NSArray *buggyVersions = @[ [NSDecimalNumber decimalNumberWithString:@"2.9"],
+                                [NSDecimalNumber decimalNumberWithString:@"2.91"] ];
+    if (_hasStatusBar && [buggyVersions containsObject:gateway_.minimumServerVersion]) {
+        return height + 1;
+    }
+    return height;
+}
+
 - (void)setClientSize:(NSSize)size {
     DLog(@"Set client size to %@", NSStringFromSize(size));
     DLog(@"%@", [NSThread callStackSymbols]);
@@ -623,7 +634,7 @@ static NSString *kListWindowsFormat = @"\"#{session_name}\t#{window_id}\t"
                                          responseObject:nil
                                                   flags:0],
                          [gateway_ dictionaryForCommand:[NSString stringWithFormat:@"refresh-client -C %d,%d",
-                                                         (int)size.width, (int)size.height]
+                                                         (int)size.width, [self adjustHeightForStatusBar:(int)size.height]]
                                          responseTarget:nil
                                        responseSelector:nil
                                          responseObject:nil
@@ -646,6 +657,13 @@ static NSString *kListWindowsFormat = @"\"#{session_name}\t#{window_id}\t"
                responseTarget:self
              responseSelector:@selector(showWindowOptionsResponse:)];
     }
+    [gateway_ sendCommand:@"show-option -g -v status"
+           responseTarget:self
+         responseSelector:@selector(handleStatusResponse:)];
+}
+
+- (void)handleStatusResponse:(NSString *)string {
+    _hasStatusBar = [string isEqualToString:@"on"];
 }
 
 - (void)checkForUTF8 {
@@ -668,7 +686,13 @@ static NSString *kListWindowsFormat = @"\"#{session_name}\t#{window_id}\t"
     // show-window-options pane-border-format will succeed in 2.3 and later (presumably. 2.3 isn't out yet)
     // the socket_path format was added in 2.2.
     // the session_activity format was added in 2.1
-    NSArray *commands = @[ [gateway_ dictionaryForCommand:@"show-window-options pane-border-format"
+    NSArray *commands = @[ [gateway_ dictionaryForCommand:@"display-message -p \"#{version}\""
+                                           responseTarget:self
+                                         responseSelector:@selector(handleDisplayMessageVersion:)
+                                           responseObject:nil
+                                                    flags:kTmuxGatewayCommandShouldTolerateErrors],
+
+                           [gateway_ dictionaryForCommand:@"show-window-options pane-border-format"
                                            responseTarget:self
                                          responseSelector:@selector(guessVersion23Response:)
                                            responseObject:nil
@@ -716,6 +740,36 @@ static NSString *kListWindowsFormat = @"\"#{session_name}\t#{window_id}\t"
     if ([response containsString:@"_"]) {
         [gateway_ abortWithErrorMessage:@"tmux is not in UTF-8 mode. Please pass the -u command line argument to tmux or change your LANG environment variable to end with “.UTF-8”."
                                   title:@"UTF-8 Mode Not Detected"];
+    }
+}
+
+- (void)handleDisplayMessageVersion:(NSString *)response {
+    if (response.length == 0) {
+        // The "version" format was first added in 2.4
+        [self decreaseMaximumServerVersionTo:@"2.3"];
+        return;
+    }
+
+    // In case we get back something that's not a number, or a totally unreasonable number, just ignore this.
+    NSDecimalNumber *number = [NSDecimalNumber decimalNumberWithString:response];
+    if (number.doubleValue != number.doubleValue ||
+        number.doubleValue < 2.4 || number.doubleValue > 10) {
+        return;
+    }
+    
+    // Sadly tmux version numbers look like 2.9 or 2.9a instead of a proper decimal number.
+    NSRange range = [response rangeOfCharacterFromSet:[NSCharacterSet lowercaseLetterCharacterSet]];
+    if (range.location == NSNotFound) {
+        [self increaseMinimumServerVersionTo:response];
+    } else {
+        // Convert 2.9a to 2.91
+        // According to this issue it should be safe to do this:
+        // https://github.com/tmux/tmux/issues/1712
+        unichar c = [response characterAtIndex:range.location];
+        NSInteger bug = c - 'a' + 1;
+        NSString *prefix = [response substringToIndex:range.location];
+        NSString *version = [NSString stringWithFormat:@"%@%@", prefix, @(bug)];
+        [self increaseMinimumServerVersionTo:version];
     }
 }
 
@@ -866,6 +920,13 @@ static NSString *kListWindowsFormat = @"\"#{session_name}\t#{window_id}\t"
 }
 
 - (void)selectPane:(int)windowPane {
+    NSDecimalNumber *version2_9 = [NSDecimalNumber decimalNumberWithString:@"2.9"];
+
+    if ([gateway_.minimumServerVersion isEqual:version2_9]) {
+        // I presume this will be fixed in whatever verson follows 2.9, so use an isEqual:. I need to remember to revisit this after the bug is fixed!
+        return;
+    }
+
     NSString *command = [NSString stringWithFormat:@"select-pane -t %%%d", windowPane];
     [gateway_ sendCommand:command
            responseTarget:nil
@@ -931,14 +992,18 @@ static NSString *kListWindowsFormat = @"\"#{session_name}\t#{window_id}\t"
                     flags:0];
 }
 
+- (NSString *)escapedWindowName:(NSString *)name {
+    return [[name stringByReplacingOccurrencesOfString:@"\n" withString:@" "] stringByReplacingOccurrencesOfString:@"\\" withString:@"\\\\"];
+}
+
 - (void)renameWindowWithId:(int)windowId
                  inSession:(NSString *)sessionName
                     toName:(NSString *)newName {
     NSString *theCommand;
     if (sessionName) {
-        theCommand = [NSString stringWithFormat:@"rename-window -t \"%@:@%d\" \"%@\"", sessionName, windowId, newName];
+        theCommand = [NSString stringWithFormat:@"rename-window -t \"%@:@%d\" \"%@\"", sessionName, windowId, [self escapedWindowName:newName]];
     } else {
-        theCommand = [NSString stringWithFormat:@"rename-window -t @%d \"%@\"", windowId, newName];
+        theCommand = [NSString stringWithFormat:@"rename-window -t @%d \"%@\"", windowId, [self escapedWindowName:newName]];
     }
     [gateway_ sendCommand:theCommand
            responseTarget:nil
@@ -1429,6 +1494,21 @@ static NSString *kListWindowsFormat = @"\"#{session_name}\t#{window_id}\t"
                          KEY_VERTICAL_SPACING: @(vs) } retain];
 }
 
+- (void)setLayoutInWindow:(int)window toLayout:(NSString *)layout {
+    NSArray *commands = @[ [gateway_ dictionaryForCommand:[NSString stringWithFormat:@"select-layout -t @%@ %@",
+                                                           @(window), layout]
+                                           responseTarget:self
+                                         responseSelector:@selector(didSetLayout:)
+                                           responseObject:nil
+                                                    flags:0],
+                           [gateway_ dictionaryForCommand:[NSString stringWithFormat:@"list-windows -F \"#{window_id} #{window_layout} #{window_flags}\" -t \"%@\"", sessionName_]
+                                           responseTarget:self
+                                         responseSelector:@selector(didListWindowsSubsequentToSettingLayout:)
+                                           responseObject:nil
+                                                    flags:0] ];
+    [gateway_ sendCommandList:commands];
+}
+
 - (void)setLayoutInWindowPane:(int)windowPane toLayoutNamed:(NSString *)name {
     NSArray *commands = @[ [gateway_ dictionaryForCommand:[NSString stringWithFormat:@"select-layout -t %%%@ %@", @(windowPane), name]
                                            responseTarget:self
@@ -1667,7 +1747,7 @@ static NSString *kListWindowsFormat = @"\"#{session_name}\t#{window_id}\t"
         NSString *recordWindowId = [doc valueInRecord:record forField:@"window_id"];
         if ([self windowIdFromString:recordWindowId] == [windowId intValue]) {
             [self openWindowWithIndex:[self windowIdFromString:[doc valueInRecord:record forField:@"window_id"]]
-                                 name:[doc valueInRecord:record forField:@"window_name"]
+                                 name:[[doc valueInRecord:record forField:@"window_name"] it_unescapedTmuxWindowName]
                                  size:NSMakeSize([[doc valueInRecord:record forField:@"window_width"] intValue],
                                                  [[doc valueInRecord:record forField:@"window_height"] intValue])
                                layout:[doc valueInRecord:record forField:@"window_layout"]

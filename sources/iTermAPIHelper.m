@@ -2436,6 +2436,10 @@ static iTermAPIHelper *sAPIHelperInstance;
             [self handleSessionScopeVariableRequest:request handler:handler];
             return;
 
+        case ITMVariableRequest_Scope_OneOfCase_WindowId:
+            [self handleWindowScopeVariableRequest:request handler:handler];
+            return;
+
         case ITMVariableRequest_Scope_OneOfCase_GPBUnsetOneOfCase:
             break;
     }
@@ -2447,9 +2451,9 @@ static iTermAPIHelper *sAPIHelperInstance;
 - (void)handleAppScopeVariableRequest:(ITMVariableRequest *)request
                               handler:(void (^)(ITMVariableResponse *))handler {
     ITMVariableResponse *response = [[ITMVariableResponse alloc] init];
-    [self handleVariableSetsInRequest:request scope:[iTermVariableScope globalsScope]];
+    BOOL ok = [self handleVariableSetsInRequest:request scope:[iTermVariableScope globalsScope]];
     [self handleVariableGetsInRequest:request response:response scope:[iTermVariableScope globalsScope]];
-    response.status = ITMVariableResponse_Status_Ok;
+    response.status = ok ? ITMVariableResponse_Status_Ok : ITMVariableResponse_Status_InvalidName;
     handler(response);
 }
 
@@ -2474,6 +2478,30 @@ static iTermAPIHelper *sAPIHelperInstance;
     [self handleVariableSetsInRequest:request scope:tab.variablesScope];
     [self handleVariableGetsInRequest:request response:response scope:tab.variablesScope];
 
+    handler(response);
+}
+
+- (void)handleWindowScopeVariableRequest:(ITMVariableRequest *)request
+                                 handler:(void (^)(ITMVariableResponse *))handler {
+    if ([request.sessionId isEqualToString:@"all"]) {
+        NSArray<iTermVariableScope *> *scopes = [[iTermController sharedInstance].terminals mapWithBlock:^id(PseudoTerminal *anObject) {
+            return anObject.scope;
+        }];
+        handler([self handleVariableMultiSetRequest:request scopes:scopes]);
+        return;
+    }
+    
+    ITMVariableResponse *response = [[ITMVariableResponse alloc] init];
+    PseudoTerminal *windowController = [self windowControllerWithID:request.windowId];
+    if (!windowController) {
+        response.status = ITMVariableResponse_Status_WindowNotFound;
+        handler(response);
+        return;
+    }
+    
+    [self handleVariableSetsInRequest:request scope:windowController.scope];
+    [self handleVariableGetsInRequest:request response:response scope:windowController.scope];
+    
     handler(response);
 }
 
@@ -2502,7 +2530,8 @@ static iTermAPIHelper *sAPIHelperInstance;
     handler(response);
 }
 
-- (void)handleVariableSetsInRequest:(ITMVariableRequest *)request scope:(iTermVariableScope *)scope {
+- (BOOL)handleVariableSetsInRequest:(ITMVariableRequest *)request scope:(iTermVariableScope *)scope {
+    __block BOOL result = YES;
     [request.setArray enumerateObjectsUsingBlock:^(ITMVariableRequest_Set * _Nonnull setRequest, NSUInteger idx, BOOL * _Nonnull stop) {
         id value;
         if ([setRequest.value isEqual:@"null"]) {
@@ -2510,8 +2539,12 @@ static iTermAPIHelper *sAPIHelperInstance;
         } else {
             value = [NSJSONSerialization it_objectForJsonString:setRequest.value];
         }
-        [scope setValue:value forVariableNamed:setRequest.name];
+        const BOOL ok = [scope setValue:value forVariableNamed:setRequest.name];
+        if (!ok) {
+            result = NO;
+        }
     }];
+    return result;
 }
 
 - (void)handleVariableGetsInRequest:(ITMVariableRequest *)request response:(ITMVariableResponse *)response scope:(iTermVariableScope *)scope {

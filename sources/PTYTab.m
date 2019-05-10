@@ -15,8 +15,10 @@
 #import "iTermProfilePreferences.h"
 #import "iTermSwiftyString.h"
 #import "iTermSwiftyStringGraph.h"
+#import "iTermTmuxLayoutBuilder.h"
 #import "iTermVariableReference.h"
 #import "iTermVariableScope.h"
+#import "iTermVariableScope+Session.h"
 #import "iTermVariableScope+Tab.h"
 #import "MovePaneController.h"
 #import "NSAppearance+iTerm.h"
@@ -188,8 +190,6 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 
     // Temporarily hidden live views (this is needed to hold a reference count).
     NSMutableArray *hiddenLiveViews_;  // SessionView objects
-
-    NSString *tmuxWindowName_;
 
     // This tab broadcasts to all its sessions?
     BOOL broadcasting_;
@@ -419,8 +419,12 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
                                                                   sourcePath:iTermVariableKeyTabTitleOverrideFormat
                                                              destinationPath:iTermVariableKeyTabTitleOverride];
     __weak __typeof(self) weakSelf = self;
-    _tabTitleOverrideSwiftyString.observer = ^(NSString * _Nonnull newValue) {
+    _tabTitleOverrideSwiftyString.observer = ^(NSString * _Nonnull newValue, NSError *error) {
+        if (error) {
+            return [NSString stringWithFormat:@"🐞 %@", error.localizedDescription];
+        }
         [weakSelf updateTitleOverrideFromFormatVariable];
+        return newValue;
     };
 }
 
@@ -3079,11 +3083,10 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 }
 
 - (NSString *)tmuxWindowName {
-    return tmuxWindowName_ ? tmuxWindowName_ : @"tmux";
+    return self.activeSession.variablesScope.tmuxWindowTitleEval ?: @"tmux";
 }
 
 - (void)setTmuxWindowName:(NSString *)tmuxWindowName {
-    tmuxWindowName_ = [tmuxWindowName copy];
     [[self realParentWindow] setWindowTitle];
     for (PTYSession *session in self.sessions) {
         [session.variablesScope setValue:tmuxWindowName forVariableNamed:iTermVariableKeySessionTmuxWindowTitle];
@@ -3420,7 +3423,89 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     }
 }
 
+- (int)nodeSize:(ITMSplitTreeNode *)node width:(BOOL)sumWidths {
+    int sum = 0;
+    // Perpindicular is true if we're summing widths with a horizontal divider
+    // or summing heights with a vertical divider. The size of the first child
+    // is the result in this case.
+    const BOOL perpindicular = ((sumWidths && !node.vertical) ||
+                                (!sumWidths && node.vertical));
+    for (ITMSplitTreeNode_SplitTreeLink *link in node.linksArray) {
+        switch (link.childOneOfCase) {
+            case ITMSplitTreeNode_SplitTreeLink_Child_OneOfCase_Node:
+                sum += [self nodeSize:link.node width:sumWidths];
+                break;
+            case ITMSplitTreeNode_SplitTreeLink_Child_OneOfCase_Session:
+                sum += link.session.gridSize.width;
+                break;
+            case ITMSplitTreeNode_SplitTreeLink_Child_OneOfCase_GPBUnsetOneOfCase:
+                assert(NO);
+        }
+        if (perpindicular) {
+            return sum;
+        }
+    }
+    return sum;
+}
+
+- (iTermTmuxLayoutBuilderLeafNode *)layoutBuilderLeafNodeForLink:(ITMSplitTreeNode_SplitTreeLink *)link {
+    PTYSession *session = [self sessionWithGUID:link.session.uniqueIdentifier];
+    if (!session) {
+        return nil;
+    }
+    return [[iTermTmuxLayoutBuilderLeafNode alloc] initWithSessionOfSize:VT100GridSizeMake(link.session.gridSize.width,
+                                                                                           link.session.gridSize.height)
+                                                              windowPane:session.tmuxPane];
+}
+
+- (iTermTmuxLayoutBuilderNode *)layoutBuilderNodeForSplitTreeNode:(ITMSplitTreeNode *)node {
+    if (node.linksArray.count == 1 &&
+        node.linksArray[0].childOneOfCase == ITMSplitTreeNode_SplitTreeLink_Child_OneOfCase_Node) {
+        ITMSplitTreeNode_SplitTreeLink *link = node.linksArray[0];
+        return [self layoutBuilderLeafNodeForLink:link];
+    }
+    
+    iTermTmuxLayoutBuilderInteriorNode *result = [[iTermTmuxLayoutBuilderInteriorNode alloc] initWithVerticalDividers:node.vertical];
+    for (ITMSplitTreeNode_SplitTreeLink *link in node.linksArray) {
+        switch (link.childOneOfCase) {
+            case ITMSplitTreeNode_SplitTreeLink_Child_OneOfCase_Node: {
+                iTermTmuxLayoutBuilderNode *childNode = [self layoutBuilderNodeForSplitTreeNode:link.node];
+                if (!childNode) {
+                    return nil;
+                }
+                [result addNode:childNode];
+                break;
+            }
+            case ITMSplitTreeNode_SplitTreeLink_Child_OneOfCase_Session: {
+                iTermTmuxLayoutBuilderLeafNode *leafNode = [self layoutBuilderLeafNodeForLink:link];
+                if (!leafNode) {
+                    return nil;
+                }
+                [result addNode:leafNode];
+                break;
+            }
+            case ITMSplitTreeNode_SplitTreeLink_Child_OneOfCase_GPBUnsetOneOfCase:
+                return nil;
+        }
+    }
+    return result;
+}
+
+- (void)setTmuxSizesFromSplitTreeNode:(ITMSplitTreeNode *)node {
+    iTermTmuxLayoutBuilderNode *root = [self layoutBuilderNodeForSplitTreeNode:node];
+    iTermTmuxLayoutBuilder *builder = [[iTermTmuxLayoutBuilder alloc] initWithRootNode:root];
+    if (!self.realParentWindow.anyFullScreen) {
+        VT100GridSize clientSize = builder.clientSize;
+        [self.tmuxController setClientSize:NSMakeSize(clientSize.width, clientSize.height)];
+    }
+    [self.tmuxController setLayoutInWindow:self.tmuxWindow toLayout:builder.layoutString];
+}
+
 - (void)setSizesFromSplitTreeNode:(ITMSplitTreeNode *)node {
+    if (self.tmuxTab) {
+        [self setTmuxSizesFromSplitTreeNode:node];
+        return;
+    }
     CGSize newRootSize = [self setSizesFromSplitTreeNode:node splitView:root_];
     if (!self.realParentWindow.anyFullScreen) {
         root_.frame = NSMakeRect(0, 0, newRootSize.width, newRootSize.height);
@@ -4112,7 +4197,14 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 }
 
 - (void)setTitleOverride:(NSString *)titleOverride {
-    [self.variablesScope setValue:titleOverride forVariableNamed:iTermVariableKeyTabTitleOverrideFormat];
+    if (self.tmuxTab) {
+        [self.tmuxController renameWindowWithId:self.tmuxWindow
+                                      inSession:nil
+                                         toName:titleOverride];
+        return;
+    }
+    NSString *const sanitized = titleOverride.length ? titleOverride : nil;
+    self.variablesScope.tabTitleOverrideFormat = sanitized;
 }
 
 - (void)updateTitleOverrideFromFormatVariable {
@@ -5356,6 +5448,10 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
                      scope:self.variablesScope];
 
     [self.realParentWindow tabAddSwiftyStringsToGraph:graph];
+}
+
+- (iTermVariableScope *)sessionTabScope {
+    return self.variablesScope;
 }
 
 @end

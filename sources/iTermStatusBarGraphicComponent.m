@@ -274,8 +274,13 @@ static const CGFloat iTermStatusBarSparklineBottomMargin = 2;
     }
 
     // Draw baseline
-    [[self statusBarTextColor] set];
-    NSRectFill(NSMakeRect(NSMinX(rect), rect.origin.y + iTermStatusBarSparklineBottomMargin, NSWidth(rect), 1));
+    NSColor *baseColor = [self statusBarTextColor];
+    [[baseColor colorWithAlphaComponent:baseColor.alphaComponent * 0.5] set];
+    const NSRect baselineRect = NSMakeRect(NSMinX(rect),
+                                           rect.origin.y + iTermStatusBarSparklineBottomMargin,
+                                           NSWidth(rect),
+                                           1);
+    NSRectFillUsingOperation(baselineRect, NSCompositingOperationSourceOver);
 
     if (self.numberOfTimeSeries == 1) {
         NSBezierPath *path = [self bezierPathWithValues:self.values inRect:rect];
@@ -312,18 +317,20 @@ static const CGFloat iTermStatusBarSparklineBottomMargin = 2;
         return nil;
     }
 
-    CGFloat x = NSMaxX(rect) - values.count * barWidth;
+    NSInteger segments = MAX(0, ((NSInteger)values.count) - 1);
+    const CGFloat x0 = NSMaxX(rect) - segments * barWidth;
     const CGFloat y = iTermStatusBarSparklineBottomMargin + rect.origin.y + 0.5;
     NSBezierPath *path = [[NSBezierPath alloc] init];
     path.miterLimit = 1;
-    [path moveToPoint:NSMakePoint(x, y)];
+    [path moveToPoint:NSMakePoint(x0, y)];
     const double ceiling = MAX(1, self.ceiling);
+    int i = 0;
     for (NSNumber *n in values) {
         const CGFloat height = n.doubleValue * (rect.size.height - iTermStatusBarSparklineBottomMargin * 2) / ceiling;
-        [path lineToPoint:NSMakePoint(x, y + height + 0.5)];
-        x += barWidth;
+        const CGFloat x = x0 + i * barWidth;
+        [path lineToPoint:NSMakePoint(x, y + height)];
+        i++;
     }
-    [path lineToPoint:NSMakePoint(x, y + 0.5)];
     return path;
 }
 
