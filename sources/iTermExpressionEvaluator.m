@@ -53,7 +53,7 @@
 
 - (instancetype)initWithInterpolatedString:(NSString *)interpolatedString scope:(iTermVariableScope *)scope {
     iTermParsedExpression *parsedExpression = [iTermExpressionParser parsedExpressionWithInterpolatedString:interpolatedString
-                                                                                                        scope:scope];
+                                                                                                      scope:scope];
     return [self initWithParsedExpression:parsedExpression
                                invocation:interpolatedString
                                     scope:scope];
@@ -207,6 +207,10 @@ static NSMutableArray *iTermExpressionEvaluatorGlobalStore(void) {
         case iTermParsedExpressionTypeNil:
             completion(nil, nil, nil);
             return;
+
+        case iTermParsedExpressionTypeArrayLookup:
+        case iTermParsedExpressionTypeVariableReference:
+            assert(NO);
     }
 
     NSString *reason = [NSString stringWithFormat:@"Invalid parsed expression type %@", @(parsedExpression.expressionType)];

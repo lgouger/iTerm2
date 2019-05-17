@@ -65,13 +65,44 @@
 
 #pragma mark - APIs
 
-+ (void)callFunction:(NSString *)invocation
-             timeout:(NSTimeInterval)timeout
-               scope:(iTermVariableScope *)scope
-          completion:(void (^)(id, NSError *, NSSet<NSString *> *))completion {
++ (iTermParsedExpression *)callFunction:(NSString *)invocation
+                                timeout:(NSTimeInterval)timeout
+                                  scope:(iTermVariableScope *)scope
+                             retainSelf:(BOOL)retainSelf
+                             completion:(void (^)(id, NSError *, NSSet<NSString *> *))completion {
+    static dispatch_once_t onceToken;
+    static NSMutableArray<iTermParsedExpression *> *array;
+    dispatch_once(&onceToken, ^{
+        array = [NSMutableArray array];
+    });
+    __block BOOL complete = NO;
+    __block iTermParsedExpression *expression = [self callFunction:invocation
+                                                           timeout:timeout
+                                                             scope:scope
+                                                        completion:^(id result, NSError *error, NSSet<NSString *> *missing) {
+                                                            completion(result, error, missing);
+                                                            if (expression) {
+                                                                [array removeObject:expression];
+                                                            }
+                                                            complete = YES;
+                                                        }];
+    if (retainSelf && !complete) {
+        [array addObject:expression];
+    }
+    return expression;
+}
+
++ (iTermParsedExpression *)callFunction:(NSString *)invocation
+                                timeout:(NSTimeInterval)timeout
+                                  scope:(iTermVariableScope *)scope
+                             completion:(void (^)(id, NSError *, NSSet<NSString *> *))completion {
     iTermParsedExpression *expression = [[iTermExpressionParser callParser] parse:invocation
                                                                               scope:scope];
     switch (expression.expressionType) {
+        case iTermParsedExpressionTypeVariableReference:
+        case iTermParsedExpressionTypeArrayLookup:
+            assert(false);
+
         case iTermParsedExpressionTypeArrayOfValues:
         case iTermParsedExpressionTypeArrayOfExpressions:
         case iTermParsedExpressionTypeNumber:
@@ -82,11 +113,11 @@
                                            code:3
                                        userInfo:@{ NSLocalizedDescriptionKey: reason }],
                        nil);
-            return;
+            return nil;
         }
         case iTermParsedExpressionTypeError:
             completion(nil, expression.error, nil);
-            return;
+            return nil;
 
         case iTermParsedExpressionTypeNil: {
             NSString *reason = @"nil not allowed";
@@ -95,7 +126,7 @@
                                            code:4
                                        userInfo:@{ NSLocalizedDescriptionKey: reason }],
                        nil);
-            return;
+            return nil;
         }
         case iTermParsedExpressionTypeFunctionCall:
             assert(expression.functionCall);
@@ -103,7 +134,7 @@
                                                                  scope:scope
                                                                timeout:timeout
                                                             completion:completion];
-            return;
+            return expression;
         case iTermParsedExpressionTypeInterpolatedString: {
             NSString *reason = @"interpolated string not allowed";
             completion(nil,
@@ -111,10 +142,11 @@
                                            code:4
                                        userInfo:@{ NSLocalizedDescriptionKey: reason }],
                        nil);
-            return;
+            return nil;
         }
     }
     assert(NO);
+    return nil;
 }
 
 #pragma mark - Function Calls
@@ -247,19 +279,28 @@
 
     // Fill in any default values not expliciltly specified.
     NSDictionary<NSString *, id> *fullParameters = nil;
-    self->_connectionKey = [[[iTermAPIHelper sharedInstance] connectionKeyForRPCWithName:self.name
-                                                                      explicitParameters:parameterValues
-                                                                                   scope:scope
-                                                                          fullParameters:&fullParameters] copy];
-    [[iTermAPIHelper sharedInstance] dispatchRPCWithName:self.name
-                                               arguments:fullParameters
-                                              completion:^(id apiResult, NSError *apiError) {
-                                                  NSSet<NSString *> *missing = nil;
-                                                  if (apiError.code == iTermAPIHelperFunctionCallUnregisteredErrorCode) {
-                                                      missing = [NSSet setWithObject:self.signature];
-                                                  }
-                                                  completion(apiResult, apiError, missing);
-                                              }];
+    iTermAPIHelper *apiHelper = [iTermAPIHelper sharedInstanceIfEnabled];
+    if (apiHelper == nil) {
+        NSString *const signature = [self signature];
+        NSError *error = [NSError errorWithDomain:iTermAPIHelperErrorDomain
+                                             code:iTermAPIHelperErrorCodeAPIDisabled
+                                         userInfo:@{ NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Undefined function with signature “%@”", signature]}];
+        completion(nil, error, nil);
+        return;
+    }
+    self->_connectionKey = [[apiHelper connectionKeyForRPCWithName:self.name
+                                                explicitParameters:parameterValues
+                                                             scope:scope
+                                                    fullParameters:&fullParameters] copy];
+    [apiHelper dispatchRPCWithName:self.name
+                         arguments:fullParameters
+                        completion:^(id apiResult, NSError *apiError) {
+                            NSSet<NSString *> *missing = nil;
+                            if (apiError.code == iTermAPIHelperErrorCodeUnregisteredFunction) {
+                                missing = [NSSet setWithObject:self.signature];
+                            }
+                            completion(apiResult, apiError, missing);
+                        }];
 }
 
 - (BOOL)isBuiltinFunction {
@@ -349,7 +390,7 @@
 - (NSError *)errorForDependentCall:(iTermScriptFunctionCall *)call
                thatFailedWithError:(NSError *)error
                      connectionKey:(id)connectionKey {
-    if (error.code == iTermAPIHelperFunctionCallUnregisteredErrorCode && [error.domain isEqualToString:@"com.iterm2.api"]) {
+    if (error.code == iTermAPIHelperErrorCodeUnregisteredFunction && [error.domain isEqualToString:iTermAPIHelperErrorDomain]) {
         return error;
     }
     NSString *reason = [NSString stringWithFormat:@"In call to %@: %@", call.name, error.localizedDescription];

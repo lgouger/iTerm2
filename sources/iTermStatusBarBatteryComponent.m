@@ -6,38 +6,80 @@
 //
 
 #import "iTermStatusBarBatteryComponent.h"
+
 #import "iTermPowerManager.h"
+#import "NSArray+iTerm.h"
+#import "NSDateFormatterExtras.h"
 #import "NSDictionary+iTerm.h"
 #import "NSImage+iTerm.h"
 #import "NSView+iTerm.h"
 
 static const CGFloat iTermBatteryWidth = 120;
+static NSString *const iTermBatteryComponentKnobKeyShowPercentage = @"ShowPercentage";
+static NSString *const iTermBatteryComponentKnobKeyShowTime = @"ShowTime";
 
 @implementation iTermStatusBarBatteryComponent {
-    NSMutableArray<NSNumber *> *_samples;
     NSImage *_chargingImage;
 }
+
 
 - (instancetype)initWithConfiguration:(NSDictionary<iTermStatusBarComponentConfigurationKey,id> *)configuration
                                 scope:(nullable iTermVariableScope *)scope {
     self = [super initWithConfiguration:configuration scope:scope];
     if (self) {
-        _samples = [NSMutableArray array];
         __weak __typeof(self) weakSelf = self;
-        [[iTermPowerManager sharedInstance] addPowerStateSubscriber:self block:^(iTermPowerState *state) {
-            [weakSelf update:state];
-        }];
         [[NSNotificationCenter defaultCenter] addObserver:self
                                                  selector:@selector(powerManagerStateDidChange:)
                                                      name:iTermPowerManagerStateDidChange
                                                    object:nil];
         _chargingImage = [NSImage it_imageNamed:@"StatusBarIconCharging" forClass:self.class];
+        [[iTermPowerManager sharedInstance] addPowerStateSubscriber:self block:^(iTermPowerState *state) {
+            [weakSelf update:state];
+        }];
     }
     return self;
 }
 
+- (NSArray<iTermStatusBarComponentKnob *> *)statusBarComponentKnobs {
+    iTermStatusBarComponentKnob *showPercentageKnob =
+    [[iTermStatusBarComponentKnob alloc] initWithLabelText:@"Show Percentage"
+                                                      type:iTermStatusBarComponentKnobTypeCheckbox
+                                               placeholder:nil
+                                              defaultValue:@YES
+                                                       key:iTermBatteryComponentKnobKeyShowPercentage];
+    iTermStatusBarComponentKnob *showEstimatedTimeKnob =
+    [[iTermStatusBarComponentKnob alloc] initWithLabelText:@"Show Estimated Time"
+                                                      type:iTermStatusBarComponentKnobTypeCheckbox
+                                               placeholder:nil
+                                              defaultValue:@NO
+                                                       key:iTermBatteryComponentKnobKeyShowTime];
+    return [@[ showPercentageKnob, showEstimatedTimeKnob ] arrayByAddingObjectsFromArray:[super statusBarComponentKnobs]];
+}
+
++ (BOOL)machineHasBattery {
+    static dispatch_once_t onceToken;
+    static BOOL result;
+    dispatch_once(&onceToken, ^{
+        if ([[iTermPowerManager sharedInstance] currentState] == nil) {
+            result = NO;
+        } else {
+            result = YES;
+        }
+    });
+    return result;
+}
+
 - (NSImage *)statusBarComponentIcon {
-    return [NSImage it_imageNamed:@"StatusBarIconBattery" forClass:[self class]];
+    static dispatch_once_t onceToken;
+    static NSImage *image;
+    dispatch_once(&onceToken, ^{
+        if ([self.class machineHasBattery]) {
+            image = [NSImage it_imageNamed:@"StatusBarIconBattery" forClass:[self class]];
+        } else {
+            image = [NSImage it_imageNamed:@"StatusBarIconNoBattery" forClass:[self class]];
+        }
+    });
+    return image;
 }
 
 - (NSString *)statusBarComponentShortDescription {
@@ -70,12 +112,14 @@ static const CGFloat iTermBatteryWidth = 120;
 }
 
 - (NSArray<NSNumber *> *)values {
-    return _samples;
+    return [[[iTermPowerManager sharedInstance] percentageSamples] mapWithBlock:^id(NSNumber *percentage) {
+        return @(percentage.doubleValue / 100.0);
+    }];
 }
 
 - (int)currentEstimate {
-    double x = _samples.lastObject.doubleValue;
-    return x * 100;
+    const double x = [[[[iTermPowerManager sharedInstance] currentState] percentage] doubleValue];
+    return x;
 }
 
 - (void)drawTextWithRect:(NSRect)rect
@@ -139,38 +183,95 @@ static const CGFloat iTermBatteryWidth = 120;
 }
 
 - (NSSize)leftSize {
+    if (!self.showPercentage) {
+        return NSMakeSize(0, 0);
+    }
     NSString *longestPercentage = @"100%";
     return [longestPercentage sizeWithAttributes:self.leftAttributes];
 }
 
+- (BOOL)isCharging {
+    return [self.class machineHasBattery] && [[iTermPowerManager sharedInstance] connectedToPower];
+}
+
 - (CGSize)rightSize {
-    CGSize size = [self.rightText sizeWithAttributes:self.rightAttributes];
+    CGSize size = [@"" sizeWithAttributes:self.rightAttributes];
+    if (self.showTimeOnRight) {
+        size.width += [@"55:55" sizeWithAttributes:self.rightAttributes].width;
+        const BOOL charging = self.isCharging;
+        if (!charging) {
+            return size;
+        }
+    }
     size.width += _chargingImage.size.width;
     return size;
 }
 
+- (BOOL)showPercentage {
+    NSDictionary *knobs = self.configuration[iTermStatusBarComponentConfigurationKeyKnobValues];
+    return [knobs[iTermBatteryComponentKnobKeyShowPercentage] ?: @YES boolValue];
+}
+
+- (BOOL)showTime {
+    const BOOL charging = self.isCharging;
+    if (self.currentEstimate == 100 && charging) {
+        return NO;
+    }
+    iTermPowerState *currentState = [[iTermPowerManager sharedInstance] currentState];
+    if ([currentState time].doubleValue < 1) {
+        return NO;
+    }
+    if (currentState.charging != charging) {
+        return NO;
+    }
+    NSDictionary *knobs = self.configuration[iTermStatusBarComponentConfigurationKeyKnobValues];
+    return [knobs[iTermBatteryComponentKnobKeyShowTime] ?: @NO boolValue];
+}
+
+- (BOOL)showTimeOnRight {
+    return (self.showTime &&
+            self.showPercentage);
+}
+
 - (NSString *)leftText {
-    if (_samples.count == 0) {
+    if ([[[iTermPowerManager sharedInstance] currentState] percentage] == nil) {
         return @"";
     }
-    return [NSString stringWithFormat:@"%d%%", self.currentEstimate];
+    if (self.showPercentage) {
+        return [NSString stringWithFormat:@"%d%%", self.currentEstimate];
+    }
+    if (self.showTime) {
+        return [NSDateFormatter durationString:[[[[iTermPowerManager sharedInstance] currentState] time] doubleValue]];
+    }
+    return @"";
 }
 
 - (NSString *)rightText {
+    if ([[[iTermPowerManager sharedInstance] currentState] percentage] == nil) {
+        return @"";
+    }
+    if (self.showTimeOnRight) {
+        return [NSDateFormatter durationString:[[[[iTermPowerManager sharedInstance] currentState] time] doubleValue]];
+    }
     return @"";
 }
 
 - (void)drawRect:(NSRect)rect {
     CGSize rightSize = self.rightSize;
 
-    [self drawTextWithRect:rect
+    NSRect textRect = rect;
+    const BOOL charging = self.isCharging;
+    if (self.showTimeOnRight && charging) {
+        textRect.size.width -= _chargingImage.size.width;
+    }
+    [self drawTextWithRect:textRect
                       left:self.leftText
                      right:self.rightText
                  rightSize:rightSize];
 
     NSRect graphRect = [self graphRectForRect:rect leftSize:self.leftSize rightSize:rightSize];
 
-    if ([[iTermPowerManager sharedInstance] connectedToPower]) {
+    if (charging) {
         NSImage *tintedImage = [_chargingImage it_imageWithTintColor:[self statusBarTextColor] ?: [self.delegate statusBarComponentDefaultTextColor]];
         [tintedImage drawInRect:NSMakeRect(NSMaxX(rect) - _chargingImage.size.width,
                                            [self.view retinaRound:(rect.size.height - _chargingImage.size.height) / 2.0],
@@ -189,10 +290,6 @@ static const CGFloat iTermBatteryWidth = 120;
 - (void)update:(iTermPowerState *)state {
     if (state.percentage == nil) {
         return;
-    }
-    [_samples addObject:@(state.percentage.doubleValue / 100.0)];
-    while (_samples.count > self.maximumNumberOfValues) {
-        [_samples removeObjectAtIndex:0];
     }
     [self invalidate];
 }

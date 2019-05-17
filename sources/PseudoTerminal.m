@@ -72,6 +72,7 @@
 #import "NSAppearance+iTerm.h"
 #import "NSArray+iTerm.h"
 #import "NSColor+iTerm.h"
+#import "NSEvent+iTerm.h"
 #import "NSImage+iTerm.h"
 #import "NSScreen+iTerm.h"
 #import "NSStringITerm.h"
@@ -1210,11 +1211,15 @@ ITERM_WEAKLY_REFERENCEABLE
     [self updateUseMetalInAllTabs];
 }
 
-- (void)tmuxFontDidChange:(NSNotification *)notification
-{
+- (void)tmuxFontDidChange:(NSNotification *)notification {
     DLog(@"tmuxFontDidChange");
+    PTYSession *session = notification.object;
     if ([[self uniqueTmuxControllers] count]) {
-        [self fitWindowToIdealizedTabsPreservingHeight:NO];
+        if ([self.tabs anyWithBlock:^BOOL(PTYTab *tab) {
+            return [tab.sessions containsObject:session] || !tab.tmuxController.variableWindowSize;
+        }]) {
+            [self fitWindowToIdealizedTabsPreservingHeight:NO];
+        }
     }
 }
 
@@ -2646,6 +2651,8 @@ ITERM_WEAKLY_REFERENCEABLE
 
 - (IBAction)newTmuxWindow:(id)sender {
     [[self currentTmuxController] newWindowWithAffinity:nil
+                                                   size:[PTYTab sizeForTmuxWindowWithAffinity:nil
+                                                                                   controller:self.currentTmuxController]
                                        initialDirectory:[iTermInitialDirectory initialDirectoryFromProfile:self.currentSession.profile
                                                                                                 objectType:iTermWindowObject]
                                                   scope:[iTermVariableScope globalsScope]
@@ -2657,7 +2664,10 @@ ITERM_WEAKLY_REFERENCEABLE
     if (tmuxWindow < 0) {
         tmuxWindow = -(number_ + 1);
     }
-    [[self currentTmuxController] newWindowWithAffinity:[NSString stringWithFormat:@"%d", tmuxWindow]
+    NSString *affinity = [NSString stringWithFormat:@"%d", tmuxWindow];
+    [[self currentTmuxController] newWindowWithAffinity:affinity
+                                                   size:[PTYTab sizeForTmuxWindowWithAffinity:affinity
+                                                                                   controller:self.currentTmuxController]
                                        initialDirectory:[iTermInitialDirectory initialDirectoryFromProfile:self.currentSession.profile
                                                                                                 objectType:iTermTabObject]
                                                   scope:[iTermVariableScope globalsScope]
@@ -3331,7 +3341,23 @@ ITERM_WEAKLY_REFERENCEABLE
                         // with legacy scrollers (if the system is configured to use them) and then
                         // it needs to update its size when the scrollers are forced to be inline.
                         for (TmuxController *controller in self.uniqueTmuxControllers) {
-                            [controller setClientSize:self.tmuxCompatibleSize];
+                            if (controller.variableWindowSize) {
+                                NSArray<NSString *> *windows = [self.tabs mapWithBlock:^id(PTYTab *anObject) {
+                                    if (!anObject.tmuxTab) {
+                                        return nil;
+                                    }
+                                    if (anObject.tmuxController != controller) {
+                                        return nil;
+                                    }
+                                    return [NSString stringWithInt:anObject.tmuxWindow];
+                                }];
+                                if (windows.count > 0) {
+                                    DLog(@"Calling window did resize because canonicalizing a full screen window, scrollbar style changed, and variable size tmux windows is enabled");
+                                    [controller windowDidResize:self];
+                                }
+                            } else {
+                                [controller setClientSize:self.tmuxCompatibleSize];
+                            }
                         }
                     }
                 }
@@ -3820,7 +3846,7 @@ ITERM_WEAKLY_REFERENCEABLE
     const NSUInteger theMask =
         (NSEventModifierFlagControl | NSEventModifierFlagOption | NSEventModifierFlagCommand | NSEventModifierFlagShift);
     BOOL modifierDown =
-        (([[NSApp currentEvent] modifierFlags] & theMask) == NSEventModifierFlagControl);
+        (([[NSApp currentEvent] it_modifierFlags] & theMask) == NSEventModifierFlagControl);
     BOOL snapWidth = !modifierDown;
     BOOL snapHeight = !modifierDown;
     if (sender != [self window]) {
@@ -5026,7 +5052,7 @@ ITERM_WEAKLY_REFERENCEABLE
     } else {
         maxVerticallyPref = [iTermPreferences boolForKey:kPreferenceKeyMaximizeVerticallyOnly];
         if (maxVerticallyPref ^
-            (([[NSApp currentEvent] modifierFlags] & NSEventModifierFlagShift) != 0)) {
+            (([[NSApp currentEvent] it_modifierFlags] & NSEventModifierFlagShift) != 0)) {
             verticalOnly = YES;
         }
     }
@@ -5444,7 +5470,7 @@ ITERM_WEAKLY_REFERENCEABLE
         [theTab recompact];
         [theTab notifyWindowChanged];
         DLog(@"Update client size");
-        [[theTab tmuxController] setClientSize:[theTab tmuxSize]];
+        [[theTab tmuxController] setSize:theTab.tmuxSize window:theTab.tmuxWindow];
     }
     [self saveAffinitiesLater:[tabViewItem identifier]];
 }
@@ -5578,7 +5604,6 @@ ITERM_WEAKLY_REFERENCEABLE
 - (NSImage *)imageFromSelectedTabView:(NSTabView *)aTabView
                           tabViewItem:(NSTabViewItem *)tabViewItem {
     NSView *tabRootView = [tabViewItem view];
-    NSRect tabFrame = [_contentView.tabBarControl frame];
 
     NSRect contentFrame;
     NSRect viewRect;
@@ -6354,6 +6379,8 @@ static CGFloat iTermDimmingAmount(PSMTabBarControl *tabView) {
         return @(iTermDimmingAmount(tabView));
     } else if ([option isEqualToString:PSMTabBarControlOptionMinimalStyleTreatLeftInsetAsPartOfFirstTab]) {
         return @([iTermAdvancedSettingsModel minimalTabStyleTreatLeftInsetAsPartOfFirstTab]);
+    } else if ([option isEqualToString:PSMTabBarControlOptionMinimumSpaceForLabel]) {
+        return @([iTermAdvancedSettingsModel minimumTabLabelWidth]);
     }
     return nil;
 }
@@ -8340,9 +8367,9 @@ static CGFloat iTermDimmingAmount(PSMTabBarControl *tabView) {
                                                       userInfo:nil];
 
 
-    [_contentView.tabView cycleFlagsChanged:[theEvent modifierFlags]];
+    [_contentView.tabView cycleFlagsChanged:[theEvent it_modifierFlags]];
 
-    NSUInteger modifierFlags = [theEvent modifierFlags];
+    NSUInteger modifierFlags = [theEvent it_modifierFlags];
     if (!(modifierFlags & NSEventModifierFlagCommand) &&
         [[[self currentSession] textview] isFindingCursor]) {
         // The cmd key was let up while finding the cursor

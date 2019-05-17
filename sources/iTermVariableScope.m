@@ -82,6 +82,10 @@ NS_ASSUME_NONNULL_BEGIN
     return self;
 }
 
+- (BOOL)usePlaceholders {
+    return NO;
+}
+
 - (void)addVariables:(iTermVariables *)variables toScopeNamed:(nullable NSString *)scopeName {
     [_frames insertObject:[iTermTuple tupleWithObject:scopeName andObject:variables] atIndex:0];
     [self resolveDanglingReferences];
@@ -268,6 +272,16 @@ NS_ASSUME_NONNULL_BEGIN
     return result;
 }
 
+// This is useful for debug logging
+- (NSString *)owner {
+    for (iTermTuple<NSString *, iTermVariables *> *tuple in _frames) {
+        if (tuple.firstObject == nil) {
+            return [[tuple.secondObject owner] description];
+        }
+    }
+    return @"(unknown)";
+}
+
 - (void)resolveDanglingReferences {
     NSPointerArray *refs = _danglingReferences;
     if (refs.count == 0) {
@@ -359,6 +373,14 @@ NS_ASSUME_NONNULL_BEGIN
         return [[iTermVariableReference alloc] initWithPath:path scope:self->_scope];
     }];
 }
+@end
+
+@implementation iTermVariablePlaceholderScope
+
+- (BOOL)usePlaceholders {
+    return YES;
+}
+
 @end
 
 NS_ASSUME_NONNULL_END

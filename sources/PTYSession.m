@@ -96,6 +96,7 @@
 #import "NSData+iTerm.h"
 #import "NSDate+iTerm.h"
 #import "NSDictionary+iTerm.h"
+#import "NSEvent+iTerm.h"
 #import "NSFont+iTerm.h"
 #import "NSImage+iTerm.h"
 #import "NSPasteboard+iTerm.h"
@@ -2890,7 +2891,7 @@ ITERM_WEAKLY_REFERENCEABLE
     int keyBindingAction;
     NSString *keyBindingText;
 
-    modflag = [event modifierFlags];
+    modflag = [event it_modifierFlags];
     unmodkeystr = [event charactersIgnoringModifiers];
     unmodunicode = [unmodkeystr length]>0?[unmodkeystr characterAtIndex:0]:0;
 
@@ -3029,7 +3030,7 @@ ITERM_WEAKLY_REFERENCEABLE
     int keyBindingAction;
     NSString *keyBindingText;
 
-    modflag = [event modifierFlags];
+    modflag = [event it_modifierFlags];
     unmodkeystr = [event charactersIgnoringModifiers];
     unmodunicode = [unmodkeystr length]>0?[unmodkeystr characterAtIndex:0]:0;
 
@@ -4282,7 +4283,8 @@ ITERM_WEAKLY_REFERENCEABLE
 
 + (NSDictionary *)arrangementFromTmuxParsedLayout:(NSDictionary *)parseNode
                                          bookmark:(Profile *)bookmark
-                                   tmuxController:(TmuxController *)tmuxController {
+                                   tmuxController:(TmuxController *)tmuxController
+                                           window:(int)window {
     NSMutableDictionary* result = [NSMutableDictionary dictionaryWithCapacity:3];
     [result setObject:[parseNode objectForKey:kLayoutDictWidthKey] forKey:SESSION_ARRANGEMENT_COLUMNS];
     [result setObject:[parseNode objectForKey:kLayoutDictHeightKey] forKey:SESSION_ARRANGEMENT_ROWS];
@@ -4309,7 +4311,7 @@ ITERM_WEAKLY_REFERENCEABLE
     if (value) {
         result[SESSION_ARRANGEMENT_TMUX_TAB_COLOR] = value;
     }
-    NSDictionary *fontOverrides = tmuxController.fontOverrides;
+    NSDictionary *fontOverrides = [tmuxController fontOverridesForWindow:window];
     if (fontOverrides) {
         result[SESSION_ARRANGEMENT_FONT_OVERRIDES] = fontOverrides;
     }
@@ -4615,7 +4617,9 @@ ITERM_WEAKLY_REFERENCEABLE
         NSNumber *hSpacing = args[2];
         NSNumber *vSpacing = args[3];
         TmuxController *controller = args[4];
-        if (controller == _tmuxController) {
+        NSNumber *tmuxWindow = args[5];
+        if (controller == _tmuxController &&
+            (!controller.variableWindowSize || tmuxWindow.intValue == self.delegate.tmuxWindow)) {
             [_textview setFont:font
                   nonAsciiFont:nonAsciiFont
              horizontalSpacing:[hSpacing doubleValue]
@@ -4634,14 +4638,15 @@ ITERM_WEAKLY_REFERENCEABLE
                                                                       _textview.nonAsciiFontEvenIfNotUsed,
                                                                       @(_textview.horizontalSpacing),
                                                                       @(_textview.verticalSpacing),
-                                                                      _tmuxController ?: [NSNull null] ]];
+                                                                      _tmuxController ?: [NSNull null],
+                                                                      @(self.delegate.tmuxWindow)]];
         fontChangeNotificationInProgress = NO;
         [_delegate setTmuxFont:_textview.font
                   nonAsciiFont:_textview.nonAsciiFontEvenIfNotUsed
                       hSpacing:_textview.horizontalSpacing
                       vSpacing:_textview.verticalSpacing];
         [[NSNotificationCenter defaultCenter] postNotificationName:kPTYSessionTmuxFontDidChange
-                                                            object:nil];
+                                                            object:self];
     }
 }
 
@@ -5554,7 +5559,9 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
                 _tmuxStatusBarMonitor.active = [iTermProfilePreferences boolForKey:KEY_SHOW_STATUS_BAR inProfile:self.profile];
                 if ([iTermAdvancedSettingsModel useTmuxStatusBar] ||
                     [iTermStatusBarLayout shouldOverrideLayout:self.profile[KEY_STATUS_BAR_LAYOUT]]) {
-                    [self setSessionSpecificProfileValues:@{ KEY_STATUS_BAR_LAYOUT: [[iTermStatusBarLayout tmuxLayoutWithController:_tmuxController scope:nil] dictionaryValue] }];
+                    [self setSessionSpecificProfileValues:@{ KEY_STATUS_BAR_LAYOUT: [[iTermStatusBarLayout tmuxLayoutWithController:_tmuxController
+                                                                                                                              scope:nil
+                                                                                                                             window:self.delegate.tmuxWindow] dictionaryValue] }];
                 }
                 break;
         }
@@ -5891,11 +5898,11 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
     }
 }
 
-- (void)tmuxWindowAddedWithId:(int)windowId
-{
+- (void)tmuxWindowAddedWithId:(int)windowId {
     if (![_tmuxController window:windowId]) {
         [_tmuxController openWindowWithId:windowId
-                              intentional:NO];
+                              intentional:NO
+                                  profile:[_tmuxController profileForWindow:self.delegate.tmuxWindow]];
     }
     [_tmuxController windowsChanged];
 }
@@ -6055,11 +6062,11 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
 }
 
 - (VT100GridSize)tmuxClientSize {
-    return [_delegate sessionTmuxSizeWithProfile:_tmuxController.profile];
+    return [_delegate sessionTmuxSizeWithProfile:[_tmuxController profileForWindow:self.delegate.tmuxWindow]];
 }
 
 - (NSInteger)tmuxNumberOfLinesOfScrollbackHistory {
-    Profile *profile = _tmuxController.profile;
+    Profile *profile = [_tmuxController profileForWindow:self.delegate.tmuxWindow];
     if ([iTermPreferences useTmuxProfile]) {
         profile = [[ProfileModel sharedInstance] tmuxProfile];
     }
@@ -6166,22 +6173,22 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
         return NO;
     }
     NSMutableArray *actualModifiers = [NSMutableArray array];
-    if (event.modifierFlags & NSEventModifierFlagControl) {
+    if (event.it_modifierFlags & NSEventModifierFlagControl) {
         [actualModifiers addObject:@(ITMModifiers_Control)];
     }
-    if (event.modifierFlags & NSEventModifierFlagOption) {
+    if (event.it_modifierFlags & NSEventModifierFlagOption) {
         [actualModifiers addObject:@(ITMModifiers_Option)];
     }
-    if (event.modifierFlags & NSEventModifierFlagCommand) {
+    if (event.it_modifierFlags & NSEventModifierFlagCommand) {
         [actualModifiers addObject:@(ITMModifiers_Command)];
     }
-    if (event.modifierFlags & NSEventModifierFlagShift) {
+    if (event.it_modifierFlags & NSEventModifierFlagShift) {
         [actualModifiers addObject:@(ITMModifiers_Shift)];
     }
-    if (event.modifierFlags & NSEventModifierFlagFunction) {
+    if (event.it_modifierFlags & NSEventModifierFlagFunction) {
         [actualModifiers addObject:@(ITMModifiers_Function)];
     }
-    if (event.modifierFlags & NSEventModifierFlagNumericPad) {
+    if (event.it_modifierFlags & NSEventModifierFlagNumericPad) {
         [actualModifiers addObject:@(ITMModifiers_Numpad)];
     }
     for (NSInteger i = 0; i < pattern.requiredModifiersArray_Count; i++) {
@@ -6246,7 +6253,7 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
             [self didInferEndOfCommand];
         }
 
-        if ((event.modifierFlags & NSEventModifierFlagControl) && [event.charactersIgnoringModifiers isEqualToString:@"c"]) {
+        if ((event.it_modifierFlags & NSEventModifierFlagControl) && [event.charactersIgnoringModifiers isEqualToString:@"c"]) {
             if (self.terminal.receivingFile) {
                 // Offer to abort download if you press ^c while downloading an inline file
                 [self askAboutAbortingDownload];
@@ -6265,22 +6272,22 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
         ITMKeystrokeNotification *keystrokeNotification = [[[ITMKeystrokeNotification alloc] init] autorelease];
         keystrokeNotification.characters = event.characters;
         keystrokeNotification.charactersIgnoringModifiers = event.charactersIgnoringModifiers;
-        if (event.modifierFlags & NSEventModifierFlagControl) {
+        if (event.it_modifierFlags & NSEventModifierFlagControl) {
             [keystrokeNotification.modifiersArray addValue:ITMModifiers_Control];
         }
-        if (event.modifierFlags & NSEventModifierFlagOption) {
+        if (event.it_modifierFlags & NSEventModifierFlagOption) {
             [keystrokeNotification.modifiersArray addValue:ITMModifiers_Option];
         }
-        if (event.modifierFlags & NSEventModifierFlagCommand) {
+        if (event.it_modifierFlags & NSEventModifierFlagCommand) {
             [keystrokeNotification.modifiersArray addValue:ITMModifiers_Command];
         }
-        if (event.modifierFlags & NSEventModifierFlagShift) {
+        if (event.it_modifierFlags & NSEventModifierFlagShift) {
             [keystrokeNotification.modifiersArray addValue:ITMModifiers_Shift];
         }
-        if (event.modifierFlags & NSEventModifierFlagNumericPad) {
+        if (event.it_modifierFlags & NSEventModifierFlagNumericPad) {
             [keystrokeNotification.modifiersArray addValue:ITMModifiers_Numpad];
         }
-        if (event.modifierFlags & NSEventModifierFlagFunction) {
+        if (event.it_modifierFlags & NSEventModifierFlagFunction) {
             [keystrokeNotification.modifiersArray addValue:ITMModifiers_Function];
         }
         keystrokeNotification.keyCode = event.keyCode;
@@ -6332,6 +6339,7 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
     [iTermScriptFunctionCall callFunction:invocation
                                   timeout:[[NSDate distantFuture] timeIntervalSinceNow]
                                     scope:scope
+                               retainSelf:YES
                                completion:^(id value, NSError *error, NSSet<NSString *> *missing) {
                                    if (error) {
                                        [PTYSession reportFunctionCallError:error
@@ -6417,6 +6425,7 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
             [iTermScriptFunctionCall callFunction:keyBindingText
                                           timeout:[[NSDate distantFuture] timeIntervalSinceNow]
                                             scope:[iTermVariableScope globalsScope]
+                                       retainSelf:YES
                                        completion:^(id value, NSError *error, NSSet<NSString *> *missing) {
                                            if (error) {
                                                [PTYSession reportFunctionCallError:error
@@ -6455,11 +6464,11 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
             [[_delegate realParentWindow] moveTabRight:nil];
             break;
         case KEY_ACTION_NEXT_MRU_TAB:
-            [[[_delegate parentWindow] tabView] cycleKeyDownWithModifiers:[event modifierFlags]
+            [[[_delegate parentWindow] tabView] cycleKeyDownWithModifiers:[event it_modifierFlags]
                                                                  forwards:YES];
             break;
         case KEY_ACTION_PREVIOUS_MRU_TAB:
-            [[[_delegate parentWindow] tabView] cycleKeyDownWithModifiers:[event modifierFlags]
+            [[[_delegate parentWindow] tabView] cycleKeyDownWithModifiers:[event it_modifierFlags]
                                                                  forwards:NO];
             break;
         case KEY_ACTION_NEXT_PANE:
@@ -6891,9 +6900,9 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
 - (void)logKeystroke:(NSEvent *)event {
     const unichar unicode = event.characters.length > 0 ? [event.characters characterAtIndex:0] : 0;
     DLog(@"event:%@ (%llx+%x)[%@][%@]:%x(%c) <%lu>",
-         event, (unsigned long long)event.modifierFlags, event.keyCode, event.characters,
+         event, (unsigned long long)event.it_modifierFlags, event.keyCode, event.characters,
          event.charactersIgnoringModifiers, unicode, unicode,
-         (event.modifierFlags & NSEventModifierFlagNumericPad));
+         (event.it_modifierFlags & NSEventModifierFlagNumericPad));
 }
 
 - (BOOL)trySpecialKeyHandlersForEvent:(NSEvent *)event {
@@ -6956,7 +6965,7 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
 
 - (BOOL)maybeHandleKeyBindingActionForKeyEvent:(NSEvent *)event {
     const unichar characterIgnoringModifiers = [event.charactersIgnoringModifiers length] > 0 ? [event.charactersIgnoringModifiers characterAtIndex:0] : 0;
-    const NSEventModifierFlags modifiers = event.modifierFlags;
+    const NSEventModifierFlags modifiers = event.it_modifierFlags;
 
     // Check if we have a custom key mapping for this event
     NSString *keyBindingText;
@@ -6992,7 +7001,7 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
     // session, even though it might be displayed.
     const unichar character = event.characters.length > 0 ? [event.characters characterAtIndex:0] : 0;
     const unichar characterIgnoringModifiers = [event.charactersIgnoringModifiers length] > 0 ? [event.charactersIgnoringModifiers characterAtIndex:0] : 0;
-    const NSEventModifierFlags modifiers = event.modifierFlags;
+    const NSEventModifierFlags modifiers = event.it_modifierFlags;
 
     if (character == 27) {
         // Escape exits IR

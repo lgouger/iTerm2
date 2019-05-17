@@ -9,6 +9,7 @@
 #import "iTermExpressionParser+Private.h"
 
 #import "CPParser+Cache.h"
+#import "iTermAdvancedSettingsModel.h"
 #import "iTermGrammarProcessor.h"
 #import "iTermParsedExpression+Tests.h"
 #import "iTermScriptFunctionCall+Private.h"
@@ -26,7 +27,7 @@
 @implementation iTermExpressionParser {
     @protected
     CPTokeniser *_tokenizer;
-    CPParser *_parser;
+    CPSLRParser *_parser;
     iTermVariableScope *_scope;
     NSError *_error;
     NSString *_input;
@@ -40,6 +41,8 @@
     iTermParsedExpression *expression = [[iTermExpressionParser callParser] parse:invocation
                                                                             scope:permissiveScope];
     switch (expression.expressionType) {
+        case iTermParsedExpressionTypeArrayLookup:
+        case iTermParsedExpressionTypeVariableReference:
         case iTermParsedExpressionTypeNumber:
         case iTermParsedExpressionTypeString:
         case iTermParsedExpressionTypeArrayOfExpressions:
@@ -172,6 +175,10 @@
     return self;
 }
 
+- (void)dealloc {
+    [_parser it_releaseParser];
+}
+
 - (void)addSwiftyStringRecognizers {
     iTermSwiftyStringRecognizer *left =
         [[iTermSwiftyStringRecognizer alloc] initWithStartQuote:@"\""
@@ -223,6 +230,11 @@
         return [[iTermParsedExpression alloc] initWithErrorCode:3 reason:errorReason];
     }
 
+    if ([value conformsToProtocol:@protocol(iTermExpressionParserPlaceholder)]) {
+        return [[iTermParsedExpression alloc] initWithPlaceholder:value
+                                                         optional:optional];
+    }
+
     // The fallbackError is used only when value is not legit.
     NSString *fallbackError;
     if (optional) {
@@ -243,8 +255,7 @@
              arraySoFar.lastObject &&
              arraySoFar.lastObject.expressionType == iTermParsedExpressionTypeString) {
              NSString *concatenated = [arraySoFar.lastObject.string stringByAppendingString:expression.string];
-             iTermParsedExpression *combined = [[iTermParsedExpression alloc] initWithString:concatenated
-                                                                                    optional:NO];
+             iTermParsedExpression *combined = [[iTermParsedExpression alloc] initWithString:concatenated];
              return [[arraySoFar subarrayToIndex:arraySoFar.count - 1] arrayByAddingObject:combined];
          }
          return [arraySoFar arrayByAddingObject:expression];
@@ -269,8 +280,7 @@
     [swifty enumerateSwiftySubstrings:^(NSUInteger index, NSString *substring, BOOL isLiteral, BOOL *stop) {
         if (isLiteral) {
             NSString *escapedString = [substring it_stringByExpandingBackslashEscapedCharacters];
-            [interpolatedParts addObject:[[iTermParsedExpression alloc] initWithString:escapedString
-                                                                              optional:NO]];
+            [interpolatedParts addObject:[[iTermParsedExpression alloc] initWithString:escapedString]];
             return;
         }
 
@@ -279,9 +289,19 @@
                                                     scope:scope];
         if (expression.expressionType == iTermParsedExpressionTypeString && escapingFunction) {
             NSString *escapedString = escapingFunction(expression.string);
-            [interpolatedParts addObject:[[iTermParsedExpression alloc] initWithString:escapedString
-                                                                              optional:NO]];
+            [interpolatedParts addObject:[[iTermParsedExpression alloc] initWithString:escapedString]];
             return;
+        }
+        if ([iTermAdvancedSettingsModel laxNilPolicyInInterpolatedStrings] &&
+            expression.expressionType == iTermParsedExpressionTypeError) {
+            // If the expression was a variable reference, replace it with empty string. This works
+            // around the annoyance of remembering to add question marks in interpolated strings,
+            // where you know the result you want is always an empty string.
+            iTermParsedExpression *expressionWithPlaceholders = [parser parse:substring
+                                                                        scope:[[iTermVariablePlaceholderScope alloc] init]];
+            if ([expressionWithPlaceholders.object conformsToProtocol:@protocol(iTermExpressionParserPlaceholder)]) {
+                expression = [[iTermParsedExpression alloc] initWithString:@""];
+            }
         }
         [interpolatedParts addObject:expression];
         if (expression.expressionType == iTermParsedExpressionTypeError) {
@@ -300,6 +320,17 @@
 
 - (iTermTriple<id, NSString *, NSString *> *)pathOrDereferencedArrayFromPath:(NSString *)path
                                                                        index:(NSNumber *)indexNumber {
+    if (_scope.usePlaceholders) {
+        id placeholder;
+        if (indexNumber) {
+            placeholder = [[iTermExpressionParserArrayDereferencePlaceholder alloc] initWithPath:path index:indexNumber.integerValue];
+        } else {
+            placeholder = [[iTermExpressionParserVariableReferencePlaceholder alloc] initWithPath:path];
+        }
+        return [iTermTriple tripleWithObject:placeholder
+                                   andObject:nil
+                                      object:path];
+    }
     id untypedValue = [_scope valueForVariableName:path];
     if (!untypedValue) {
         return [iTermTriple tripleWithObject:nil andObject:nil object:path];
