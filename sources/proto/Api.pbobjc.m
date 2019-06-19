@@ -1099,6 +1099,7 @@ void ITMServerOriginatedMessage_ClearSubmessageOneOfCase(ITMServerOriginatedMess
 @dynamic session;
 @dynamic window;
 @dynamic app;
+@dynamic method;
 @dynamic hasInvocation, invocation;
 @dynamic hasTimeout, timeout;
 
@@ -1109,6 +1110,7 @@ typedef struct ITMInvokeFunctionRequest__storage_ {
   ITMInvokeFunctionRequest_Window *window;
   ITMInvokeFunctionRequest_App *app;
   NSString *invocation;
+  ITMInvokeFunctionRequest_Method *method;
   double timeout;
 } ITMInvokeFunctionRequest__storage_;
 
@@ -1177,6 +1179,16 @@ typedef struct ITMInvokeFunctionRequest__storage_ {
         .core.offset = (uint32_t)offsetof(ITMInvokeFunctionRequest__storage_, timeout),
         .core.flags = (GPBFieldFlags)(GPBFieldOptional | GPBFieldHasDefaultValue),
         .core.dataType = GPBDataTypeDouble,
+      },
+      {
+        .defaultValue.valueMessage = nil,
+        .core.name = "method",
+        .core.dataTypeSpecific.className = GPBStringifySymbol(ITMInvokeFunctionRequest_Method),
+        .core.number = ITMInvokeFunctionRequest_FieldNumber_Method,
+        .core.hasIndex = -1,
+        .core.offset = (uint32_t)offsetof(ITMInvokeFunctionRequest__storage_, method),
+        .core.flags = GPBFieldOptional,
+        .core.dataType = GPBDataTypeMessage,
       },
     };
     GPBDescriptor *localDescriptor =
@@ -1359,6 +1371,50 @@ typedef struct ITMInvokeFunctionRequest_App__storage_ {
                                         fields:NULL
                                     fieldCount:0
                                    storageSize:sizeof(ITMInvokeFunctionRequest_App__storage_)
+                                         flags:GPBDescriptorInitializationFlag_None];
+    [localDescriptor setupContainingMessageClassName:GPBStringifySymbol(ITMInvokeFunctionRequest)];
+    NSAssert(descriptor == nil, @"Startup recursed!");
+    descriptor = localDescriptor;
+  }
+  return descriptor;
+}
+
+@end
+
+#pragma mark - ITMInvokeFunctionRequest_Method
+
+@implementation ITMInvokeFunctionRequest_Method
+
+@dynamic hasReceiver, receiver;
+
+typedef struct ITMInvokeFunctionRequest_Method__storage_ {
+  uint32_t _has_storage_[1];
+  NSString *receiver;
+} ITMInvokeFunctionRequest_Method__storage_;
+
+// This method is threadsafe because it is initially called
+// in +initialize for each subclass.
++ (GPBDescriptor *)descriptor {
+  static GPBDescriptor *descriptor = nil;
+  if (!descriptor) {
+    static GPBMessageFieldDescription fields[] = {
+      {
+        .name = "receiver",
+        .dataTypeSpecific.className = NULL,
+        .number = ITMInvokeFunctionRequest_Method_FieldNumber_Receiver,
+        .hasIndex = 0,
+        .offset = (uint32_t)offsetof(ITMInvokeFunctionRequest_Method__storage_, receiver),
+        .flags = GPBFieldOptional,
+        .dataType = GPBDataTypeString,
+      },
+    };
+    GPBDescriptor *localDescriptor =
+        [GPBDescriptor allocDescriptorForClass:[ITMInvokeFunctionRequest_Method class]
+                                     rootClass:[ITMApiRoot class]
+                                          file:ITMApiRoot_FileDescriptor()
+                                        fields:fields
+                                    fieldCount:(uint32_t)(sizeof(fields) / sizeof(GPBMessageFieldDescription))
+                                   storageSize:sizeof(ITMInvokeFunctionRequest_Method__storage_)
                                          flags:GPBDescriptorInitializationFlag_None];
     [localDescriptor setupContainingMessageClassName:GPBStringifySymbol(ITMInvokeFunctionRequest)];
     NSAssert(descriptor == nil, @"Startup recursed!");
@@ -9649,6 +9705,7 @@ BOOL ITMGetProfilePropertyResponse_Status_IsValidValue(int32_t value__) {
 @dynamic guidList;
 @dynamic hasKey, key;
 @dynamic hasJsonValue, jsonValue;
+@dynamic assignmentsArray, assignmentsArray_Count;
 
 typedef struct ITMSetProfilePropertyRequest__storage_ {
   uint32_t _has_storage_[2];
@@ -9656,6 +9713,7 @@ typedef struct ITMSetProfilePropertyRequest__storage_ {
   ITMSetProfilePropertyRequest_GuidList *guidList;
   NSString *key;
   NSString *jsonValue;
+  NSMutableArray *assignmentsArray;
 } ITMSetProfilePropertyRequest__storage_;
 
 // This method is threadsafe because it is initially called
@@ -9699,6 +9757,15 @@ typedef struct ITMSetProfilePropertyRequest__storage_ {
         .offset = (uint32_t)offsetof(ITMSetProfilePropertyRequest__storage_, jsonValue),
         .flags = GPBFieldOptional,
         .dataType = GPBDataTypeString,
+      },
+      {
+        .name = "assignmentsArray",
+        .dataTypeSpecific.className = GPBStringifySymbol(ITMSetProfilePropertyRequest_Assignment),
+        .number = ITMSetProfilePropertyRequest_FieldNumber_AssignmentsArray,
+        .hasIndex = GPBNoHasBit,
+        .offset = (uint32_t)offsetof(ITMSetProfilePropertyRequest__storage_, assignmentsArray),
+        .flags = GPBFieldRepeated,
+        .dataType = GPBDataTypeMessage,
       },
     };
     GPBDescriptor *localDescriptor =
@@ -9762,6 +9829,61 @@ typedef struct ITMSetProfilePropertyRequest_GuidList__storage_ {
                                         fields:fields
                                     fieldCount:(uint32_t)(sizeof(fields) / sizeof(GPBMessageFieldDescription))
                                    storageSize:sizeof(ITMSetProfilePropertyRequest_GuidList__storage_)
+                                         flags:GPBDescriptorInitializationFlag_None];
+    [localDescriptor setupContainingMessageClassName:GPBStringifySymbol(ITMSetProfilePropertyRequest)];
+    NSAssert(descriptor == nil, @"Startup recursed!");
+    descriptor = localDescriptor;
+  }
+  return descriptor;
+}
+
+@end
+
+#pragma mark - ITMSetProfilePropertyRequest_Assignment
+
+@implementation ITMSetProfilePropertyRequest_Assignment
+
+@dynamic hasKey, key;
+@dynamic hasJsonValue, jsonValue;
+
+typedef struct ITMSetProfilePropertyRequest_Assignment__storage_ {
+  uint32_t _has_storage_[1];
+  NSString *key;
+  NSString *jsonValue;
+} ITMSetProfilePropertyRequest_Assignment__storage_;
+
+// This method is threadsafe because it is initially called
+// in +initialize for each subclass.
++ (GPBDescriptor *)descriptor {
+  static GPBDescriptor *descriptor = nil;
+  if (!descriptor) {
+    static GPBMessageFieldDescription fields[] = {
+      {
+        .name = "key",
+        .dataTypeSpecific.className = NULL,
+        .number = ITMSetProfilePropertyRequest_Assignment_FieldNumber_Key,
+        .hasIndex = 0,
+        .offset = (uint32_t)offsetof(ITMSetProfilePropertyRequest_Assignment__storage_, key),
+        .flags = GPBFieldOptional,
+        .dataType = GPBDataTypeString,
+      },
+      {
+        .name = "jsonValue",
+        .dataTypeSpecific.className = NULL,
+        .number = ITMSetProfilePropertyRequest_Assignment_FieldNumber_JsonValue,
+        .hasIndex = 1,
+        .offset = (uint32_t)offsetof(ITMSetProfilePropertyRequest_Assignment__storage_, jsonValue),
+        .flags = GPBFieldOptional,
+        .dataType = GPBDataTypeString,
+      },
+    };
+    GPBDescriptor *localDescriptor =
+        [GPBDescriptor allocDescriptorForClass:[ITMSetProfilePropertyRequest_Assignment class]
+                                     rootClass:[ITMApiRoot class]
+                                          file:ITMApiRoot_FileDescriptor()
+                                        fields:fields
+                                    fieldCount:(uint32_t)(sizeof(fields) / sizeof(GPBMessageFieldDescription))
+                                   storageSize:sizeof(ITMSetProfilePropertyRequest_Assignment__storage_)
                                          flags:GPBDescriptorInitializationFlag_None];
     [localDescriptor setupContainingMessageClassName:GPBStringifySymbol(ITMSetProfilePropertyRequest)];
     NSAssert(descriptor == nil, @"Startup recursed!");

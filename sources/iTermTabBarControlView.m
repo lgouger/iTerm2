@@ -35,12 +35,15 @@ typedef NS_ENUM(NSInteger, iTermTabBarFlashState) {
 - (instancetype)initWithFrame:(NSRect)frameRect {
     self = [super initWithFrame:frameRect];
     if (self) {
-        [self setTabsHaveCloseButtons:![iTermAdvancedSettingsModel eliminateCloseButtons]];
+        [self setTabsHaveCloseButtons:[iTermPreferences boolForKey:kPreferenceKeyTabsHaveCloseButton]];
         self.minimumTabDragDistance = [iTermAdvancedSettingsModel minimumTabDragDistance];
         // This used to depend on job but it's too difficult to do now that different sessions might
         // have different title formats.
         self.ignoreTrailingParentheticalsForSmartTruncation = YES;
         self.height = [iTermAdvancedSettingsModel defaultTabBarHeight];
+        if (@available(macOS 10.14, *)) {
+            self.showAddTabButton = YES;
+        }
     }
     return self;
 }
@@ -232,6 +235,13 @@ typedef NS_ENUM(NSInteger, iTermTabBarFlashState) {
     if ([self flashing] &&
         ![_itermTabBarDelegate iTermTabBarShouldFlashAutomatically]) {
         [self setFlashing:NO];
+    }
+}
+
+- (void)setOrientation:(PSMTabBarOrientation)orientation {
+    [super setOrientation:orientation];
+    if (@available(macOS 10.14, *)) {
+        self.showAddTabButton = (orientation == PSMTabBarHorizontalOrientation);
     }
 }
 

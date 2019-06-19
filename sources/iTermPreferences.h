@@ -96,7 +96,8 @@ extern NSString *const kPreferenceKeyStatusBarPosition;
 extern NSString *const kPreferenceKeyHideTabBar;
 extern NSString *const kPreferenceKeyHideTabNumber;
 extern NSString *const kPreferenceKeyPreserveWindowSizeWhenTabBarVisibilityChanges;
-extern NSString *const kPreferenceKeyHideTabCloseButton;
+extern NSString *const kPreferenceKeyHideTabCloseButton;  // DEPRECATED
+extern NSString *const kPreferenceKeyTabsHaveCloseButton;
 extern NSString *const kPreferenceKeyHideTabActivityIndicator;
 extern NSString *const kPreferenceKeyShowNewOutputIndicator;
 extern NSString *const kPreferenceKeyShowPaneTitles;
@@ -155,6 +156,7 @@ extern NSString *const kPreferenceKeyDoubleClickPerformsSmartSelection;
 // Not in prefs
 // Stores the last CFBundleVersion run.
 extern NSString *const kPreferenceKeyAppVersion;
+extern NSString *const kPreferenceKeyAllAppVersions;
 
 // Auto-command history (set through menu)
 extern NSString *const kPreferenceAutoCommandHistory;
@@ -190,6 +192,7 @@ extern NSString *const kPreferenceKeyHotkeyMigratedFromSingleToMulti;
 
 // Last app version launched, if any.
 + (NSString *)appVersionBeforeThisLaunch;
++ (NSSet<NSString *> *)allAppVersionsUsedOnThisMachine;
 
 + (void)setObject:(id)object forKey:(NSString *)key;
 + (NSObject *)objectForKey:(NSString *)key;

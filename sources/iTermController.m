@@ -66,7 +66,10 @@
 #import "iTermUserDefaults.h"
 #import "iTermWarning.h"
 #import "PTYWindow.h"
+
 #include <objc/runtime.h>
+
+@import Sparkle;
 
 @interface NSApplication (Undocumented)
 - (void)_cycleWindowsReversed:(BOOL)back;
@@ -254,14 +257,18 @@ static iTermController *gSharedInstance;
         DLog(@"Creating a new tmux window");
         [_frontTerminalWindowController newTmuxWindow:sender];
     } else {
-        [self launchBookmark:nil inTerminal:nil];
+        [self launchBookmark:nil
+                  inTerminal:nil
+          respectTabbingMode:YES];
     }
 }
 
 - (void)newSessionInTabAtIndex:(id)sender {
     Profile *bookmark = [[ProfileModel sharedInstance] bookmarkWithGuid:[sender representedObject]];
     if (bookmark) {
-        [self launchBookmark:bookmark inTerminal:_frontTerminalWindowController];
+        [self launchBookmark:bookmark
+                  inTerminal:_frontTerminalWindowController
+          respectTabbingMode:NO];
     }
 }
 
@@ -290,7 +297,9 @@ static iTermController *gSharedInstance;
 - (void)newSessionInWindowAtIndex:(id)sender {
     Profile *bookmark = [[ProfileModel sharedInstance] bookmarkWithGuid:[sender representedObject]];
     if (bookmark) {
-        [self launchBookmark:bookmark inTerminal:nil];
+        [self launchBookmark:bookmark
+                  inTerminal:nil
+          respectTabbingMode:NO];
     }
 }
 
@@ -309,7 +318,9 @@ static iTermController *gSharedInstance;
         NSString *guid = [ProfileModel freshGuid];
         bookmark = [bookmark dictionaryBySettingObject:guid forKey:KEY_GUID];
     }
-    PTYSession *session = [self launchBookmark:bookmark inTerminal:_frontTerminalWindowController];
+    PTYSession *session = [self launchBookmark:bookmark
+                                    inTerminal:_frontTerminalWindowController
+                            respectTabbingMode:NO];
     if (divorced) {
         [session divorceAddressBookEntryFromPreferences];
     }
@@ -325,7 +336,9 @@ static iTermController *gSharedInstance;
         [[_frontTerminalWindowController currentSession] isTmuxClient]) {
         [_frontTerminalWindowController newTmuxTab:sender];
     } else {
-        [self launchBookmark:nil inTerminal:_frontTerminalWindowController];
+        [self launchBookmark:nil
+                  inTerminal:_frontTerminalWindowController
+          respectTabbingMode:NO];
     }
 }
 
@@ -835,12 +848,16 @@ static iTermController *gSharedInstance;
     PseudoTerminal *term = newWindow ? nil : [self currentTerminal];
     for (Profile *bookmark in bookmarks) {
         if (!term) {
-            PTYSession *session = [self launchBookmark:bookmark inTerminal:nil];
+            PTYSession *session = [self launchBookmark:bookmark
+                                            inTerminal:nil
+                                    respectTabbingMode:NO];
             if (session) {
                 term = [self terminalWithSession:session];
             }
         } else {
-            [self launchBookmark:bookmark inTerminal:term];
+            [self launchBookmark:bookmark
+                      inTerminal:term
+              respectTabbingMode:NO];
         }
     }
 }
@@ -1010,13 +1027,16 @@ static iTermController *gSharedInstance;
     [[iTermFullScreenWindowManager sharedInstance] makeWindowEnterFullScreen:term.ptyWindow];
 }
 
-- (PTYSession *)launchBookmark:(NSDictionary *)bookmarkData inTerminal:(PseudoTerminal *)theTerm {
+- (PTYSession *)launchBookmark:(NSDictionary *)bookmarkData
+                    inTerminal:(PseudoTerminal *)theTerm
+            respectTabbingMode:(BOOL)respectTabbingMode {
     return [self launchBookmark:bookmarkData
                      inTerminal:theTerm
                         withURL:nil
                        hotkeyWindowType:iTermHotkeyWindowTypeNone
                         makeKey:YES
                     canActivate:YES
+             respectTabbingMode:respectTabbingMode
                         command:nil
                           block:nil
                     synchronous:NO
@@ -1149,12 +1169,66 @@ static iTermController *gSharedInstance;
     }
 }
 
+- (PseudoTerminal *)windowControllerForNewTabWithProfile:(Profile *)profile
+                                               candidate:(PseudoTerminal *)preferredWindowController
+                                      respectTabbingMode:(BOOL)respectTabbingMode {
+    const BOOL preventTab = [profile[KEY_PREVENT_TAB] boolValue];
+    if (preventTab) {
+        return nil;
+    }
+    if (!respectTabbingMode || [iTermAdvancedSettingsModel disregardDockSettingToOpenTabsInsteadOfWindows]) {
+        return preferredWindowController;
+    }
+    switch ([iTermUserDefaults appleWindowTabbingMode]) {
+        case iTermAppleWindowTabbingModeManual:
+            return preferredWindowController;
+        case iTermAppleWindowTabbingModeAlways:
+            if (preferredWindowController) {
+                return preferredWindowController;
+            }
+            [self maybeWarnAboutOpeningInTab];
+            return [self currentTerminal];
+        case iTermAppleWindowTabbingModeFullscreen: {
+            if (preferredWindowController) {
+                return preferredWindowController;
+            }
+            PseudoTerminal *tempTerm = [[iTermController sharedInstance] currentTerminal];
+            if (tempTerm && tempTerm.windowType == WINDOW_TYPE_LION_FULL_SCREEN) {
+                [self maybeWarnAboutOpeningInTab];
+                return tempTerm;
+            }
+            return nil;
+        }
+    }
+}
+
+- (void)maybeWarnAboutOpeningInTab {
+#if ENABLE_RESPECT_DOCK_PREFER_TABS_SETTING
+    NSString *const firstVersionRespectingSetting = @"SET THIS";
+    if (iTermUserDefaults.haveBeenWarnedAboutTabDockSetting) {
+        return;
+    }
+    id<SUVersionComparison> comparator = [SUStandardVersionComparator defaultComparator];
+    const BOOL haveUsedOlderVersion = [[iTermPreferences allAppVersionsUsedOnThisMachine].allObjects anyWithBlock:^BOOL(NSString *version) {
+        return [comparator compareVersion:firstVersionRespectingSetting toVersion:version] == NSOrderedDescending;
+    }];
+    if (!haveUsedOlderVersion) {
+        return;
+    }
+    [[iTermNotificationController sharedInstance] postNotificationWithTitle:@"Creating a tab"
+                                                                     detail:@"The system preference to open a tab instead of a window is now respected in iTerm2."
+                                                                        URL:[NSURL URLWithString:@"https://gitlab.com/gnachman/iterm2/wikis/Prefer-Tabs-When-Opening-Documents"]];
+    iTermUserDefaults.haveBeenWarnedAboutTabDockSetting = YES;
+#endif
+}
+
 - (PTYSession *)launchBookmark:(NSDictionary *)bookmarkData
                     inTerminal:(PseudoTerminal *)theTerm
                        withURL:(NSString *)url
               hotkeyWindowType:(iTermHotkeyWindowType)hotkeyWindowType
                        makeKey:(BOOL)makeKey
                    canActivate:(BOOL)canActivate
+            respectTabbingMode:(BOOL)respectTabbingMode
                        command:(NSString *)command
                          block:(PTYSession *(^)(Profile *, PseudoTerminal *))block
                    synchronous:(BOOL)synchronous
@@ -1192,9 +1266,8 @@ static iTermController *gSharedInstance;
     if (!bookmarkData) {
         DLog(@"Using profile:\n%@", aDict);
     }
-    if (theTerm && [[aDict objectForKey:KEY_PREVENT_TAB] boolValue]) {
-        theTerm = nil;
-    }
+
+    theTerm = [self windowControllerForNewTabWithProfile:aDict candidate:theTerm respectTabbingMode:respectTabbingMode];
 
     // Where do we execute this command?
     BOOL toggle = NO;
@@ -1629,7 +1702,8 @@ static iTermController *gSharedInstance;
     PTYSession *(^makeSession)(Profile *, PseudoTerminal *) = ^PTYSession *(Profile *profile, PseudoTerminal *term)  {
         profile = [profile dictionaryBySettingObject:@"" forKey:KEY_INITIAL_TEXT];
         const BOOL closeSessionsOnEnd = !!(options & iTermSingleUseWindowOptionsCloseOnTermination);
-        profile = [profile dictionaryBySettingObject:@(closeSessionsOnEnd) forKey:KEY_CLOSE_SESSIONS_ON_END];
+        profile = [profile dictionaryBySettingObject:@(closeSessionsOnEnd ? iTermSessionEndActionClose : iTermSessionEndActionDefault)
+                                              forKey:KEY_SESSION_END_ACTION];
         term.window.collectionBehavior = NSWindowCollectionBehaviorFullScreenNone;
         if (shortLived) {
             profile = [profile dictionaryBySettingObject:@0 forKey:KEY_UNDO_TIMEOUT];
@@ -1667,6 +1741,7 @@ static iTermController *gSharedInstance;
                               hotkeyWindowType:iTermHotkeyWindowTypeNone
                                        makeKey:YES
                                    canActivate:YES
+                            respectTabbingMode:NO
                                        command:command
                                          block:makeSession
                                    synchronous:NO

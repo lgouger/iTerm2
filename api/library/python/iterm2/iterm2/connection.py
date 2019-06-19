@@ -76,11 +76,17 @@ class Connection:
         """
         connection = Connection()
         cookie, key = _cookie_and_key()
-        connection.websocket = await websockets.connect(
-                _uri(),
-                ping_interval=None,
-                extra_headers=_headers(),
-                subprotocols=_subprotocols())
+        try:
+            connection.websocket = await websockets.connect(
+                    _uri(),
+                    ping_interval=None,
+                    extra_headers=_headers(),
+                    subprotocols=_subprotocols())
+        except websockets.exceptions.InvalidStatusCode as e:
+            if e.status_code == 406:
+                print("This version of the iterm2 module is too old for the current version of iTerm2. Please upgrade.")
+                sys.exit(1)
+            raise
         connection.__dispatch_forever_future = asyncio.ensure_future(connection._async_dispatch_forever(connection, asyncio.get_event_loop()))
         return connection
 
@@ -236,6 +242,18 @@ class Connection:
             except Exception:
                 raise
 
+    @property
+    def iterm2_protocol_version(self):
+        """Returns a tuple (major version, minor version) or 0,0 if it's an old version of iTerm2 that doesn't report its version or it's unknown."""
+        key = "X-iTerm2-Protocol-Version"
+        if key not in self.websocket.response_headers:
+            return (0, 0)
+        s = self.websocket.response_headers[key]
+        parts = s.split(".")
+        if len(parts) != 2:
+            return (0, 0)
+        return (int(parts[0]), int(parts[1]))
+
     async def async_connect(self, coro, retry=False):
         """
         Establishes a websocket connection.
@@ -267,6 +285,11 @@ class Connection:
                     except Exception as _err:
                         traceback.print_exc()
                         sys.exit(1)
+            except websockets.exceptions.InvalidStatusCode as e:
+                if e.status_code == 406:
+                    print("This version of the iterm2 module is too old for the current version of iTerm2. Please upgrade.")
+                    sys.exit(1)
+                raise
             except websockets.exceptions.InvalidMessage:
                 # This is a temporary workaround for this issue:
                 #

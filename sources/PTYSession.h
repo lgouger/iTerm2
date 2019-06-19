@@ -34,6 +34,7 @@ extern NSString *const kPTYSessionCapturedOutputDidChange;
 extern NSString *const PTYSessionCreatedNotification;
 extern NSString *const PTYSessionTerminatedNotification;
 extern NSString *const PTYSessionRevivedNotification;
+extern NSString *const iTermSessionWillTerminateNotification;
 
 @class CapturedOutput;
 @class FakeWindow;
@@ -134,7 +135,8 @@ typedef enum {
 - (void)nameOfSession:(PTYSession *)session didChangeTo:(NSString *)newName;
 
 // Session-initiated font size. May cause window size to adjust.
-- (void)sessionDidChangeFontSize:(PTYSession *)session;
+- (void)sessionDidChangeFontSize:(PTYSession *)session
+                    adjustWindow:(BOOL)adjustWindow;
 
 // Session-initiated resize.
 - (BOOL)sessionInitiatedResize:(PTYSession*)session width:(int)width height:(int)height;
@@ -235,6 +237,7 @@ typedef enum {
 - (void)sessionDidInvalidateStatusBar:(PTYSession *)session;
 - (void)sessionAddSwiftyStringsToGraph:(iTermSwiftyStringGraph *)graph;
 - (iTermVariableScope *)sessionTabScope;
+- (void)sessionDidReportSelectedTmuxPane:(PTYSession *)session;
 
 @end
 
@@ -277,7 +280,8 @@ typedef enum {
 // Do we need to prompt on close for this session?
 @property(nonatomic, readonly) iTermPromptOnCloseReason *promptOnCloseReason;
 
-// Array of subprocessess names.
+// Array of subprocessess names. WARNING: This forces a synchronous update of the process cache.
+// It is up-to-date but too slow to call frequently.
 @property(nonatomic, readonly) NSArray *childJobNames;
 
 // Is the session idle? Used by updateLabelAttributes to send a user notification when processing ends.
@@ -334,7 +338,7 @@ typedef enum {
 @property(nonatomic, assign) NSTimeInterval antiIdlePeriod;
 
 // If true, close the tab when the session ends.
-@property(nonatomic, assign) BOOL autoClose;
+@property(nonatomic, assign) iTermSessionEndAction endAction;
 
 // Should ambiguous-width characters (e.g., Greek) be treated as double-width? Usually a bad idea.
 @property(nonatomic, assign) BOOL treatAmbiguousWidthAsDoubleWidth;
@@ -759,7 +763,8 @@ typedef enum {
 - (BOOL)hasAnnouncementWithIdentifier:(NSString *)identifier;
 
 // Change the current profile but keep the name the same.
-- (void)setProfile:(NSDictionary *)newProfile preservingName:(BOOL)preserveName;
+- (void)setProfile:(NSDictionary *)newProfile
+    preservingName:(BOOL)preserveName;
 
 // Make the scroll view's document view be this session's textViewWrapper.
 - (void)setScrollViewDocumentView;
@@ -795,7 +800,6 @@ typedef enum {
 // Call this when a session moves to a different tab or window to update the session ID.
 - (void)didMoveSession;
 - (void)triggerDidChangeNameTo:(NSString *)newName;
-- (void)setTmuxWindowTitle:(NSString *)newName;
 - (void)didInitializeSessionWithName:(NSString *)name;
 - (void)profileNameDidChangeTo:(NSString *)name;
 - (void)profileDidChangeToProfileWithName:(NSString *)name;
@@ -812,9 +816,8 @@ typedef enum {
 - (ITMNotificationResponse *)handleAPINotificationRequest:(ITMNotificationRequest *)request
                                             connectionKey:(NSString *)connectionKey;
 
-- (ITMSetProfilePropertyResponse_Status)handleSetProfilePropertyForKey:(NSString *)key
-                                                                 value:(id)value
-                                                    scriptHistoryEntry:(iTermScriptHistoryEntry *)scriptHistoryEntry;
+- (ITMSetProfilePropertyResponse_Status)handleSetProfilePropertyForAssignments:(NSArray<iTermTuple<NSString *, id> *> *)tuples
+                                                            scriptHistoryEntry:(iTermScriptHistoryEntry *)scriptHistoryEntry;
 
 - (ITMGetProfilePropertyResponse *)handleGetProfilePropertyForKeys:(NSArray<NSString *> *)keys;
 

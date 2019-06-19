@@ -132,6 +132,7 @@ extern PSMTabBarControlOptionKey PSMTabBarControlOptionMinimumSpaceForLabel;  //
 - (void)tabView:(NSTabView *)tabView closeTab:(id)identifier;
 - (NSTabViewItem *)tabView:(NSTabView *)tabView unknownObjectWasDropped:(id <NSDraggingInfo>)sender;
 - (id)tabView:(PSMTabBarControl *)tabView valueOfOption:(PSMTabBarControlOptionKey)option;
+- (void)tabViewDidClickAddTabButton:(PSMTabBarControl *)tabView;
 
 @end
 
@@ -182,6 +183,7 @@ typedef enum {
 @property(nonatomic, assign) BOOL automaticallyAnimates;
 @property(nonatomic, assign) int tabLocation;
 @property(nonatomic, assign) int minimumTabDragDistance;
+@property(nonatomic, readonly) BOOL lainOutWithOverflow;
 
 // If off (the default) always ellipsize the ends of tab titles that don't fit.
 // Of on, ellipsize the start if more tabs share a prefix than a suffix.

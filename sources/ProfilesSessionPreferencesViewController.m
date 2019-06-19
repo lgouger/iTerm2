@@ -15,6 +15,7 @@
 #import "NSColor+iTerm.h"
 #import "NSDictionary+iTerm.h"
 #import "NSFileManager+iTerm.h"
+#import "NSImage+iTerm.h"
 #import "NSObject+iTerm.h"
 #import "PSMMinimalTabStyle.h"
 #import "PreferencePanel.h"
@@ -43,7 +44,7 @@
 @end
 
 @implementation ProfilesSessionPreferencesViewController {
-    IBOutlet NSButton *_closeSessionsOnEnd;
+    IBOutlet NSPopUpButton *_onEndAction;
     IBOutlet NSTableView *_jobsTable;
     IBOutlet NSButton *_removeJob;
     IBOutlet NSButton *_autoLog;
@@ -85,10 +86,14 @@
                                                  name:kReloadAllProfiles
                                                object:nil];
     __weak __typeof(self) weakSelf = self;
-    [self defineControl:_closeSessionsOnEnd
-                    key:KEY_CLOSE_SESSIONS_ON_END
-            relatedView:nil
-                   type:kPreferenceInfoTypeCheckbox];
+    PreferenceInfo *info;
+    info = [self defineControl:_onEndAction
+                           key:KEY_SESSION_END_ACTION
+                   displayName:@"Close or restart session on end"
+                          type:kPreferenceInfoTypePopup];
+    info.customSettingChangedHandler = ^(id sender) {
+        [weakSelf onEndSettingDidChange];
+    };
 
     [self defineControl:_alwaysWarn
                     key:KEY_PROMPT_CLOSE
@@ -128,7 +133,6 @@
             displayName:@"Undo close session timeout"
                    type:kPreferenceInfoTypeIntegerTextField];
 
-    PreferenceInfo *info;
     info = [self defineControl:_autoLog
                            key:KEY_AUTOLOG
                    displayName:@"Directory to automatically log sessions to"
@@ -229,6 +233,10 @@
                    displayName:@"Configure status bar"
                        phrases:@[]
                            key:nil];
+}
+
+- (void)onEndSettingDidChange {
+    [self setUnsignedInteger:_onEndAction.selectedTag forKey:KEY_SESSION_END_ACTION];
 }
 
 // Ensure the anti-idle period's value is constrained to the legal range.
@@ -503,7 +511,16 @@
 }
 
 - (void)updateLogDirWarning {
-    [_logDirWarning setHidden:[_autoLog state] == NSOffState || [self logDirIsWritable]];
+    if ([_autoLog state] == NSOffState) {
+        _logDirWarning.hidden = YES;
+        return;
+    }
+    _logDirWarning.hidden = NO;
+    if ([self logDirIsWritable]) {
+        _logDirWarning.image = [NSImage it_imageNamed:@"CheckMark" forClass:self.class];
+    } else {
+        _logDirWarning.image = [NSImage it_imageNamed:@"WarningSign" forClass:self.class];
+    }
 }
 
 - (BOOL)logDirIsWritable {

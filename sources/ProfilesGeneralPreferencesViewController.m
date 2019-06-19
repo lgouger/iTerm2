@@ -15,10 +15,12 @@
 #import "iTermImageWell.h"
 #import "iTermLaunchServices.h"
 #import "iTermNotificationCenter.h"
+#import "iTermObject.h"
 #import "iTermProfilePreferences.h"
 #import "iTermRateLimitedUpdate.h"
 #import "iTermSessionTitleBuiltInFunction.h"
 #import "iTermShortcutInputView.h"
+#import "iTermVariableScope.h"
 #import "iTermVariableScope+Session.h"
 #import "iTermVariableScope+Tab.h"
 #import "iTermVariableScope+Window.h"
@@ -74,6 +76,8 @@ static NSString *const iTermProfilePreferencesUpdateSessionName = @"iTermProfile
     IBOutlet NSTextField *_badgeLabel;
     IBOutlet NSTextField *_badgeTextForEditCurrentSession;
     IBOutlet NSButton *_editBadgeButton;
+    iTermFunctionCallTextFieldDelegate *_profileNameFieldDelegate;
+    iTermFunctionCallTextFieldDelegate *_profileNameFieldForEditCurrentSessionDelegate;
     iTermFunctionCallTextFieldDelegate *_badgeTextFieldDelegate;
     iTermFunctionCallTextFieldDelegate *_badgeTextForEditCurrentSessionFieldDelegate;
     iTermFunctionCallTextFieldDelegate *_tabTitleTextFieldDelegate;
@@ -143,9 +147,16 @@ static NSString *const iTermProfilePreferencesUpdateSessionName = @"iTermProfile
         [strongSelf->_profileDelegate profilesGeneralPreferencesNameWillChange];
     };
 
+    _profileNameFieldDelegate =
+    [[iTermFunctionCallTextFieldDelegate alloc] initWithPathSource:[iTermVariableHistory pathSourceForContext:iTermVariablesSuggestionContextSession]
+                                                       passthrough:_profileNameField.delegate
+                                                     functionsOnly:NO];
+    _profileNameField.delegate = _profileNameFieldDelegate;
+
     info = [self defineUnsearchableControl:_profileNameFieldForEditCurrentSession
                                        key:KEY_NAME
                                       type:kPreferenceInfoTypeStringTextField];
+    // Initialize with tmux pane title from server, if available.
     info.willChange = ^() {
         __strong __typeof(weakSelf) strongSelf = self;
         if (!strongSelf) {
@@ -157,12 +168,16 @@ static NSString *const iTermProfilePreferencesUpdateSessionName = @"iTermProfile
         [weakSelf ensureSessionNameVisible];
     };
     info.controlTextDidEndEditing = ^(NSNotification *notification) {
-        __strong __typeof(weakSelf) strongSelf = self;
-        if (!strongSelf) {
-            return;
-        }
-        [strongSelf->_profileDelegate profilesGeneralPreferencesNameDidEndEditing];
+        [weakSelf sessionNameDidEndEditing];
     };
+    info.onUpdate = ^BOOL{
+        return [weakSelf onUpdateTitle];
+    };
+    _profileNameFieldForEditCurrentSessionDelegate =
+    [[iTermFunctionCallTextFieldDelegate alloc] initWithPathSource:[iTermVariableHistory pathSourceForContext:iTermVariablesSuggestionContextSession]
+                                                       passthrough:_profileNameFieldForEditCurrentSession.delegate
+                                                     functionsOnly:NO];
+    _profileNameFieldForEditCurrentSession.delegate = _profileNameFieldForEditCurrentSessionDelegate;
 
     info = [self defineControl:_icon
                            key:KEY_ICON
@@ -197,6 +212,7 @@ static NSString *const iTermProfilePreferencesUpdateSessionName = @"iTermProfile
                  update:^BOOL { [weakSelf updateCommandType]; return YES; }];
 
     _customCommand.cell.usesSingleLineMode = YES;
+    _customCommand.hidden = YES;
     info = [self defineControl:_customCommand
                            key:KEY_COMMAND_LINE
                    displayName:@"Profile customc ommand"
@@ -320,6 +336,25 @@ static NSString *const iTermProfilePreferencesUpdateSessionName = @"iTermProfile
     [self updateEditAdvancedConfigButton];
 }
 
+- (BOOL)onUpdateTitle {
+    NSString *tmuxPaneTitle = [self stringForKey:KEY_TMUX_PANE_TITLE];
+    if (!tmuxPaneTitle) {
+        return NO;
+    }
+    if ([_profileNameFieldForEditCurrentSession textFieldIsFirstResponder] && _profileNameFieldForEditCurrentSession.window.isKeyWindow) {
+        // Don't allow it to change to a server-set value during editing.
+        return YES;
+    }
+    _profileNameFieldForEditCurrentSession.stringValue = tmuxPaneTitle;
+    return YES;
+}
+
+- (void)sessionNameDidEndEditing {
+    [self setString:_profileNameFieldForEditCurrentSession.stringValue forKey:KEY_TMUX_PANE_TITLE];
+    [_rateLimit force];
+    [_profileDelegate profilesGeneralPreferencesNameDidEndEditing];
+}
+
 // User interacted with it
 - (void)iconDidChange {
     const iTermProfileIcon icon = [self unsignedIntegerForKey:KEY_ICON];
@@ -397,6 +432,14 @@ static NSString *const iTermProfilePreferencesUpdateSessionName = @"iTermProfile
     self.view = _editCurrentSessionView;
 }
 
+- (void)updateTmuxTabTitle {
+    iTermVariableScope *scope = (iTermVariableScope *)self.scope.tab;
+    NSString *tmuxTabTitle = [scope valueForVariableName:iTermVariableKeyTabTmuxWindowName];
+    if (tmuxTabTitle) {
+        _tabTitle.stringValue = tmuxTabTitle;
+    }
+}
+
 - (id<iTermSessionScope>)scope {
     return [self.profileDelegate profilesGeneralPreferencesScope];
 }
@@ -410,6 +453,7 @@ static NSString *const iTermProfilePreferencesUpdateSessionName = @"iTermProfile
     if (scope) {
         _tabTitle.stringValue =  scope.tab.tabTitleOverrideFormat ?: @"";
         _windowTitle.stringValue = scope.tab.window.windowTitleOverrideFormat ?: @"";
+        [self updateTmuxTabTitle];
     }
 }
 
@@ -485,8 +529,10 @@ static NSString *const iTermProfilePreferencesUpdateSessionName = @"iTermProfile
 - (void)updateEnabledState {
     [super updateEnabledState];
     if ([[self stringForKey:KEY_CUSTOM_COMMAND] isEqualToString:kProfilePreferenceCommandTypeCustomValue]) {
+        _customCommand.hidden = NO;
         _customCommand.enabled = YES;
     } else {
+        _customCommand.hidden = YES;
         _customCommand.enabled = NO;
     }
     _customDirectory.enabled = ([[self stringForKey:KEY_CUSTOM_DIRECTORY] isEqualToString:kProfilePreferenceInitialDirectoryCustomValue]);
@@ -793,6 +839,16 @@ static NSString *const iTermProfilePreferencesUpdateSessionName = @"iTermProfile
         newValue ^= selectedTag;
     }
 
+    // Ensure only one of job or commandline is enabled.
+    if ((newValue & iTermTitleComponentsJob) &&
+        (newValue & iTermTitleComponentsCommandLine)) {
+        if (menuItem.tag == iTermTitleComponentsCommandLine) {
+            newValue ^= iTermTitleComponentsJob;
+        } else {
+            newValue ^= iTermTitleComponentsCommandLine;
+        }
+    }
+
     NSUInteger nameTagsMask = (iTermTitleComponentsProfileName |
                                iTermTitleComponentsSessionName |
                                iTermTitleComponentsProfileAndSessionName);
@@ -858,13 +914,15 @@ static NSString *const iTermProfilePreferencesUpdateSessionName = @"iTermProfile
     titleSettings.title = customName ?: [iTermSessionTitleBuiltInFunction titleForSessionName:@"Name"
                                                                                   profileName:@"Profile"
                                                                                           job:@"Job"
+                                                                                  commandLine:@"Job+Args"
                                                                                           pwd:@"PWD"
                                                                                           tty:@"TTY"
                                                                                          user:@"User"
                                                                                          host:@"Host"
-                                                                                         tmux:nil
+                                                                                     tmuxPane:nil
                                                                                      iconName:@"“Shell”"
                                                                                    windowName:@""
+                                                                               tmuxWindowName:nil
                                                                                    components:value
                                                                                 isWindowTitle:NO];
 
@@ -956,7 +1014,11 @@ static NSString *const iTermProfilePreferencesUpdateSessionName = @"iTermProfile
     if (value.length == 0) {
         value = nil;
     }
-    self.scope.tab.tabTitleOverrideFormat = value;
+    // Do this rather than updating the variable directly because tmux needs special handling.
+    iTermCallMethodByIdentifier(self.scope.tab.tabID,
+                                @"iterm2.set_title",
+                                @{ @"title": value ?: [NSNull null] },
+                                nil);
 }
 
 - (void)windowTitleDidChange {

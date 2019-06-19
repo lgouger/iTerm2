@@ -3,6 +3,7 @@ import asyncio
 
 import iterm2.api_pb2
 import iterm2.app
+import iterm2.capabilities
 import iterm2.connection
 import iterm2.keyboard
 import iterm2.notifications
@@ -348,7 +349,6 @@ class Session:
 
         When you use this function the underlying profile is not modified. The session will keep a copy of its profile with these modifications.
 
-        :param key: The name of the property
         :param write_only_profile: A write-only profile that has the desired changes.
 
         :throws: :class:`~iterm2.rpc.RPCException` if something goes wrong.
@@ -358,6 +358,20 @@ class Session:
           * Example ":ref:`settabcolor_example`"
           * Example ":ref:`increase_font_size_example`"
         """
+        if iterm2.capabilities.supports_multiple_set_profile_properties(self.connection):
+            assignments = []
+            for key, json_value in write_only_profile.values.items():
+                assignments += [(key, json_value)]
+            response = await iterm2.rpc.async_set_profile_properties_json(
+                self.connection,
+                self.session_id,
+                assignments)
+            status = response.set_profile_property_response.status
+            if status != iterm2.api_pb2.SetProfilePropertyResponse.Status.Value("OK"):
+                raise iterm2.rpc.RPCException(iterm2.api_pb2.SetProfilePropertyResponse.Status.Name(status))
+            return
+
+        # Deprecated code path, in use by 3.3.0beta9 and earlier.
         for key, json_value in write_only_profile.values.items():
             response = await iterm2.rpc.async_set_profile_property_json(
                 self.connection,
@@ -392,6 +406,20 @@ class Session:
         else:
             raise iterm2.rpc.RPCException(
                 iterm2.api_pb2.GetProfilePropertyResponse.Status.Name(status))
+
+    async def async_set_profile(self, profile: iterm2.profile.Profile):
+        """
+        Changes this session's profile.
+
+        The profile may be an existing profile, an existing
+        profile with modifications, or a previously uknown
+        profile with a unique GUID.
+
+        :param profile: The `~iterm2.profile.Profile` to use.
+
+        :throws: :class:`~iterm2.rpc.RPCException` if something goes wrong.
+        """
+        await self.async_set_profile_properties(profile.local_write_only_copy)
 
     async def async_inject(self, data: bytes) -> None:
         """
@@ -611,6 +639,35 @@ class Session:
         dict = json.loads(response.get_property_response.json_value)
         t = (dict["grid"], dict["history"], dict["overflow"], dict["first_visible"] )
         return SessionLineInfo(t)
+
+    async def async_set_name(self, name: str):
+        """Changes the session's name.
+
+        This is equivalent to editing the session's name manually in the Edit Session window.
+
+        :param name: The new name to use.
+
+        :throws: :class:`~iterm2.rpc.RPCException` if something goes wrong.
+        """
+        invocation = iterm2.util.invocation_string(
+                "iterm2.set_name",
+                { "name": name })
+        await iterm2.rpc.async_invoke_method(self.connection, self.session_id, invocation, -1)
+
+    async def async_run_tmux_command(self, command: str, timeout: float=-1) -> str:
+        """Invoke a tmux command and return its result. Raises an exception if this session is not a tmux integration session.
+
+        :param command: The tmux command to run.
+        :param timeout: The amount of time to wait for a response, or -1 to use the default.
+
+        :returns: The output from tmux.
+
+        :throws: :class:`~iterm2.rpc.RPCException` if something goes wrong.
+        """
+        invocation = iterm2.util.invocation_string(
+                "iterm2.run_tmux_command",
+                { "command": command })
+        return await iterm2.rpc.async_invoke_method(self.connection, self.session_id, invocation, timeout)
 
     async def async_invoke_function(self, invocation: str, timeout: float=-1):
         """

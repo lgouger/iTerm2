@@ -10,10 +10,11 @@
 #import "iTermExpressionEvaluator.h"
 #import "iTermExpressionParser.h"
 #import "iTermScriptFunctionCall.h"
+#import "iTermObject.h"
 #import "iTermVariableScope.h"
 #import "NSArray+iTerm.h"
 
-@interface iTermScriptFunctionCallTest : XCTestCase
+@interface iTermScriptFunctionCallTest : XCTestCase<iTermObject>
 
 @end
 
@@ -26,6 +27,7 @@
     _savedBIFs = [[iTermBuiltInFunctions sharedInstance] savedState];
     iTermBuiltInFunction *add = [[iTermBuiltInFunction alloc] initWithName:@"add"
                                                                  arguments:@{ @"x": [NSNumber class], @"y": [NSNumber class] }
+                                                         optionalArguments:[NSSet set]
                                                              defaultValues:@{}
                                                                    context:iTermVariablesSuggestionContextNone
                                                                      block:^(NSDictionary * _Nonnull parameters, iTermBuiltInFunctionCompletionBlock  _Nonnull completion) {
@@ -36,6 +38,7 @@
 
     iTermBuiltInFunction *mult = [[iTermBuiltInFunction alloc] initWithName:@"mult"
                                                                   arguments:@{ @"x": [NSNumber class], @"y": [NSNumber class] }
+                                                          optionalArguments:[NSSet set]
                                                               defaultValues:@{}
                                                                     context:iTermVariablesSuggestionContextNone
                                                                       block:^(NSDictionary * _Nonnull parameters, iTermBuiltInFunctionCompletionBlock  _Nonnull completion) {
@@ -46,6 +49,7 @@
 
     iTermBuiltInFunction *cat = [[iTermBuiltInFunction alloc] initWithName:@"cat"
                                                                   arguments:@{ @"x": [NSString class], @"y": [NSString class] }
+                                                         optionalArguments:[NSSet set]
                                                               defaultValues:@{}
                                                                     context:iTermVariablesSuggestionContextNone
                                                                       block:^(NSDictionary * _Nonnull parameters, iTermBuiltInFunctionCompletionBlock  _Nonnull completion) {
@@ -56,6 +60,7 @@
 
     iTermBuiltInFunction *s = [[iTermBuiltInFunction alloc] initWithName:@"s"
                                                                arguments:@{}
+                                                       optionalArguments:[NSSet set]
                                                              defaultValues:@{}
                                                                    context:iTermVariablesSuggestionContextNone
                                                                      block:^(NSDictionary * _Nonnull parameters, iTermBuiltInFunctionCompletionBlock  _Nonnull completion) {
@@ -65,6 +70,7 @@
 
     iTermBuiltInFunction *a = [[iTermBuiltInFunction alloc] initWithName:@"a"
                                                                arguments:@{}
+                                                       optionalArguments:[NSSet set]
                                                            defaultValues:@{}
                                                                  context:iTermVariablesSuggestionContextNone
                                                                    block:^(NSDictionary * _Nonnull parameters, iTermBuiltInFunctionCompletionBlock  _Nonnull completion) {
@@ -469,4 +475,15 @@
     NSArray *expected = @[ @1, @2, @3 ];
     XCTAssertEqualObjects(actual, expected);
 }
+
+#pragma mark - iTermObject
+
+- (iTermBuiltInFunctions *)objectMethodRegistry {
+    return nil;
+}
+
+- (iTermVariableScope *)objectScope {
+    return nil;
+}
+
 @end

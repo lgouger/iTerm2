@@ -185,7 +185,6 @@ DEFINE_INT(minCompactTabWidth, 60, SECTION_TABS @"Minimum tab width when using u
 DEFINE_INT(optimumTabWidth, 175, SECTION_TABS @"Preferred tab width when tabs are equally sized.");
 DEFINE_BOOL(addNewTabAtEndOfTabs, YES, SECTION_TABS @"Add new tabs at the end of the tab bar, not next to current tab.");
 DEFINE_BOOL(navigatePanesInReadingOrder, YES, SECTION_TABS @"Next Pane and Previous Pane commands use reading order, not the time of last use.");
-DEFINE_BOOL(eliminateCloseButtons, NO, SECTION_TABS @"Eliminate close buttons from tabs, even on mouse-over.");
 DEFINE_FLOAT(tabAutoShowHoldTime, 1.0, SECTION_TABS @"How long in seconds to show tabs in fullscreen.\nThe tab bar appears briefly in fullscreen when the number of tabs changes or you switch tabs. This setting gives the time in seconds for it to remain visible.");
 DEFINE_FLOAT(tabFlashAnimationDuration, 0.25, SECTION_TABS @"Animation duration for fade in/out animation of tabs in full screen, in seconds.")
 DEFINE_BOOL(allowDragOfTabIntoNewWindow, YES, SECTION_TABS @"Allow a tab to be dragged and dropped outside any existing tab bar to create a new window.");
@@ -202,6 +201,7 @@ DEFINE_FLOAT(compactMinimalTabBarHeight, 38, SECTION_TABS @"Tab bar height (poin
 DEFINE_FLOAT(defaultTabBarHeight, 24, SECTION_TABS @"Default tab bar height")
 DEFINE_BOOL(doubleClickTabToEdit, YES, SECTION_TABS @"Should double-clicking a tab open a window to edit its title?");
 DEFINE_FLOAT(minimumTabLabelWidth, 35, SECTION_TABS @"Minimum width for tab labels.\nThe activity/bell icon will be hidden when the space for the label drops below this size (in points)");
+DEFINE_BOOL(disregardDockSettingToOpenTabsInsteadOfWindows, YES, SECTION_TABS @"Ignore System Preferences > Dock > Prefer tabs when opening documents?\nWhen set to No, asking to open a window will open a tab instead when system preferences is configured to prefer tabs over windows. When set to Yes, asking to open a window may open a tab instead.");
 
 #pragma mark Mouse
 
@@ -517,6 +517,7 @@ DEFINE_BOOL(shouldSetLCTerminal, YES, SECTION_EXPERIMENTAL @"Set LC_TERMINAL=iTe
 DEFINE_BOOL(clearBellIconAggressively, YES, SECTION_EXPERIMENTAL @"Clear bell icon when a session becomes active.\nWhen off, you must type in the session to clear the bell icon.");
 DEFINE_BOOL(workAroundNumericKeypadBug, YES, SECTION_EXPERIMENTAL @"Treat the equals sign on the numeric keypad as a key on the numeric keypad.\nFor mysterious reasons, macOS does not treat this key as belonging to the numeric keypad. Enable this setting to work around the bug.");
 DEFINE_BOOL(tmuxVariableWindowSizesSupported, NO, SECTION_EXPERIMENTAL @"Allow variable window sizes in tmux integration");
+DEFINE_BOOL(aggressiveBaseCharacterDetection, NO, SECTION_EXPERIMENTAL @"Detect base unicode characters with lookup table.\nApple's algorithm for segmenting composed characters makes bad choices, such as for Tamil. Enable this to reduce text overlapping.");
 
 #pragma mark - Scripting
 #define SECTION_SCRIPTING @"Scripting: "

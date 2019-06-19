@@ -39,6 +39,7 @@
 #import "iTermInitialDirectory.h"
 #import "iTermKeyBindingMgr.h"
 #import "iTermKeyLabels.h"
+#import "iTermObject.h"
 #import "iTermScriptConsole.h"
 #import "iTermScriptHistory.h"
 #import "iTermStandardKeyMapper.h"
@@ -82,6 +83,7 @@
 #import "iTermTheme.h"
 #import "iTermThroughputEstimator.h"
 #import "iTermTmuxStatusBarMonitor.h"
+#import "iTermTmuxOptionMonitor.h"
 #import "iTermUpdateCadenceController.h"
 #import "iTermVariableReference.h"
 #import "iTermVariableScope.h"
@@ -154,6 +156,7 @@ static NSString *const kAskAboutOutdatedKeyMappingKeyFormat = @"AskAboutOutdated
 NSString *const PTYSessionCreatedNotification = @"PTYSessionCreatedNotification";
 NSString *const PTYSessionTerminatedNotification = @"PTYSessionTerminatedNotification";
 NSString *const PTYSessionRevivedNotification = @"PTYSessionRevivedNotification";
+NSString *const iTermSessionWillTerminateNotification = @"iTermSessionDidTerminate";
 
 NSString *const kPTYSessionTmuxFontDidChange = @"kPTYSessionTmuxFontDidChange";
 NSString *const kPTYSessionCapturedOutputDidChange = @"kPTYSessionCapturedOutputDidChange";
@@ -264,6 +267,7 @@ static const NSUInteger kMaxHosts = 100;
     iTermHotKeyNavigableSession,
     iTermMetaFrustrationDetector,
     iTermMetalGlueDelegate,
+    iTermObject,
     iTermPasteHelperDelegate,
     iTermSessionNameControllerDelegate,
     iTermSessionViewDelegate,
@@ -498,14 +502,14 @@ static const NSUInteger kMaxHosts = 100;
     iTermVariables *_userVariables;
     iTermSwiftyString *_badgeSwiftyString;
     iTermSwiftyString *_autoNameSwiftyString;
-    iTermSwiftyString *_tmuxWindowTitleSwiftyString;
 
     iTermBackgroundDrawingHelper *_backgroundDrawingHelper;
     iTermMetaFrustrationDetector *_metaFrustrationDetector;
 
     iTermTmuxStatusBarMonitor *_tmuxStatusBarMonitor;
     iTermWorkingDirectoryPoller *_pwdPoller;
-    
+    iTermTmuxOptionMonitor *_tmuxTitleMonitor;
+
     iTermGraphicSource *_graphicSource;
     iTermVariableReference *_jobPidRef;
     iTermCacheableImage *_customIcon;
@@ -520,6 +524,10 @@ static const NSUInteger kMaxHosts = 100;
     BOOL _showingVisualIndicatorForEsc;
 
     iTermPrintGuard *_printGuard;
+    iTermBuiltInFunctions *_methods;
+
+    // When this is true, changing the font size does not cause the window size to change.
+    BOOL _windowAdjustmentDisabled;
 }
 
 + (NSMapTable<NSString *, PTYSession *> *)sessionMap {
@@ -615,8 +623,9 @@ static const NSUInteger kMaxHosts = 100;
                      forVariableNamed:iTermVariableKeySessionCreationTimeString];
         [self.variablesScope setValue:[@(_autoLogId) stringValue] forVariableNamed:iTermVariableKeySessionAutoLogID];
         [self.variablesScope setValue:_guid forVariableNamed:iTermVariableKeySessionID];
+        _variables.primaryKey = iTermVariableKeySessionID;
         _jobPidRef = [[iTermVariableReference alloc] initWithPath:iTermVariableKeySessionJobPid
-                                                            scope:self.variablesScope];
+                                                           vendor:self.variablesScope];
         __weak __typeof(self) weakSelf = self;
         _jobPidRef.onChangeBlock = ^{
             [weakSelf jobPidDidChange];
@@ -634,21 +643,6 @@ static const NSUInteger kMaxHosts = 100;
             return newValue;
         };
 
-        [_tmuxWindowTitleSwiftyString invalidate];
-        [_tmuxWindowTitleSwiftyString autorelease];
-        _tmuxWindowTitleSwiftyString = [[iTermSwiftyString alloc] initWithScope:self.variablesScope
-                                                                     sourcePath:iTermVariableKeySessionTmuxWindowTitle
-                                                                destinationPath:iTermVariableKeySessionTmuxWindowTitleEval];
-        _tmuxWindowTitleSwiftyString.contextProvider = ^iTermVariableScope *{
-            return weakSelf.delegate.sessionTabScope;
-        };
-        _tmuxWindowTitleSwiftyString.observer = ^NSString *(NSString * _Nonnull newValue, NSError *error) {
-            if ([weakSelf checkForCyclesInSwiftyStrings]) {
-                weakSelf.variablesScope.tmuxWindowTitleEval = @"[Cycle detected]";
-            }
-            return newValue;
-        };
-        
         _tmuxSecureLogging = NO;
         _tailFindContext = [[FindContext alloc] init];
         _commandRange = VT100GridCoordRangeMake(-1, -1, -1, -1);
@@ -747,7 +741,6 @@ static const NSUInteger kMaxHosts = 100;
                                                  selector:@selector(apiDidStop:)
                                                      name:iTermAPIHelperDidStopNotification
                                                    object:nil];
-
         [iTermSetFindStringNotification subscribe:self
                                             block:^(iTermSetFindStringNotification * _Nonnull notification) {
                                                 [weakSelf useStringForFind:notification.string];
@@ -838,13 +831,13 @@ ITERM_WEAKLY_REFERENCEABLE
     [_metalDisabledTokens release];
     [_badgeSwiftyString release];
     [_autoNameSwiftyString release];
-    [_tmuxWindowTitleSwiftyString release];
     [_statusBarViewController release];
     [_echoProbe release];
     [_backgroundDrawingHelper release];
     [_metaFrustrationDetector release];
     [_tmuxStatusBarMonitor setActive:NO];
     [_tmuxStatusBarMonitor release];
+    [_tmuxTitleMonitor release];
     if (_metalContext) {
         CGContextRelease(_metalContext);
     }
@@ -868,6 +861,7 @@ ITERM_WEAKLY_REFERENCEABLE
     [_badgeFontName release];
     [_variablesScope release];
     [_printGuard release];
+    [_methods release];
 
     [super dealloc];
 }
@@ -1492,10 +1486,7 @@ ITERM_WEAKLY_REFERENCEABLE
         }
     } else {
         // Is a tmux pane
-        NSString *title = [state objectForKey:@"title"];
-        if (title) {
-            [aSession setTmuxWindowTitle:title];
-        }
+        // NOTE: There used to be code here that used state[@"title"] but AFAICT that didn't exist.
         if ([aSession.profile[KEY_AUTOLOG] boolValue]) {
             startAutoLog = YES;
         }
@@ -1753,6 +1744,8 @@ ITERM_WEAKLY_REFERENCEABLE
 - (NSArray<NSString *> *)childJobNames {
     pid_t thePid = [_shell pid];
 
+    [[iTermProcessCache sharedInstance] updateSynchronously];
+
     iTermProcessInfo *info = [[iTermProcessCache sharedInstance] processInfoForPid:thePid];
     if (!info) {
         return @[];
@@ -1833,10 +1826,6 @@ ITERM_WEAKLY_REFERENCEABLE
 - (void)triggerDidChangeNameTo:(NSString *)newName {
     [self.variablesScope setValuesFromDictionary:@{ iTermVariableKeySessionTriggerName: newName,
                                                     iTermVariableKeySessionAutoNameFormat: newName }];
-}
-
-- (void)setTmuxWindowTitle:(NSString *)newName {
-    [self.variablesScope setValue:newName forVariableNamed:iTermVariableKeySessionTmuxWindowTitle];
 }
 
 - (void)didInitializeSessionWithName:(NSString *)name {
@@ -2016,6 +2005,7 @@ ITERM_WEAKLY_REFERENCEABLE
                                     hotkeyWindowType:iTermHotkeyWindowTypeNone
                                              makeKey:NO
                                          canActivate:NO
+                                  respectTabbingMode:NO
                                              command:nil
                                                block:nil
                                          synchronous:NO
@@ -2090,6 +2080,8 @@ ITERM_WEAKLY_REFERENCEABLE
     [self terminate];
 }
 
+// Request that the session close. It may or may not be undoable. Only undoable terminations support
+// "restart", which is done by first calling revive and then replaceTerminatedShellWithNewInstance.
 - (void)terminate {
     DLog(@"terminate called from %@", [NSThread callStackSymbols]);
 
@@ -2121,6 +2113,8 @@ ITERM_WEAKLY_REFERENCEABLE
         _tmuxStatusBarMonitor.active = NO;
         [_tmuxStatusBarMonitor release];
         _tmuxStatusBarMonitor = nil;
+
+        [self uninstallTmuxTitleMonitor];
     } else if (self.tmuxMode == TMUX_GATEWAY) {
         [_tmuxController detach];
         [_tmuxGateway release];
@@ -2136,7 +2130,7 @@ ITERM_WEAKLY_REFERENCEABLE
     _hideAfterTmuxWindowOpens = NO;
     _tmuxController = nil;
     [self.variablesScope setValue:nil forVariableNamed:iTermVariableKeySessionTmuxClientName];
-    [self.variablesScope setValue:nil forVariableNamed:iTermVariableKeySessionTmuxWindowTitle];
+    [self.variablesScope setValue:nil forVariableNamed:iTermVariableKeySessionTmuxPaneTitle];
 
     // The source pane may have just exited. Dogs and cats living together!
     // Mass hysteria!
@@ -2149,6 +2143,7 @@ ITERM_WEAKLY_REFERENCEABLE
         [_liveSession terminate];
     }
 
+    DLog(@"  terminate: exited = YES");
     _exited = YES;
     [_view retain];  // hardstop and revive will release this.
     if (undoable) {
@@ -2162,6 +2157,8 @@ ITERM_WEAKLY_REFERENCEABLE
     // final update of display
     [self updateDisplayBecause:@"terminate session"];
 
+    [[NSNotificationCenter defaultCenter] postNotificationName:iTermSessionWillTerminateNotification
+                                                        object:self];
     [_delegate removeSession:self];
 
     _colorMap.delegate = nil;
@@ -2193,6 +2190,7 @@ ITERM_WEAKLY_REFERENCEABLE
     [[iTermController sharedInstance] addRestorableSession:[self restorableSession]];
 }
 
+// Not undoable. Kill the process. However, you can replace the terminated shell after this.
 - (void)hardStop {
     [[iTermController sharedInstance] removeSessionFromRestorableSessions:self];
     [_view release];  // This balances a retain in -terminate.
@@ -2239,6 +2237,7 @@ ITERM_WEAKLY_REFERENCEABLE
                 [self queueRestartSessionAnnouncement];
             }
         } else {
+            DLog(@"  revive: exited=NO");
             _exited = NO;
         }
         _textview.dataSource = _screen;
@@ -2737,6 +2736,7 @@ ITERM_WEAKLY_REFERENCEABLE
 
 - (void)threadedTaskBrokenPipe
 {
+    DLog(@"threaded task broken pipe");
     // Put the call to brokenPipe in the same queue as executeTokens:bytesHandled: to avoid a race.
     dispatch_async(dispatch_get_main_queue(), ^{
         [self brokenPipe];
@@ -2753,8 +2753,12 @@ ITERM_WEAKLY_REFERENCEABLE
     [self.variablesScope setValue:task.tty forVariableNamed:iTermVariableKeySessionTTY];
 }
 
+// Called when the file descriptor closes. If -terminate was already called this does nothing.
+// Otherwise, you can call replaceTerminatedShellWithNewInstance after this to restart the session.
 - (void)brokenPipe {
+    DLog(@"  brokenPipe");
     if (_exited) {
+        DLog(@"  brokenPipe: Already exited");
         return;
     }
     [_shell killServerIfRunning];
@@ -2766,6 +2770,7 @@ ITERM_WEAKLY_REFERENCEABLE
                                                               [_delegate tabNumber]]];
     }
 
+    DLog(@"  brokenPipe: set exited = YES");
     _exited = YES;
     [[NSNotificationCenter defaultCenter] postNotificationName:PTYSessionTerminatedNotification object:self];
     [[NSNotificationCenter defaultCenter] postNotificationName:kCurrentSessionDidChange object:nil];
@@ -2784,14 +2789,30 @@ ITERM_WEAKLY_REFERENCEABLE
         [_delegate closeSession:self];
         return;
     }
-    if ([self autoClose] && [_delegate sessionShouldAutoClose:self]) {
-        [self appendBrokenPipeMessage:@"Broken Pipe"];
-        [_delegate closeSession:self];
-        return;
+    if (self.tmuxMode == TMUX_GATEWAY) {
+        [self forceTmuxDetach];
+    }
+    [self appendBrokenPipeMessage:@"Broken Pipe"];
+    switch (self.endAction) {
+        case iTermSessionEndActionClose:
+            if ([_delegate sessionShouldAutoClose:self]) {
+                [_delegate closeSession:self];
+                return;
+            }
+            break;
+
+        case iTermSessionEndActionRestart:
+            if ([self isRestartable]) {
+                [self performSelector:@selector(maybeReplaceTerminatedShellWithNewInstance) withObject:nil afterDelay:1];
+                return;
+            }
+            break;
+
+        case iTermSessionEndActionDefault:
+            break;
     }
 
     // Offer to restart the session by rerunning its program.
-    [self appendBrokenPipeMessage:@"Broken Pipe"];
     if ([self isRestartable]) {
         [self queueRestartSessionAnnouncement];
     }
@@ -2832,10 +2853,22 @@ ITERM_WEAKLY_REFERENCEABLE
     return _program != nil;
 }
 
+- (void)maybeReplaceTerminatedShellWithNewInstance {
+    // The check for screen.terminal is because after -terminate is called, it is no longer safe
+    // to replace the terminated shell with a new instance unless you first do -revive. When
+    // the terminal is nil you can't write text to the screen.
+    if (_screen.terminal && self.isRestartable && _exited) {
+        [self replaceTerminatedShellWithNewInstance];
+    }
+}
+
+// NOTE: Not safe to call this after -terminate, unless you first call -revive. It *is* safe
+// to call this after -brokenPipe, provided -terminate wasn't already called.
 - (void)replaceTerminatedShellWithNewInstance {
     assert(self.isRestartable);
     assert(_exited);
     _shouldRestart = NO;
+    DLog(@"  replaceTerminatedShellWithNewInstance: exited <- NO");
     _exited = NO;
     [_shell release];
     _shell = [[PTYTask alloc] init];
@@ -2847,6 +2880,9 @@ ITERM_WEAKLY_REFERENCEABLE
          substitutions:_substitutions
            synchronous:YES
             completion:nil];
+    [self dismissAnnouncementWithIdentifier:kReopenSessionWarningIdentifier];
+    [self removeAnnouncementWithIdentifier:kReopenSessionWarningIdentifier];
+    DLog(@"  replaceTerminatedShellWithNewInstance: return with terminal=%@", _screen.terminal);
 }
 
 - (NSSize)idealScrollViewSizeWithStyle:(NSScrollerStyle)scrollerStyle {
@@ -3590,7 +3626,7 @@ ITERM_WEAKLY_REFERENCEABLE
     [self setAntiIdleCode:[iTermProfilePreferences intForKey:KEY_IDLE_CODE inProfile:aDict]];
     [self setAntiIdlePeriod:[iTermProfilePreferences doubleForKey:KEY_IDLE_PERIOD inProfile:aDict]];
     [self setAntiIdle:[iTermProfilePreferences boolForKey:KEY_SEND_CODE_WHEN_IDLE inProfile:aDict]];
-    [self setAutoClose:[iTermProfilePreferences boolForKey:KEY_CLOSE_SESSIONS_ON_END inProfile:aDict]];
+    self.endAction = [iTermProfilePreferences unsignedIntegerForKey:KEY_SESSION_END_ACTION inProfile:aDict];
     _screen.normalization = [iTermProfilePreferences integerForKey:KEY_UNICODE_NORMALIZATION
                                                          inProfile:aDict];
     [self setTreatAmbiguousWidthAsDoubleWidth:[iTermProfilePreferences boolForKey:KEY_AMBIGUOUS_DOUBLE_WIDTH
@@ -3747,10 +3783,6 @@ ITERM_WEAKLY_REFERENCEABLE
 
 - (BOOL)checkForCyclesInSwiftyStrings {
     iTermSwiftyStringGraph *graph = [[[iTermSwiftyStringGraph alloc] init] autorelease];
-    [graph addSwiftyString:_tmuxWindowTitleSwiftyString
-            withFormatPath:iTermVariableKeySessionTmuxWindowTitle
-            evaluationPath:iTermVariableKeySessionTmuxWindowTitleEval
-                     scope:self.variablesScope];
     [graph addSwiftyString:_autoNameSwiftyString
             withFormatPath:iTermVariableKeySessionAutoNameFormat
             evaluationPath:iTermVariableKeySessionAutoName
@@ -4362,9 +4394,7 @@ ITERM_WEAKLY_REFERENCEABLE
             _lastUpdate = now;
         }
     } else {
-        int pid;
-        NSString *name = [_shell currentJob:NO pid:&pid completion:nil];
-        [self setJobName:name pid:pid];
+        [self setCurrentForegroundJobProcessInfo:[_shell cachedProcessInfoIfAvailable]];
         [self.view setTitle:_nameController.presentationSessionTitle];
     }
 
@@ -4388,14 +4418,22 @@ ITERM_WEAKLY_REFERENCEABLE
 
 // Update the tab, session view, and window title.
 - (void)updateTitles {
-    int pid = 0;
+    iTermProcessInfo *processInfo = [_shell cachedProcessInfoIfAvailable];
+    if (processInfo) {
+        [self updateTitleWithProcessInfo:processInfo];
+        return;
+    } else {
+        [self updateTitleWithProcessInfo:nil];
+    }
     __weak __typeof(self) weakSelf = self;
-    NSString *newJobName = [_shell currentJob:NO pid:&pid completion:^{
-        DLog(@"** completion block recursing **");
-        [weakSelf updateTitles];
+    [_shell fetchProcessInfoForCurrentJobWithCompletion:^(iTermProcessInfo *processInfo) {
+        [weakSelf updateTitleWithProcessInfo:processInfo];
     }];
-    DLog(@"Job for pid %@ is %@, pid=%@", @(_shell.pid), newJobName, @(pid));
-    [self setJobName:newJobName pid:pid];
+}
+
+- (void)updateTitleWithProcessInfo:(iTermProcessInfo *)processInfo {
+    DLog(@"Job for pid %@ is %@, pid=%@", @(_shell.pid), processInfo.name, @(processInfo.processID));
+    [self setCurrentForegroundJobProcessInfo:processInfo];
 
     if ([_delegate sessionBelongsToVisibleTab]) {
         // Revert to the permanent tab title.
@@ -4408,9 +4446,10 @@ ITERM_WEAKLY_REFERENCEABLE
     return [self.variablesScope valueForVariableName:iTermVariableKeySessionJob];
 }
 
-- (void)setJobName:(NSString *)jobName pid:(pid_t)pid {
-    [self.variablesScope setValue:jobName forVariableNamed:iTermVariableKeySessionJob];
-    [self.variablesScope setValue:@(pid) forVariableNamed:iTermVariableKeySessionJobPid];
+- (void)setCurrentForegroundJobProcessInfo:(iTermProcessInfo *)processInfo {
+    [self.variablesScope setValue:processInfo.name forVariableNamed:iTermVariableKeySessionJob];
+    [self.variablesScope setValue:processInfo.commandLine forVariableNamed:iTermVariableKeySessionCommandLine];
+    [self.variablesScope setValue:@(processInfo.processID) forVariableNamed:iTermVariableKeySessionJobPid];
     if (!_exited && _shell.pid > 0) {
         [self.variablesScope setValue:@(_shell.pid) forVariableNamed:iTermVariableKeySessionChildPid];
     }
@@ -4418,7 +4457,7 @@ ITERM_WEAKLY_REFERENCEABLE
     [self tryAutoProfileSwitchWithHostname:self.variablesScope.hostname
                                   username:self.variablesScope.username
                                       path:self.variablesScope.path
-                                       job:jobName];
+                                       job:processInfo.name];
 }
 
 - (void)refresh {
@@ -4505,7 +4544,7 @@ ITERM_WEAKLY_REFERENCEABLE
      horizontalSpacing:horizontalSpacing
        verticalSpacing:verticalSpacing];
     DLog(@"Line height is now %f", (float)[_textview lineHeight]);
-    [_delegate sessionDidChangeFontSize:self];
+    [_delegate sessionDidChangeFontSize:self adjustWindow:!_windowAdjustmentDisabled];
     DLog(@"After:\n%@", [window.contentView iterm_recursiveDescription]);
     DLog(@"Window frame: %@", window);
 }
@@ -4531,9 +4570,15 @@ ITERM_WEAKLY_REFERENCEABLE
         [self isTmuxClient] &&
         [theGuid isEqualToString:_profile[KEY_GUID]]) {
         Profile *profile = [[ProfileModel sessionsInstance] bookmarkWithGuid:theGuid];
-        [_tmuxController renameWindowWithId:_delegate.tmuxWindow
-                                  inSession:nil
-                                     toName:profile[KEY_NAME]];
+        if (_tmuxController.canRenamePane) {
+            [_tmuxController renamePane:self.tmuxPane toTitle:profile[KEY_NAME]];
+            [_tmuxTitleMonitor updateOnce];
+        } else {
+            // Legacy code path for pre tmux 2.6
+            [_tmuxController renameWindowWithId:_delegate.tmuxWindow
+                                      inSession:nil
+                                         toName:profile[KEY_NAME]];
+        }
         _tmuxTitleOutOfSync = NO;
     }
 }
@@ -4691,13 +4736,75 @@ ITERM_WEAKLY_REFERENCEABLE
     }
 }
 
+- (BOOL)profileValuesDifferFromCurrentProfile:(NSDictionary *)newValues {
+    for (NSString *key in newValues) {
+        if ([key isEqualToString:KEY_GUID] || [key isEqualToString:KEY_ORIGINAL_GUID]) {
+            continue;
+        }
+        NSObject *value = newValues[key];
+        if (![NSObject object:_profile[key] isEqualToObject:value]) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
+// Missing values are replaced with their defaults. If everything matches excluding deprecated keys
+// then the profiles are equivalent.
+- (BOOL)profile:(Profile *)profile1 isEffectivelyEqualToProfile:(Profile *)profile2 {
+    for (NSString *key in [iTermProfilePreferences nonDeprecatedKeys]) {
+        id value1 = [iTermProfilePreferences objectForKey:key inProfile:profile1];
+        id value2 = [iTermProfilePreferences objectForKey:key inProfile:profile2];
+
+        if ([NSObject object:value1 isEqualToObject:value2]) {
+            continue;
+        }
+        return NO;
+    }
+    return YES;
+}
+
 - (void)setSessionSpecificProfileValues:(NSDictionary *)newValues {
     DLog(@"%@: setSessionSpecificProfilevalues:%@", self, newValues);
+    if (![self profileValuesDifferFromCurrentProfile:newValues]) {
+        DLog(@"No changes to be made");
+        return;
+    }
+
+    // Consider the possibility that newValues exactly matches an existing shared profile or is
+    // a modified copy of a shared profile.
+    NSString *const newGuid = newValues[KEY_GUID];
+    if (newGuid) {
+        Profile *const existingProfile = [[ProfileModel sharedInstance] bookmarkWithGuid:newGuid];
+        if (existingProfile) {
+            DLog(@"Switching to existing profile");
+            // Switch to the existing profile. This will remarry if possible.
+            [self setProfile:existingProfile preservingName:NO adjustWindow:YES];
+
+            // Are we done?
+            if ([self profile:existingProfile isEffectivelyEqualToProfile:newValues]) {
+                DLog(@"Effectively equivalent to existing profile");
+                // Since you switched to a shared profile that is an exact match, we're done.
+                return;
+            }
+
+            // No. Divorce and modify. This takes care of making everything right, such as setting
+            // the original profile guid.
+            DLog(@"Divorce and modify");
+        }
+    }
+
+    // Normal case: divorce and update a subset of properties.
     if (!self.isDivorced) {
         [self divorceAddressBookEntryFromPreferences];
     }
+
+    // Build a copy of the current dictionary, replacing values with those provided in newValues.
     NSMutableDictionary* temp = [NSMutableDictionary dictionaryWithDictionary:_profile];
     for (NSString *key in newValues) {
+        if ([key isEqualToString:KEY_GUID] || [key isEqualToString:KEY_ORIGINAL_GUID]) {
+            continue;
+        }
         NSObject *value = newValues[key];
         if ([value isKindOfClass:[NSNull class]]) {
             [temp removeObjectForKey:key];
@@ -4705,7 +4812,8 @@ ITERM_WEAKLY_REFERENCEABLE
             temp[key] = value;
         }
     }
-    if ([temp isEqualToDictionary:_profile]) {
+    if ([self profile:temp isEffectivelyEqualToProfile:_profile]) {
+        DLog(@"Not doing anything because temp is equal to _profile");
         // This was a no-op, so there's no need to get a divorce. Happens most
         // commonly when setting tab color after a split.
         return;
@@ -5511,6 +5619,7 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
         }
         if (focused && [self isTmuxClient]) {
             [_tmuxController selectPane:self.tmuxPane];
+            [self.delegate sessionDidReportSelectedTmuxPane:self];
         }
     }
 }
@@ -5553,20 +5662,53 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
                 break;
             case TMUX_CLIENT:
                 name = @"client";
-                assert(!_tmuxStatusBarMonitor);
-                _tmuxStatusBarMonitor = [[iTermTmuxStatusBarMonitor alloc] initWithGateway:_tmuxController.gateway
-                                                                                     scope:self.variablesScope];
-                _tmuxStatusBarMonitor.active = [iTermProfilePreferences boolForKey:KEY_SHOW_STATUS_BAR inProfile:self.profile];
-                if ([iTermAdvancedSettingsModel useTmuxStatusBar] ||
-                    [iTermStatusBarLayout shouldOverrideLayout:self.profile[KEY_STATUS_BAR_LAYOUT]]) {
-                    [self setSessionSpecificProfileValues:@{ KEY_STATUS_BAR_LAYOUT: [[iTermStatusBarLayout tmuxLayoutWithController:_tmuxController
-                                                                                                                              scope:nil
-                                                                                                                             window:self.delegate.tmuxWindow] dictionaryValue] }];
-                }
+                [self installTmuxStatusBarMonitor];
+                [self installTmuxTitleMonitor];
                 break;
         }
         [self.variablesScope setValue:name forVariableNamed:iTermVariableKeySessionTmuxRole];
     });
+}
+
+- (void)installTmuxStatusBarMonitor {
+    assert(!_tmuxStatusBarMonitor);
+    _tmuxStatusBarMonitor = [[iTermTmuxStatusBarMonitor alloc] initWithGateway:_tmuxController.gateway
+                                                                         scope:self.variablesScope];
+    _tmuxStatusBarMonitor.active = [iTermProfilePreferences boolForKey:KEY_SHOW_STATUS_BAR inProfile:self.profile];
+    if ([iTermAdvancedSettingsModel useTmuxStatusBar] ||
+        [iTermStatusBarLayout shouldOverrideLayout:self.profile[KEY_STATUS_BAR_LAYOUT]]) {
+        [self setSessionSpecificProfileValues:@{ KEY_STATUS_BAR_LAYOUT: [[iTermStatusBarLayout tmuxLayoutWithController:_tmuxController
+                                                                                                                  scope:nil
+                                                                                                                 window:self.delegate.tmuxWindow] dictionaryValue] }];
+    }
+}
+
+// NOTE: Despite the name, this doesn't continuously monitor because that is
+// too expensive. Instead, we manually poll at times when a change is likely.
+- (void)installTmuxTitleMonitor {
+    if (_tmuxTitleMonitor) {
+        return;
+    }
+    __weak __typeof(self) weakSelf = self;
+    _tmuxTitleMonitor = [[iTermTmuxOptionMonitor alloc] initWithGateway:_tmuxController.gateway
+                                                                 scope:self.variablesScope
+                                                                format:@"#{pane_title}"
+                                                                target:[NSString stringWithFormat:@"%%%@", @(self.tmuxPane)]
+                                                          variableName:iTermVariableKeySessionTmuxPaneTitle
+                                                                 block:^(NSString * _Nonnull title) {
+                                                                     if (title) {
+                                                                         [weakSelf setSessionSpecificProfileValues:@{ KEY_TMUX_PANE_TITLE: title ?: @""}];
+                                                                     }
+                                                                 }];
+    [_tmuxTitleMonitor updateOnce];
+}
+
+- (void)uninstallTmuxTitleMonitor {
+    if (!_tmuxTitleMonitor) {
+        return;
+    }
+    [_tmuxTitleMonitor invalidate];
+    _tmuxTitleMonitor = nil;
 }
 
 - (PTYSessionTmuxMode)tmuxMode {
@@ -5927,6 +6069,7 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
     [_tmuxController validateOptions];
     [_tmuxController checkForUTF8];
     [_tmuxController guessVersion];
+    [_tmuxController loadTitleFormat];
 }
 
 - (void)tmuxInitialCommandDidFailWithError:(NSString *)error {
@@ -5971,7 +6114,7 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
     });
     self.tmuxMode = TMUX_NONE;
     [self.variablesScope setValue:nil forVariableNamed:iTermVariableKeySessionTmuxClientName];
-    [self.variablesScope setValue:nil forVariableNamed:iTermVariableKeySessionTmuxWindowTitle];
+    [self.variablesScope setValue:nil forVariableNamed:iTermVariableKeySessionTmuxPaneTitle];
 }
 
 - (void)tmuxCannotSendCharactersInSupplementaryPlanes:(NSString *)string windowPane:(int)windowPane {
@@ -6442,7 +6585,9 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
         case KEY_ACTION_NEW_TAB_WITH_PROFILE:
         case KEY_ACTION_NEW_WINDOW_WITH_PROFILE: {
             Profile *profile = [[ProfileModel sharedInstance] bookmarkWithGuid:keyBindingText];
-            [[iTermController sharedInstance] launchBookmark:profile inTerminal:nil];
+            [[iTermController sharedInstance] launchBookmark:profile
+                                                  inTerminal:nil
+                                          respectTabbingMode:NO];
             return YES;
         }
         case KEY_ACTION_UNDO:
@@ -7203,12 +7348,18 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
                                                        flip:NO];
     } else {
         NSView *container = [self.delegate sessionContainerView:self];
+        NSRect clippedDirtyRect = NSIntersectionRect(dirtyRect, view.enclosingScrollView.documentVisibleRect);;
+        if (@available(macOS 10.14, *)) {} else {
+            if (view == self.view) {
+                clippedDirtyRect = dirtyRect;
+            }
+        }
         NSRect windowVisibleRect = [self.view insetRect:container.bounds
                                                 flipped:YES
                                  includeBottomStatusBar:![iTermPreferences boolForKey:kPreferenceKeySeparateStatusBarsPerPane]];
         [_backgroundDrawingHelper drawBackgroundImageInView:view
                                                   container:container
-                                                  dirtyRect:NSIntersectionRect(dirtyRect, view.enclosingScrollView.documentVisibleRect)
+                                                  dirtyRect:clippedDirtyRect
                                      visibleRectInContainer:windowVisibleRect
                                      blendDefaultBackground:blendDefaultBackground
                                                        flip:YES];
@@ -7224,9 +7375,13 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
     NSRect viewRect = [self.view insetRect:sessionViewFrameInContainer
                                    flipped:YES
                     includeBottomStatusBar:YES];
+    BOOL includeBottomStatusBar = YES;
+    if (@available(macOS 10.14, *)) {
+        includeBottomStatusBar = ![iTermPreferences boolForKey:kPreferenceKeySeparateStatusBarsPerPane];
+    }
     NSRect containerBounds = [self.view insetRect:container.bounds
                                           flipped:YES
-                           includeBottomStatusBar:![iTermPreferences boolForKey:kPreferenceKeySeparateStatusBarsPerPane]];
+                           includeBottomStatusBar:includeBottomStatusBar];
     viewRect.origin.x -= containerBounds.origin.x;
     viewRect.origin.y -= containerBounds.origin.y;
 
@@ -8324,6 +8479,7 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
     // break up \(.
     title = [title stringByReplacingOccurrencesOfString:@"\\(" withString:@"\\\u200B("];
     [self.variablesScope setValue:title forVariableNamed:iTermVariableKeySessionWindowName];
+    [_tmuxTitleMonitor updateOnce];
 }
 
 - (NSString *)screenWindowTitle {
@@ -8339,6 +8495,8 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
     theName = [theName stringByReplacingOccurrencesOfString:@"\\(" withString:@"\\\u200B("];
     [self.variablesScope setValuesFromDictionary:@{ iTermVariableKeySessionAutoNameFormat: theName ?: [NSNull null],
                                                     iTermVariableKeySessionIconName: theName ?: [NSNull null] }];
+    [_tmuxTitleMonitor updateOnce];
+    
 }
 
 - (BOOL)screenWindowIsFullscreen {
@@ -8722,15 +8880,31 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
     }
 }
 
-- (void)setProfile:(NSDictionary *)newProfile preservingName:(BOOL)preserveName {
+- (void)setProfile:(NSDictionary *)newProfile
+    preservingName:(BOOL)preservingName {
+    [self setProfile:newProfile preservingName:preservingName adjustWindow:YES];
+}
+
+- (void)setProfile:(NSDictionary *)newProfile
+    preservingName:(BOOL)preserveName
+      adjustWindow:(BOOL)adjustWindow {
+    DLog(@"Set profile to\n%@", newProfile);
+    // Force triggers to be checked. We may be switching to a profile without triggers
+    // and we don't want them to run on the lines of text above _triggerLine later on
+    // when switching to a profile that does have triggers.
+    _lastPartialLineTriggerCheck = 0;
+    [self clearTriggerLine];
+
     NSString *theName = [[self profile] objectForKey:KEY_NAME];
     NSMutableDictionary *dict = [NSMutableDictionary dictionaryWithDictionary:newProfile];
     if (preserveName) {
         [dict setObject:theName forKey:KEY_NAME];
     }
 
+    _windowAdjustmentDisabled = !adjustWindow;
     [self setProfile:dict];
     [self setPreferencesFromAddressBookEntry:dict];
+    _windowAdjustmentDisabled = NO;
     [_originalProfile autorelease];
     _originalProfile = [newProfile copy];
     [self remarry];
@@ -9717,17 +9891,32 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
     _lastRemoteHost = [lastRemoteHost retain];
 }
 
-- (void)screenLogWorkingDirectoryAtLine:(int)line withDirectory:(NSString *)directory {
+// isSuitableForOldPWD means that if we don't know what the hostname is then this should be used
+// in place of asking the OS what the PWD is from now on. It's useful for users who set up a trigger
+// to report the PWD but don't report the hostname, or for users who use the CurrentDir control
+// sequence but not RemoteHost. Issue 5878, May 2019 comments.
+- (void)screenLogWorkingDirectoryAtLine:(int)line
+                          withDirectory:(NSString *)directory
+                    isSuitableForOldPWD:(BOOL)isSuitableForOldPWD {
     VT100RemoteHost *remoteHost = [_screen remoteHostOnLine:line];
     BOOL isSame = ([directory isEqualToString:_lastDirectory] &&
                    [remoteHost isEqualToRemoteHost:_lastRemoteHost]);
     [[iTermShellHistoryController sharedInstance] recordUseOfPath:directory
                                                            onHost:[_screen remoteHostOnLine:line]
                                                          isChange:!isSame];
-    // Note that when remoteHost is nil, it's unsuitable for old PWD because
-    // that means shell integration hasn't been used and we have to keep
-    // pulling the pwd from the child process via the kernel.
-    [self setLastDirectory:directory isUnsuitableForOldPWD:!remoteHost.isLocalhost];
+    BOOL unsuitable;
+    if (remoteHost == nil && isSuitableForOldPWD) {
+        // Special dispensation. Trust the caller that this working directory will be kept up to date.
+        unsuitable = NO;
+    } else {
+        // In this case a nil remoteHost is considered unsuitable because we believe this is an
+        // odd one-off (such as by setting the title) and we can't count on it being updated
+        // reliably. We'll pull pwd from the child process via the kernel.
+        unsuitable = !remoteHost.isLocalhost;
+    }
+    DLog(@"Calling setLastDirectory:%@ isUnsuitableForOldPWD:%@. remoteHost is %@\n%@",
+         directory, @(unsuitable), remoteHost, [NSThread callStackSymbols]);
+    [self setLastDirectory:directory isUnsuitableForOldPWD:unsuitable];
     self.lastRemoteHost = remoteHost;
 }
 
@@ -10103,7 +10292,7 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
 }
 
 - (void)automaticProfileSwitcherLoadProfile:(iTermSavedProfile *)savedProfile {
-    [self setProfile:savedProfile.originalProfile preservingName:NO];
+    [self setProfile:savedProfile.originalProfile preservingName:NO adjustWindow:NO];
     if (savedProfile.isDivorced) {
         NSMutableDictionary *overrides = [NSMutableDictionary dictionary];
         for (NSString *key in savedProfile.overriddenFields) {
@@ -10749,16 +10938,21 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
     return response;
 }
 
-- (ITMSetProfilePropertyResponse_Status)handleSetProfilePropertyForKey:(NSString *)key
-                                                                 value:(id)value
-                                                    scriptHistoryEntry:(iTermScriptHistoryEntry *)scriptHistoryEntry {
-    if (![iTermProfilePreferences valueIsLegal:value forKey:key]) {
-        XLog(@"Value %@ is not legal for key %@", value, key);
-        [scriptHistoryEntry addOutput:[NSString stringWithFormat:@"Value %@ is not legal type for key %@\n", value, key]];
-        return ITMSetProfilePropertyResponse_Status_RequestMalformed;
+- (ITMSetProfilePropertyResponse_Status)handleSetProfilePropertyForAssignments:(NSArray<iTermTuple<NSString *, id> *> *)tuples
+                                                            scriptHistoryEntry:(iTermScriptHistoryEntry *)scriptHistoryEntry {
+    NSMutableDictionary *dict = [NSMutableDictionary dictionary];
+    for (iTermTuple<NSString *, id> *tuple in tuples) {
+        NSString *key = tuple.firstObject;
+        id value = tuple.secondObject;
+        if (![iTermProfilePreferences valueIsLegal:value forKey:key]) {
+            XLog(@"Value %@ is not legal for key %@", value, key);
+            [scriptHistoryEntry addOutput:[NSString stringWithFormat:@"Value %@ is not legal type for key %@\n", value, key]];
+            return ITMSetProfilePropertyResponse_Status_RequestMalformed;
+        }
+        dict[key] = value;
     }
 
-    [self setSessionSpecificProfileValues:@{ key: value }];
+    [self setSessionSpecificProfileValues:dict];
     return ITMSetProfilePropertyResponse_Status_Ok;
 }
 
@@ -11215,6 +11409,73 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
 
 - (void)copyModeHandlerCopySelection:(iTermCopyModeHandler *)handler NOT_COPY_FAMILY {
     [_textview copySelectionAccordingToUserPreferences];
+}
+
+#pragma mark - iTermObject
+
+- (iTermBuiltInFunctions *)objectMethodRegistry {
+    if (!_methods) {
+        _methods = [[iTermBuiltInFunctions alloc] init];
+        iTermBuiltInMethod *method;
+        method = [[iTermBuiltInMethod alloc] initWithName:@"set_name"
+                                            defaultValues:@{}
+                                                    types:@{ @"name": [NSString class] }
+                                        optionalArguments:[NSSet set]
+                                                  context:iTermVariablesSuggestionContextSession
+                                                   target:self
+                                                   action:@selector(setNameWithCompletion:name:)];
+        [_methods registerFunction:method namespace:@"iterm2"];
+
+        method = [[iTermBuiltInMethod alloc] initWithName:@"run_tmux_command"
+                                            defaultValues:@{}
+                                                    types:@{ @"command": [NSString class] }
+                                        optionalArguments:[NSSet set]
+                                                  context:iTermVariablesSuggestionContextSession
+                                                   target:self
+                                                   action:@selector(sendTmuxCommandWithCompletion:command:)];
+        [_methods registerFunction:method namespace:@"iterm2"];
+    }
+    return _methods;
+}
+
+- (void)sendTmuxCommandWithCompletion:(void (^)(id, NSError *))completion
+                              command:(NSString *)command {
+    if (self.tmuxMode == TMUX_NONE || _tmuxController == nil) {
+        NSError *error = [NSError errorWithDomain:@"com.iterm2.tmux-command"
+                                             code:0
+                                         userInfo:@{ NSLocalizedDescriptionKey: @"Not a tmux integration session" }];
+        completion(nil, error);
+    }
+
+    [_tmuxController.gateway sendCommand:command
+                          responseTarget:self
+                        responseSelector:@selector(sendTmuxCommandMethodDidComplete:completion:)
+                          responseObject:completion
+                                   flags:kTmuxGatewayCommandShouldTolerateErrors];
+}
+
+- (void)sendTmuxCommandMethodDidComplete:(NSString *)result
+                              completion:(void (^)(id, NSError *))completion {
+    if (result) {
+        completion(result, nil);
+        return;
+    }
+
+    // Tmux responded with an error.
+    NSError *error = [NSError errorWithDomain:@"com.iterm2.tmux-command"
+                                         code:1
+                                     userInfo:@{ NSLocalizedDescriptionKey: @"tmux error" }];
+    completion(nil, error);
+}
+
+- (void)setNameWithCompletion:(void (^)(id, NSError *))completion
+                         name:(NSString *)name  {
+    [self setSessionSpecificProfileValues:@{ KEY_NAME: name ?: @""}];
+    completion(nil, nil);
+}
+
+- (iTermVariableScope *)objectScope {
+    return self.variablesScope;
 }
 
 @end

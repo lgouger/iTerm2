@@ -69,13 +69,13 @@ NSString *const iTermSessionNameControllerSystemTitleUniqueIdentifier = @"com.it
 }
 
 - (NSDictionary *)stateDictionary {
-    return @{ iTermSessionNameControllerStateKeyWindowTitleStack: _windowTitleStack ?: @[],
-              iTermSessionNameControllerStateKeyIconTitleStack: _iconTitleStack ?: @[] };
+    return @{ iTermSessionNameControllerStateKeyWindowTitleStack: [_windowTitleStack it_arrayByReplacingOccurrencesOf:[NSNull null] with:@0] ?: @[],
+              iTermSessionNameControllerStateKeyIconTitleStack: [_iconTitleStack it_arrayByReplacingOccurrencesOf:[NSNull null] with:@0] ?: @[] };
 }
 
 - (void)restoreNameFromStateDictionary:(NSDictionary *)state {
-    _windowTitleStack = [state[iTermSessionNameControllerStateKeyWindowTitleStack] mutableCopy];
-    _iconTitleStack = [state[iTermSessionNameControllerStateKeyIconTitleStack] mutableCopy];
+    _windowTitleStack = [[state[iTermSessionNameControllerStateKeyWindowTitleStack] it_arrayByReplacingOccurrencesOf:@0 with:[NSNull null]] mutableCopy];
+    _iconTitleStack = [[state[iTermSessionNameControllerStateKeyIconTitleStack] it_arrayByReplacingOccurrencesOf:@0 with:[NSNull null]] mutableCopy];
     [self.delegate sessionNameControllerDidChangeWindowTitle];
 }
 
@@ -156,7 +156,7 @@ NSString *const iTermSessionNameControllerSystemTitleUniqueIdentifier = @"com.it
         // Add tmux variables we use for adding formatting.
         for (NSString *tmuxVariableName in @[ iTermVariableKeySessionTmuxClientName,
                                               iTermVariableKeySessionTmuxRole,
-                                              iTermVariableKeySessionTmuxWindowTitleEval ]) {
+                                              iTermVariableKeySessionTmuxPaneTitle ]) {
             [scope valueForVariableName:tmuxVariableName];
         }
         for (iTermVariableReference *ref in _refs) {
@@ -338,7 +338,12 @@ NSString *const iTermSessionNameControllerSystemTitleUniqueIdentifier = @"com.it
         // window name. This is confusing: this refers to the name of a tmux window, which is
         // equivalent to an iTerm2 tab. It is reported to us by tmux. We ignore the base name
         // because the real name comes from the server and that's all we care about.
-        return [NSString stringWithFormat:@"↣ %@", descriptor.tmuxWindowName];
+        if (self.delegate.sessionNameControllerUniqueIdentifier) {
+            // Using a custom title provider.
+            return [NSString stringWithFormat:@"↣ %@", base];
+        } else {
+            return [NSString stringWithFormat:@"↣ %@", descriptor.tmuxWindowName];
+        }
     }
     return base;
 }

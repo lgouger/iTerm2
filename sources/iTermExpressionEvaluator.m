@@ -173,6 +173,7 @@ static NSMutableArray *iTermExpressionEvaluatorGlobalStore(void) {
         case iTermParsedExpressionTypeFunctionCall: {
             assert(parsedExpression.functionCall);
             [parsedExpression.functionCall performFunctionCallFromInvocation:invocation
+                                                                    receiver:nil
                                                                        scope:_scope
                                                                      timeout:timeout
                                                                   completion:completion];

@@ -99,6 +99,11 @@ function Build {
   # Modern
   SparkleSign ${SPARKLE_PREFIX}testing3_modern.xml ${SPARKLE_PREFIX}template3_modern.xml
 
+  # Copy experiment to control
+  cp $SVNDIR/source/appcasts/${SPARKLE_PREFIX}testing3.xml        $SVNDIR/source/appcasts/${SPARKLE_PREFIX}testing.xml
+  cp $SVNDIR/source/appcasts/${SPARKLE_PREFIX}testing3_new.xml    $SVNDIR/source/appcasts/${SPARKLE_PREFIX}testing_new.xml
+  cp $SVNDIR/source/appcasts/${SPARKLE_PREFIX}testing3_modern.xml $SVNDIR/source/appcasts/${SPARKLE_PREFIX}testing_modern.xml
+
   popd
 }
 

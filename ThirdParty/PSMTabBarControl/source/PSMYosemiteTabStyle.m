@@ -115,9 +115,9 @@
         _closeButtonOver = [[[NSBundle bundleForClass:self.class] imageForResource:@"TabClose_Front_Rollover"] retain];
 
         // Load "new tab" buttons
-        _addTabButtonImage = [[NSImage alloc] initByReferencingFile:[[PSMTabBarControl bundle] pathForImageResource:@"TabNewMetal"]];
-        _addTabButtonPressedImage = [[NSImage alloc] initByReferencingFile:[[PSMTabBarControl bundle] pathForImageResource:@"TabNewMetalPressed"]];
-        _addTabButtonRolloverImage = [[NSImage alloc] initByReferencingFile:[[PSMTabBarControl bundle] pathForImageResource:@"TabNewMetalRollover"]];
+        _addTabButtonImage = [[NSImage alloc] initByReferencingFile:[[PSMTabBarControl bundle] pathForImageResource:@"YosemiteAddTab"]];
+        _addTabButtonPressedImage = [[NSImage alloc] initByReferencingFile:[[PSMTabBarControl bundle] pathForImageResource:@"YosemiteAddTab"]];
+        _addTabButtonRolloverImage = [[NSImage alloc] initByReferencingFile:[[PSMTabBarControl bundle] pathForImageResource:@"YosemiteAddTab"]];
     }
     return self;
 }
@@ -150,9 +150,12 @@
     return self.tabBar.insets.left;
 }
 
-- (float)rightMarginForTabBarControlWithOverflow:(BOOL)withOverflow {
-    // This style always leaves space for overflow control.
-    return 24.0f;
+- (float)rightMarginForTabBarControlWithOverflow:(BOOL)withOverflow
+                                    addTabButton:(BOOL)withAddTabButton {
+    if (withOverflow || withAddTabButton) {
+        return 24.0f;
+    }
+    return 0;
 }
 
 // For vertical orientation

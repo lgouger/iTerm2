@@ -26,6 +26,8 @@ Here are a collection of working scripts for you to crib from. While they are ca
 
 :doc:`mousemode` — Demonstrates a status bar component that responds to changes in a variable.
 
+:doc:`gmtclock` - Demonstrates a status bar component that shows the current time in the GMT time zone.
+
 ----
 
 **Tmux**
@@ -47,6 +49,7 @@ Here are a collection of working scripts for you to crib from. While they are ca
 
 :doc:`copycolor` — Demonstrates monitoring for session creation and using color presets.
 
+:doc:`tabtitle` - Demonstrates monitoring for the creation of a new tab. Also demonstrates prompting the user for a string and changing a tab title.
 
 ----
 
@@ -59,6 +62,8 @@ Here are a collection of working scripts for you to crib from. While they are ca
 :doc:`settabcolor` — Demonstrates changing a session's local profile without updating the underlying profile.
 
 :doc:`increase_font_size` — Demonstrates changing a session's font without updating the underlying profile.
+
+:doc:`change_default_profile` - Demonstrates changing the default profile.
 
 ----
 
@@ -92,7 +97,9 @@ Here are a collection of working scripts for you to crib from. While they are ca
 
 :doc:`sorttabs` — Demonstrates reordering tabs in a window.
 
-:doc:`mrutabs` — Demonstrates monitoring for changes in keyboard focus and reordering tabs in a window.
+:doc:`mrutabs` — Demonstrates monitoring for changes in keyboard focus and reordering tabs in a window. This script keeps tabs always in most-recently-used order, so the first tab is always selected.
+
+:doc:`mrutabs2` - This script selects the next-most-recently-used tab when the current tab closes. Same for split panes.
 
 
 ----

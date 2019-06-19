@@ -16,6 +16,15 @@ extern NSString *const kSelectionRespectsSoftBoundariesKey;
 @property (class, nonatomic, copy) NSArray<NSString *> *searchHistory;
 @property (class, nonatomic) BOOL secureKeyboardEntry;
 
+typedef NS_ENUM(NSUInteger, iTermAppleWindowTabbingMode) {
+    iTermAppleWindowTabbingModeAlways,
+    iTermAppleWindowTabbingModeFullscreen,
+    iTermAppleWindowTabbingModeManual
+};
+
+@property (class, nonatomic, readonly) iTermAppleWindowTabbingMode appleWindowTabbingMode;
+@property (class, nonatomic) BOOL haveBeenWarnedAboutTabDockSetting;
+
 @end
 
 NS_ASSUME_NONNULL_END

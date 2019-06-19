@@ -13,7 +13,9 @@
 
 @import Sparkle;
 
-const int iTermMinimumPythonEnvironmentVersion = 46;
+// SEE ALSO iTermWebSocketConnectionMinimumPythonLibraryVersion
+// NOTE: This does not affect full-environment scripts.
+const int iTermMinimumPythonEnvironmentVersion = 50;
 
 @protocol iTermOptionalComponentDownloadPhaseDelegate<NSObject>
 - (void)optionalComponentDownloadPhaseDidComplete:(iTermOptionalComponentDownloadPhase *)sender;

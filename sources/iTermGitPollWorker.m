@@ -22,8 +22,8 @@ typedef void (^iTermGitCallback)(iTermGitState * _Nullable);
 
 @implementation iTermGitPollWorker {
     iTermCommandRunner *_commandRunner;
+    NSMutableArray<iTermCommandRunner *> *_terminatingCommandRunners;
     NSMutableData *_readData;
-    NSInteger _generation;
     NSMutableArray<NSString *> *_queue;
     iTermGitCache *_cache;
     NSMutableDictionary<NSString *, NSMutableArray<iTermGitCallback> *> *_outstanding;
@@ -51,6 +51,7 @@ typedef void (^iTermGitCallback)(iTermGitState * _Nullable);
         _queue = [NSMutableArray array];
         _cache = [[iTermGitCache alloc] init];
         _outstanding = [NSMutableDictionary dictionary];
+        _terminatingCommandRunners = [NSMutableArray array];
     }
     return self;
 }
@@ -145,9 +146,9 @@ typedef void (^iTermGitCallback)(iTermGitState * _Nullable);
         _commandRunner.outputHandler = ^(NSData *data) {
             [weakSelf didRead:data];
         };
-        NSInteger generation = _generation++;
+        __weak __typeof(_commandRunner) weakCommandRunner = _commandRunner;
         _commandRunner.completion = ^(int code) {
-            [weakSelf scriptDied:generation];
+            [weakSelf commandRunnerDied:weakCommandRunner];
         };
         [_commandRunner run];
     }
@@ -161,9 +162,7 @@ typedef void (^iTermGitCallback)(iTermGitState * _Nullable);
     const size_t maxBytes = 100000;
     if (_readData.length + data.length > maxBytes) {
         DLog(@"wtf, have queued up more than 100k of output from the git poller script");
-        [_commandRunner terminate];
-        _commandRunner = nil;
-        [_readData setLength:0];
+        [self killScript];
         return;
     }
 
@@ -207,6 +206,8 @@ typedef void (^iTermGitCallback)(iTermGitState * _Nullable);
     state.pushArrow = dict[@"PUSH"];
     state.pullArrow = dict[@"PULL"];
     state.branch = dict[@"BRANCH"];
+    state.adds = [dict[@"ADDS"] integerValue];
+    state.deletes = [dict[@"DELETES"] integerValue];
 
     NSString *path = _queue.firstObject;
     if (path) {
@@ -222,8 +223,13 @@ typedef void (^iTermGitCallback)(iTermGitState * _Nullable);
 }
 
 - (void)killScript {
-    DLog(@"KILL command runner %@", self->_commandRunner);
+    if (!_commandRunner) {
+        DLog(@"Command runner is already nil, doing nothing.");
+        return;
+    }
+    DLog(@"KILL command runner %@", _commandRunner);
     DLog(@"killing wedged git poller script");
+    [_terminatingCommandRunners addObject:_commandRunner];
     [_commandRunner terminate];
     [self reset];
 }
@@ -235,13 +241,22 @@ typedef void (^iTermGitCallback)(iTermGitState * _Nullable);
     [_outstanding removeAllObjects];
 }
 
-- (void)scriptDied:(NSInteger)generation {
-    DLog(@"* script died *");
-    gNumberOfCommandRunners--;
-    DLog(@"Decremented number of command runners to %@", @(gNumberOfCommandRunners));
-    if (generation != _generation) {
+- (void)commandRunnerDied:(iTermCommandRunner *)commandRunner {
+    DLog(@"* command runner died: %@ *", commandRunner);
+    if (!commandRunner) {
+        DLog(@"nil command runner");
         return;
     }
+    gNumberOfCommandRunners--;
+    DLog(@"Decremented number of command runners to %@", @(gNumberOfCommandRunners));
+    if ([_terminatingCommandRunners containsObject:commandRunner]) {
+        [_terminatingCommandRunners removeObject:commandRunner];
+        return;
+    }
+    // This assertion is here in because calling reset when this precondition
+    // is violated means you're going to nil out your current command runner even
+    // though it's still running.
+    assert(commandRunner == _commandRunner);
     [self reset];
 }
 

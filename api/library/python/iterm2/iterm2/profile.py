@@ -85,8 +85,10 @@ class LocalWriteOnlyProfile:
       * Example ":ref:`settabcolor_example`"
       * Example ":ref:`increase_font_size_example`"
     """
-    def __init__(self):
-      self.__values = {}
+    def __init__(self, values={}):
+        self.__values = {}
+        for key, value in values.items():
+            self.__values[key] = json.dumps(value)
 
     @property
     def values(self):
@@ -1861,6 +1863,11 @@ class Profile(WriteOnlyProfile):
             return None
         except KeyError:
             return None
+
+    @property
+    def local_write_only_copy(self) -> LocalWriteOnlyProfile:
+        """Returns a :class:`~iterm2.profile.LocalWriteOnlyProfile` containing the properties in this profile."""
+        return LocalWriteOnlyProfile(self.__props)
 
     @property
     def all_properties(self):

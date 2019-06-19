@@ -39,6 +39,7 @@ NSString *const kTmuxControllerWindowDidOpen = @"kTmuxControllerWindowDidOpen";
 NSString *const kTmuxControllerAttachedSessionDidChange = @"kTmuxControllerAttachedSessionDidChange";
 NSString *const kTmuxControllerWindowDidClose = @"kTmuxControllerWindowDidClose";
 NSString *const kTmuxControllerSessionWasRenamed = @"kTmuxControllerSessionWasRenamed";
+NSString *const kTmuxControllerDidFetchSetTitlesStringOption = @"kTmuxControllerDidFetchSetTitlesStringOption";
 
 // Unsupported global options:
 static NSString *const kAggressiveResize = @"aggressive-resize";
@@ -179,6 +180,8 @@ static NSDictionary *iTermTmuxControllerDefaultFontOverridesFromProfile(Profile 
     [_pendingWindows release];
     [sessionName_ release];
     [sessions_ release];
+    [_setTitlesString release];
+
     [super dealloc];
 }
 
@@ -816,9 +819,32 @@ static NSDictionary *iTermTmuxControllerDefaultFontOverridesFromProfile(Profile 
 }
 
 - (void)clearHistoryForWindowPane:(int)windowPane {
-    [gateway_ sendCommand:[NSString stringWithFormat:@"clear-history -t %%%d", windowPane]
+    [gateway_ sendCommand:[NSString stringWithFormat:@"clear-history -t \"%%%d\"", windowPane]
            responseTarget:nil
          responseSelector:nil];
+}
+
+- (void)loadTitleFormat {
+    [gateway_ sendCommandList:@[ [gateway_ dictionaryForCommand:@"show-options -v -g set-titles"
+                                                 responseTarget:self
+                                               responseSelector:@selector(handleShowSetTitles:)
+                                                 responseObject:nil
+                                                          flags:0],
+                                 [gateway_ dictionaryForCommand:@"show-options -v -g set-titles-string"
+                                                 responseTarget:self
+                                               responseSelector:@selector(handleShowSetTitlesString:)
+                                                 responseObject:nil
+                                                          flags:0] ]];
+}
+
+- (void)handleShowSetTitles:(NSString *)result {
+    _shouldSetTitles = [result isEqualToString:@"on"];
+    [[NSNotificationCenter defaultCenter] postNotificationName:kTmuxControllerDidFetchSetTitlesStringOption
+                                                        object:self];
+}
+
+- (void)handleShowSetTitlesString:(NSString *)setTitlesString {
+    _setTitlesString = [setTitlesString copy];
 }
 
 - (void)guessVersion {
@@ -894,6 +920,9 @@ static NSDictionary *iTermTmuxControllerDefaultFontOverridesFromProfile(Profile 
     if ([response hasPrefix:nextPrefix]) {
         [self handleDisplayMessageVersion:[response substringFromIndex:nextPrefix.length]];
          return;
+    }
+    if ([response hasSuffix:@"-rc"]) {
+        response = [response stringByDroppingLastCharacters:3];
     }
     // In case we get back something that's not a number, or a totally unreasonable number, just ignore this.
     NSDecimalNumber *number = [NSDecimalNumber decimalNumberWithString:response];
@@ -1031,7 +1060,7 @@ static NSDictionary *iTermTmuxControllerDefaultFontOverridesFromProfile(Profile 
             dir = @"U";
         }
     }
-    NSString *resizeStr = [NSString stringWithFormat:@"resize-pane -%@ -t %%%d %d",
+    NSString *resizeStr = [NSString stringWithFormat:@"resize-pane -%@ -t \"%%%d\" %d",
                            dir, wp, abs(amount)];
     NSString *listStr = [NSString stringWithFormat:@"list-windows -F \"#{window_id} #{window_layout} #{window_flags}\""];
     NSArray *commands = [NSArray arrayWithObjects:
@@ -1076,7 +1105,7 @@ static NSDictionary *iTermTmuxControllerDefaultFontOverridesFromProfile(Profile 
         return;
     }
 
-    NSString *command = [NSString stringWithFormat:@"select-pane -t %%%d", windowPane];
+    NSString *command = [NSString stringWithFormat:@"select-pane -t \"%%%d\"", windowPane];
     [gateway_ sendCommand:command
            responseTarget:nil
          responseSelector:nil];
@@ -1143,7 +1172,7 @@ static NSDictionary *iTermTmuxControllerDefaultFontOverridesFromProfile(Profile 
       isVertical:(BOOL)splitVertical
           before:(BOOL)addBefore
 {
-    [gateway_ sendCommand:[NSString stringWithFormat:@"move-pane -s %%%d -t %%%d %@%@",
+    [gateway_ sendCommand:[NSString stringWithFormat:@"move-pane -s \"%%%d\" -t \"%%%d\" %@%@",
                            srcPane, destPane, splitVertical ? @"-h" : @"-v",
                            addBefore ? @" -b" : @""]
            responseTarget:nil
@@ -1152,7 +1181,7 @@ static NSDictionary *iTermTmuxControllerDefaultFontOverridesFromProfile(Profile 
 
 - (void)killWindowPane:(int)windowPane
 {
-    [gateway_ sendCommand:[NSString stringWithFormat:@"kill-pane -t %%%d", windowPane]
+    [gateway_ sendCommand:[NSString stringWithFormat:@"kill-pane -t \"%%%d\"", windowPane]
            responseTarget:nil
          responseSelector:nil];
 }
@@ -1166,7 +1195,7 @@ static NSDictionary *iTermTmuxControllerDefaultFontOverridesFromProfile(Profile 
                     flags:0];
 }
 
-- (NSString *)escapedWindowName:(NSString *)name {
+- (NSString *)stringByEscapingBackslashesAndRemovingNewlines:(NSString *)name {
     return [[name stringByReplacingOccurrencesOfString:@"\n" withString:@" "] stringByReplacingOccurrencesOfString:@"\\" withString:@"\\\\"];
 }
 
@@ -1175,10 +1204,29 @@ static NSDictionary *iTermTmuxControllerDefaultFontOverridesFromProfile(Profile 
                     toName:(NSString *)newName {
     NSString *theCommand;
     if (sessionName) {
-        theCommand = [NSString stringWithFormat:@"rename-window -t \"%@:@%d\" \"%@\"", sessionName, windowId, [self escapedWindowName:newName]];
+        theCommand = [NSString stringWithFormat:@"rename-window -t \"%@:@%d\" \"%@\"", sessionName, windowId, [self stringByEscapingBackslashesAndRemovingNewlines:newName]];
     } else {
-        theCommand = [NSString stringWithFormat:@"rename-window -t @%d \"%@\"", windowId, [self escapedWindowName:newName]];
+        theCommand = [NSString stringWithFormat:@"rename-window -t @%d \"%@\"", windowId, [self stringByEscapingBackslashesAndRemovingNewlines:newName]];
     }
+    [gateway_ sendCommand:theCommand
+           responseTarget:nil
+         responseSelector:nil];
+}
+
+- (BOOL)canRenamePane {
+    NSDecimalNumber *version2_6 = [NSDecimalNumber decimalNumberWithString:@"2.6"];
+    if ([gateway_.minimumServerVersion compare:version2_6] == NSOrderedAscending) {
+        return NO;
+    }
+    return YES;
+}
+
+- (void)renamePane:(int)windowPane toTitle:(NSString *)newTitle {
+    if (![self canRenamePane]) {
+        return;
+    }
+    NSString *theCommand = [NSString stringWithFormat:@"select-pane -t %%'%d' -T \"%@\"",
+                            windowPane, [self stringByEscapingBackslashesAndRemovingNewlines:newTitle]];
     [gateway_ sendCommand:theCommand
            responseTarget:nil
          responseSelector:nil];
@@ -1289,14 +1337,14 @@ static NSDictionary *iTermTmuxControllerDefaultFontOverridesFromProfile(Profile 
 {
     [windowPositions_ setObject:[NSValue valueWithPoint:screenPoint]
                          forKey:[NSNumber numberWithInt:windowPane]];
-    [gateway_ sendCommand:[NSString stringWithFormat:@"break-pane %@ %%%d", [self breakPaneWindowPaneFlag], windowPane]
+    [gateway_ sendCommand:[NSString stringWithFormat:@"break-pane %@ \"%%%d\"", [self breakPaneWindowPaneFlag], windowPane]
            responseTarget:nil
          responseSelector:nil];
 }
 
 - (void)breakOutWindowPane:(int)windowPane toTabAside:(NSString *)sibling
 {
-    [gateway_ sendCommand:[NSString stringWithFormat:@"break-pane -P -F \"#{window_id}\" %@ %%%d", [self breakPaneWindowPaneFlag], windowPane]
+    [gateway_ sendCommand:[NSString stringWithFormat:@"break-pane -P -F \"#{window_id}\" %@ \"%%%d\"", [self breakPaneWindowPaneFlag], windowPane]
            responseTarget:self
          responseSelector:@selector(windowPaneBrokeOutWithWindowId:setAffinityTo:)
            responseObject:sibling
@@ -1620,7 +1668,7 @@ static NSDictionary *iTermTmuxControllerDefaultFontOverridesFromProfile(Profile 
 }
 
 - (void)swapPane:(int)pane1 withPane:(int)pane2 {
-    NSString *swapPaneCommand = [NSString stringWithFormat:@"swap-pane -s %%%d -t %%%d",
+    NSString *swapPaneCommand = [NSString stringWithFormat:@"swap-pane -s \"%%%d\" -t \"%%%d\"",
                                  pane1, pane2];
 
     NSArray *commands = @[ [gateway_ dictionaryForCommand:swapPaneCommand
@@ -1637,7 +1685,7 @@ static NSDictionary *iTermTmuxControllerDefaultFontOverridesFromProfile(Profile 
 }
 
 - (void)toggleZoomForPane:(int)pane {
-    NSArray *commands = @[ [gateway_ dictionaryForCommand:[NSString stringWithFormat:@"resize-pane -Z -t %%%d", pane]
+    NSArray *commands = @[ [gateway_ dictionaryForCommand:[NSString stringWithFormat:@"resize-pane -Z -t \"%%%d\"", pane]
                                            responseTarget:nil
                                          responseSelector:NULL
                                            responseObject:nil

@@ -58,9 +58,9 @@
                                     iTermVariableKeySessionTriggerName,
                                     iTermVariableKeySessionWindowName,
                                     iTermVariableKeySessionJob,
+                                    iTermVariableKeySessionCommandLine,
                                     iTermVariableKeySessionPresentationName,
-                                    iTermVariableKeySessionTmuxWindowTitle,
-                                    iTermVariableKeySessionTmuxWindowTitleEval,
+                                    iTermVariableKeySessionTmuxPaneTitle,
                                     iTermVariableKeySessionTmuxRole,
                                     iTermVariableKeySessionTmuxClientName,
                                     iTermVariableKeySessionAutoNameFormat,
@@ -85,20 +85,25 @@
     // Tab context
     [self recordUseOfVariableNamed:iTermVariableKeyTabTitleOverride inContext:iTermVariablesSuggestionContextTab];
     [self recordUseOfVariableNamed:iTermVariableKeyTabTitleOverrideFormat inContext:iTermVariablesSuggestionContextTab];
+    [self recordUseOfVariableNamed:iTermVariableKeyTabTmuxWindowName inContext:iTermVariablesSuggestionContextTab];
+    [self recordUseOfVariableNamed:iTermVariableKeyTabTmuxWindowTitle inContext:iTermVariablesSuggestionContextTab];
     [self recordUseOfVariableNamed:iTermVariableKeyTabTmuxWindow inContext:iTermVariablesSuggestionContextTab];
     [self recordUseOfVariableNamed:iTermVariableKeyTabID inContext:iTermVariablesSuggestionContextTab];
-    [self recordUseOfVariableNamed:iTermVariableKeyTabWindow inContext:iTermVariablesSuggestionContextTab];
+    [self recordUseOfNonterminalVariableNamed:iTermVariableKeyTabWindow
+                                    inContext:iTermVariablesSuggestionContextTab
+                             leadingToContext:iTermVariablesSuggestionContextWindow];
 
     [self recordUseOfNonterminalVariableNamed:iTermVariableKeyGlobalScopeName
                                     inContext:iTermVariablesSuggestionContextTab
                              leadingToContext:iTermVariablesSuggestionContextApp];
+
     [self recordUseOfNonterminalVariableNamed:iTermVariableKeyTabCurrentSession
                                     inContext:iTermVariablesSuggestionContextTab
                              leadingToContext:iTermVariablesSuggestionContextSession];
-    // TODO: Add a weak link from tab to window.
 
     // Window context
     [self recordUseOfVariableNamed:iTermVariableKeyWindowTitleOverrideFormat inContext:iTermVariablesSuggestionContextWindow];
+    [self recordUseOfVariableNamed:iTermVariableKeyWindowID inContext:iTermVariablesSuggestionContextWindow];
     [self recordUseOfNonterminalVariableNamed:iTermVariableKeyWindowCurrentTab
                                     inContext:iTermVariablesSuggestionContextWindow
                              leadingToContext:iTermVariablesSuggestionContextTab];

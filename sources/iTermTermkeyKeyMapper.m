@@ -73,23 +73,15 @@
     }
 }
 
-// masks off shift
 // CSI code ~
-// CSI modifiers ; code ~
+// CSI code ; modifier ~
 - (NSString *)sequenceForNonUnicodeKeypress:(NSString *)code
                              eventModifiers:(NSEventModifierFlags)eventModifiers {
-    return [self optionallyShiftedSequenceForNonUnicodeKeypress:code
-                                                 eventModifiers:(eventModifiers & ~NSEventModifierFlagShift)];
-}
-
-// allows shift to remain if present
-- (NSString *)optionallyShiftedSequenceForNonUnicodeKeypress:(NSString *)code
-                                              eventModifiers:(NSEventModifierFlags)eventModifiers {
     const int csiModifiers = [self csiModifiersForEventModifiers:eventModifiers];
     if (csiModifiers == 1) {
         return [NSString stringWithFormat:@"%c[%@~", 27, code];
     } else {
-        return [NSString stringWithFormat:@"%c[%d;%@~", 27, csiModifiers, code];
+        return [NSString stringWithFormat:@"%c[%@;%d~", 27, code, csiModifiers];
     }
 }
 

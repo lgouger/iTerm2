@@ -56,6 +56,7 @@
 #import "iTermMenuBarObserver.h"
 #import "iTermMigrationHelper.h"
 #import "iTermModifierRemapper.h"
+#import "iTermObject.h"
 #import "iTermOnboardingWindowController.h"
 #import "iTermPreferences.h"
 #import "iTermPythonRuntimeDownloader.h"
@@ -65,6 +66,7 @@
 #import "iTermOpenQuicklyWindowController.h"
 #import "iTermOrphanServerAdopter.h"
 #import "iTermPasswordManagerWindowController.h"
+#import "iTermPasteHelper.h"
 #import "iTermPreciseTimer.h"
 #import "iTermPreferences.h"
 #import "iTermPromptOnCloseReason.h"
@@ -145,7 +147,7 @@ static BOOL gStartupActivitiesPerformed = NO;
 static NSString *LEGACY_DEFAULT_ARRANGEMENT_NAME = @"Default";
 static BOOL hasBecomeActive = NO;
 
-@interface iTermApplicationDelegate () <iTermPasswordManagerDelegate>
+@interface iTermApplicationDelegate () <iTermPasswordManagerDelegate, iTermObject>
 
 @property(nonatomic, readwrite) BOOL workspaceSessionActive;
 
@@ -631,7 +633,9 @@ static BOOL hasBecomeActive = NO;
 
         PseudoTerminal *term = [self terminalToOpenFileIn];
         DLog(@"application:openFile: launching new session in window %@", term);
-        PTYSession *session = [controller launchBookmark:bookmark inTerminal:term];
+        PTYSession *session = [controller launchBookmark:bookmark
+                                              inTerminal:term
+                                      respectTabbingMode:NO];
         term = (id)session.delegate.realParentWindow;
 
         if (term) {
@@ -1399,6 +1403,7 @@ static BOOL hasBecomeActive = NO;
                                             hotkeyWindowType:iTermHotkeyWindowTypeNone
                                                      makeKey:NO
                                                  canActivate:NO
+                                          respectTabbingMode:YES
                                                      command:nil
                                                        block:nil
                                                  synchronous:NO
@@ -1811,7 +1816,7 @@ static BOOL hasBecomeActive = NO;
 {
     [self changePasteSpeedBy:1.5
                     bytesKey:@"QuickPasteBytesPerCall"
-                defaultBytes:1024
+                defaultBytes:iTermQuickPasteBytesPerCallDefaultValue
                     delayKey:@"QuickPasteDelayBetweenCalls"
                 defaultDelay:.01];
 }
@@ -1820,7 +1825,7 @@ static BOOL hasBecomeActive = NO;
 {
     [self changePasteSpeedBy:0.66
                     bytesKey:@"QuickPasteBytesPerCall"
-                defaultBytes:1024
+                defaultBytes:iTermQuickPasteBytesPerCallDefaultValue
                     delayKey:@"QuickPasteDelayBetweenCalls"
                 defaultDelay:.01];
 }
@@ -2357,6 +2362,16 @@ static BOOL hasBecomeActive = NO;
 
 - (void)windowDidChangeKeyStatus:(NSNotification *)notification {
     DLog(@"%@:\n%@", notification.name, [NSThread callStackSymbols]);
+}
+
+#pragma mark - iTermObject
+
+- (iTermBuiltInFunctions *)objectMethodRegistry {
+    return nil;
+}
+
+- (iTermVariableScope *)objectScope {
+    return [iTermVariableScope globalsScope];
 }
 
 @end
