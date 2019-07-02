@@ -2855,6 +2855,14 @@ ITERM_WEAKLY_REFERENCEABLE
     }
 
     [self fitTabsToWindow];
+
+    // Sessions were created at the wrong size, which means they might not have been able to position
+    // their cursors where they needed to be. Move the cursors to their rightful places. See the
+    // comment where preferredCursorPosition is set for more details.
+    for (PTYSession *session in self.allSessions) {
+        DLog(@"restore preferred cursor position for %@", session);
+        [session.screen.currentGrid restorePreferredCursorPositionIfPossible];
+    }
     [_contentView updateToolbeltForWindow:self.window];
     return YES;
 }
@@ -8398,14 +8406,22 @@ static CGFloat iTermDimmingAmount(PSMTabBarControl *tabView) {
             windowTypeCompatibleWithTopBorder);
 }
 
-- (BOOL)haveRightBorder {
+- (BOOL)haveRightBorderRegardlessOfScrollBar {
     if (!self.shouldShowBorder) {
         return NO;
     } else if ([self anyFullScreen] ||
                self.windowType == WINDOW_TYPE_RIGHT ) {
         return NO;
-    } else if (![[[[self currentSession] view] scrollview] isLegacyScroller] ||
-               ![self scrollbarShouldBeVisible]) {
+    }
+    return YES;
+}
+
+- (BOOL)haveRightBorder {
+    if (![self haveRightBorderRegardlessOfScrollBar]) {
+        return NO;
+    }
+    if (![[[[self currentSession] view] scrollview] isLegacyScroller] ||
+        ![self scrollbarShouldBeVisible]) {
         // hidden scrollbar
         return YES;
     } else {
@@ -8448,7 +8464,7 @@ static CGFloat iTermDimmingAmount(PSMTabBarControl *tabView) {
     if ([self haveBottomBorder]) {
         ++decorationSize.height;
     }
-    if ([self haveTopBorder]) {
+    if ([self haveTopBorder] && ![self rootTerminalViewShouldDrawWindowTitleInPlaceOfTabBar]) {
         ++decorationSize.height;
     }
     if (self.divisionViewShouldBeVisible) {

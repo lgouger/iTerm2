@@ -291,7 +291,7 @@ typedef struct {
                               self.frame.size.height - height + insets.bottom + 1,
                               iTermStandardButtonsViewWidth,
                               iTermStandardButtonsViewHeight);
-    return frame;
+    return [self retinaRoundRect:frame];
 }
 
 - (NSRect)frameForWindowNumberLabel {
@@ -307,10 +307,11 @@ typedef struct {
     const CGFloat myHeight = self.frame.size.height;
     iTermPreferencesTabStyle preferredStyle = [iTermPreferences intForKey:kPreferenceKeyTabStyle];
     const CGFloat shift = (preferredStyle == TAB_STYLE_MINIMAL) ? 0 : 1;
-    return NSMakeRect(NSMaxX(standardButtonsFrame) + iTermRootTerminalViewWindowNumberLabelMargin,
-                      myHeight - tabBarHeight + (tabBarHeight - capHeight) / 2.0 - baselineOffset - shift,
-                      iTermRootTerminalViewWindowNumberLabelWidth,
-                      windowNumberHeight);
+    NSRect rect = NSMakeRect(NSMaxX(standardButtonsFrame) + iTermRootTerminalViewWindowNumberLabelMargin,
+                             myHeight - tabBarHeight + (tabBarHeight - capHeight) / 2.0 - baselineOffset - shift,
+                             iTermRootTerminalViewWindowNumberLabelWidth,
+                             windowNumberHeight);
+    return [self retinaRoundRect:rect];
 }
 
 - (NSRect)frameForWindowTitleLabel {
@@ -323,10 +324,11 @@ typedef struct {
     const CGFloat myHeight = self.frame.size.height;
     const NSEdgeInsets insets = [self.delegate tabBarInsets];
     const CGFloat sideInset = MAX(MAX(insets.left, insets.right), iTermRootTerminalViewWindowNumberLabelMargin);
-    return NSMakeRect([self retinaRound:sideInset],
-                      [self retinaRound:myHeight - tabBarHeight + (tabBarHeight - capHeight) / 2.0 - baselineOffset],
-                      ceil(MAX(0, self.frame.size.width - sideInset * 2)),
-                      ceil(_windowTitleLabel.frame.size.height));
+    NSRect rect = NSMakeRect([self retinaRound:sideInset],
+                             [self retinaRound:myHeight - tabBarHeight + (tabBarHeight - capHeight) / 2.0 - baselineOffset],
+                             ceil(MAX(0, self.frame.size.width - sideInset * 2)),
+                             ceil(_windowTitleLabel.frame.size.height));
+    return [self retinaRoundRect:rect];
 }
 
 - (NSWindowButton *)windowButtonTypes {
@@ -432,7 +434,7 @@ typedef struct {
 
         const BOOL haveLeft = self.delegate.haveLeftBorder;
         const BOOL haveTop = self.delegate.haveTopBorder;
-        const BOOL haveRight = self.delegate.haveRightBorder;
+        const BOOL haveRight = self.delegate.haveRightBorderRegardlessOfScrollBar;
         const BOOL haveBottom = self.delegate.haveBottomBorder;
 
         if (haveLeft) {
@@ -868,7 +870,7 @@ typedef struct {
             decorationHeights.top += _tabBarControl.height;
         }
     }
-    if (_delegate.haveTopBorder) {
+    if (_delegate.haveTopBorder && ![self.delegate rootTerminalViewShouldDrawWindowTitleInPlaceOfTabBar]) {
         decorationHeights.top += 1;
     }
     if (_delegate.divisionViewShouldBeVisible) {
