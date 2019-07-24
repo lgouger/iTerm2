@@ -923,8 +923,65 @@ static NSRect iTermRectCenteredVerticallyWithinRect(NSRect frameToCenter, NSRect
         [weakSelf setWindowTitle];
         return newValue;
     };
+    [self updateVariables];
     _windowNeedsInitialSize = YES;
     DLog(@"Done initializing PseudoTerminal %@", self);
+}
+
+- (void)updateVariables {
+    const NSRect rect = self.window.frame;
+    [_scope setValue:@[ @(rect.origin.x),
+                        @(rect.origin.y),
+                        @(rect.size.width),
+                        @(rect.size.height) ]
+    forVariableNamed:iTermVariableKeyWindowFrame];
+
+    NSString *style = @"unknown";
+    switch (_windowType) {
+        case WINDOW_TYPE_NORMAL:
+            style = @"normal";
+            break;
+        case WINDOW_TYPE_TRADITIONAL_FULL_SCREEN:
+            style = @"non-native full screen";
+            break;
+        case WINDOW_TYPE_LION_FULL_SCREEN:
+            style = @"native full screen";
+            break;
+        case WINDOW_TYPE_TOP:
+            style = @"full-width top";
+            break;
+        case WINDOW_TYPE_BOTTOM:
+            style = @"full-width bottom";
+            break;
+        case WINDOW_TYPE_LEFT:
+            style = @"full-height left";
+            break;
+        case WINDOW_TYPE_RIGHT:
+            style = @"full-height right";
+            break;
+        case WINDOW_TYPE_BOTTOM_PARTIAL:
+            style = @"bottom";
+            break;
+        case WINDOW_TYPE_TOP_PARTIAL:
+            style = @"top";
+            break;
+        case WINDOW_TYPE_LEFT_PARTIAL:
+            style = @"left";
+            break;
+        case WINDOW_TYPE_RIGHT_PARTIAL:
+            style = @"right";
+            break;
+        case WINDOW_TYPE_NO_TITLE_BAR:
+            style = @"no-title-bar";
+            break;
+        case WINDOW_TYPE_COMPACT:
+            style = @"compact";
+            break;
+        case WINDOW_TYPE_ACCESSORY:
+            style = @"accessory";
+            break;
+    }
+    [_scope setValue:style forVariableNamed:iTermVariableKeyWindowStyle];
 }
 
 - (void)setTerminalGuid:(NSString *)terminalGuid {
@@ -1711,6 +1768,10 @@ ITERM_WEAKLY_REFERENCEABLE
         return okToClose;
     }
     return YES;
+}
+
+- (IBAction)closeTerminalWindow:(id)sender {
+    [self close];
 }
 
 - (void)performClose:(id)sender {
@@ -4080,6 +4141,7 @@ ITERM_WEAKLY_REFERENCEABLE
         }
     }
     _windowIsMoving = NO;
+    [self updateVariables];
 }
 
 - (void)windowDidResize:(NSNotification *)aNotification {
@@ -4126,6 +4188,7 @@ ITERM_WEAKLY_REFERENCEABLE
     // If the toolbelt changed size by autoresizing, keep things in sync.
     _contentView.toolbeltWidth = _contentView.toolbelt.frame.size.width;
     [_contentView updateToolbeltProportionsIfNeeded];
+    [self updateVariables];
 }
 
 - (void)clearTransientTitle {
@@ -4385,6 +4448,14 @@ ITERM_WEAKLY_REFERENCEABLE
                windowTypeForStyleMask:(iTermWindowType)windowTypeForStyleMask
                      hotkeyWindowType:(iTermHotkeyWindowType)hotkeyWindowType
                          initialFrame:(NSRect)initialFrame {
+    // For reasons that defy comprehension, you have to do this when switching to full-size content
+    // view style mask. Otherwise, you are left with an unusable title bar.
+    if (self.window.styleMask & NSWindowStyleMaskTitled) {
+        while (self.window.titlebarAccessoryViewControllers.count > 0) {
+            [self.window removeTitlebarAccessoryViewControllerAtIndex:0];
+        }
+    }
+
     const BOOL panel = (hotkeyWindowType == iTermHotkeyWindowTypeFloatingPanel) || (windowType == WINDOW_TYPE_ACCESSORY);
     const BOOL compact = [PseudoTerminal windowType:windowType shouldBeCompactWithSavedWindowType:savedWindowType];
     Class windowClass;
@@ -4429,6 +4500,7 @@ ITERM_WEAKLY_REFERENCEABLE
             [myWindow _setContentHasShadow:NO];
         }
     }
+    [self updateVariables];
     return myWindow;
 }
 
@@ -8787,12 +8859,14 @@ static CGFloat iTermDimmingAmount(PSMTabBarControl *tabView) {
         [_contentView.tabView insertTabViewItem:aTabViewItem atIndex:anIndex];
         [aTabViewItem release];
         [_contentView.tabView selectTabViewItemAtIndex:anIndex];
-        if (self.windowInitialized && !_fullScreen && !_restoringWindow) {
+        if (self.windowInitialized && !_restoringWindow) {
             if (self.tabs.count == 1) {
                 // It's important to do this before makeKeyAndOrderFront because API clients need
                 // to know the window exists before learning that it has focus.
                 [[NSNotificationCenter defaultCenter] postNotificationName:iTermDidCreateTerminalWindowNotification object:self];
             }
+        }
+        if (self.windowInitialized && !_fullScreen && !_restoringWindow) {
             [[self window] makeKeyAndOrderFront:self];
         } else {
             PtyLog(@"window not initialized, is fullscreen, or is being restored. Stack:\n%@", [NSThread callStackSymbols]);
@@ -9077,6 +9151,8 @@ static CGFloat iTermDimmingAmount(PSMTabBarControl *tabView) {
         return !self.currentSession.screen.dvr.empty;
     } else if (item.action == @selector(toggleSizeChangesAffectProfile:)) {
         item.state = [iTermPreferences boolForKey:kPreferenceKeySizeChangesAffectProfile] ? NSOnState : NSOffState;
+        return YES;
+    } else if (item.action == @selector(performClose:)) {
         return YES;
     }
 
@@ -10074,5 +10150,21 @@ static CGFloat iTermDimmingAmount(PSMTabBarControl *tabView) {
 - (iTermVariableScope *)objectScope {
     return self.scope;
 }
+
+#pragma mark - iTermSubscribable
+
+- (NSString *)subscribableIdentifier {
+    return self.terminalGuid;
+}
+
+// Only variable-changed notifications are relevant for windows. Everything else is just for sessions.
+// Variable-changed notifs are handled before this is called.
+- (ITMNotificationResponse *)handleAPINotificationRequest:(ITMNotificationRequest *)request
+                                            connectionKey:(NSString *)connectionKey {
+    ITMNotificationResponse *response = [[[ITMNotificationResponse alloc] init] autorelease];
+    response.status = ITMNotificationResponse_Status_RequestMalformed;
+    return response;
+}
+
 
 @end
