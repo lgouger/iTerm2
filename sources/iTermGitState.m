@@ -11,6 +11,7 @@
 #import "iTermVariableReference.h"
 #import "iTermVariableScope.h"
 #import "NSArray+iTerm.h"
+#import "NSDate+iTerm.h"
 
 static NSString *const iTermGitStateVariableNameGitBranch = @"user.gitBranch";
 static NSString *const iTermGitStateVariableNameGitPushCount = @"user.gitPushCount";
@@ -28,7 +29,9 @@ static NSArray<NSString *> *iTermGitStatePaths(void) {
               iTermGitStateVariableNameGitDeletes ];
 }
 
-@implementation iTermGitState
+@implementation iTermGitState {
+    NSTimeInterval _creationTime;
+}
 
 - (instancetype)initWithScope:(iTermVariableScope *)scope {
     self = [self init];
@@ -39,12 +42,14 @@ static NSArray<NSString *> *iTermGitStatePaths(void) {
                 return nil;
             }
         }
+        _directory = [scope valueForVariableName:iTermVariableKeySessionID] ?: @"(null)";
         _branch = [scope valueForVariableName:iTermGitStateVariableNameGitBranch];
         _pushArrow = [scope valueForVariableName:iTermGitStateVariableNameGitPushCount];
         _pullArrow = [scope valueForVariableName:iTermGitStateVariableNameGitPullCount];
         _dirty = [[scope valueForVariableName:iTermGitStateVariableNameGitDirty] boolValue];
         _adds = [[scope valueForVariableName:iTermGitStateVariableNameGitAdds] integerValue];
         _deletes = [[scope valueForVariableName:iTermGitStateVariableNameGitDeletes] integerValue];
+        _creationTime = [NSDate it_timeSinceBoot];
     }
     return self;
 }
@@ -59,6 +64,16 @@ static NSArray<NSString *> *iTermGitStatePaths(void) {
     theCopy.adds = self.adds;
     theCopy.deletes = self.deletes;
     return theCopy;
+}
+
+- (NSString *)description {
+    return [NSString stringWithFormat:@"<%@: %p dir=%@ xcode=%@ push=%@ pull=%@ branch=%@ dirty=%@ adds=%@ deletes=%@>",
+            self.class, self,
+            _directory, _xcode, _pushArrow, _pullArrow, _branch, @(_dirty), @(_adds), @(_deletes)];
+}
+
+- (NSTimeInterval)age {
+    return [NSDate it_timeSinceBoot] - _creationTime;
 }
 
 @end

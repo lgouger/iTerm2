@@ -899,25 +899,21 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
 }
 
 - (NSColor *)flexibleViewColor {
-    if ([realParentWindow_ anyFullScreen]) {
-        return [NSColor blackColor];
+    NSColor *backgroundColor = [self.activeSession.colorMap colorForKey:kColorMapBackground];
+    CGFloat components[4];
+    [backgroundColor getComponents:components];
+    CGFloat mix;
+    if (backgroundColor.brightnessComponent < 0.5) {
+        mix = 1;
     } else {
-        NSColor *backgroundColor = [self.activeSession.colorMap colorForKey:kColorMapBackground];
-        CGFloat components[4];
-        [backgroundColor getComponents:components];
-        CGFloat mix;
-        if (backgroundColor.brightnessComponent < 0.5) {
-            mix = 1;
-        } else {
-            mix = 0;
-        }
-        const CGFloat a = 0.1;
-        for (int i = 0; i < 3; i++) {
-            components[i] = a * mix + (1 - a) * components[i];
-        }
-        const CGFloat alpha = self.realParentWindow.useTransparency ? (1.0 - self.activeSession.transparency) : 1.0;
-        return [NSColor colorWithCalibratedRed:components[0] green:components[1] blue:components[2] alpha:alpha];
+        mix = 0;
     }
+    const CGFloat a = 0.1;
+    for (int i = 0; i < 3; i++) {
+        components[i] = a * mix + (1 - a) * components[i];
+    }
+    const CGFloat alpha = self.realParentWindow.useTransparency ? (1.0 - self.activeSession.transparency) : 1.0;
+    return [NSColor colorWithCalibratedRed:components[0] green:components[1] blue:components[2] alpha:alpha];
 }
 
 - (void)updateFlexibleViewColors {
@@ -5584,6 +5580,10 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     [_tmuxTitleMonitor updateOnce];
 }
 
+- (void)sessionDidUpdatePaneTitle:(PTYSession *)session {
+    [_tmuxTitleMonitor updateOnce];
+}
+
 #pragma mark - iTermObject
 
 - (iTermBuiltInFunctions *)objectMethodRegistry {
@@ -5598,6 +5598,15 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
                                                    target:self
                                                    action:@selector(setTitleWithCompletion:title:)];
         [_methods registerFunction:method namespace:@"iterm2"];
+
+        method = [[iTermBuiltInMethod alloc] initWithName:@"select_pane_in_direction"
+                                            defaultValues:@{}
+                                                    types:@{ @"direction": [NSString class] }
+                                        optionalArguments:[NSSet set]
+                                                  context:iTermVariablesSuggestionContextSession
+                                                   target:self
+                                                   action:@selector(selectPaneInDirectionWithCompletion:direction:)];
+        [_methods registerFunction:method namespace:@"iterm2"];
     }
     return _methods;
 }
@@ -5606,6 +5615,33 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
                          title:(NSString *)title {
     [self setTitleOverride:title];
     completion(nil, nil);
+}
+
+- (void)selectPaneInDirectionWithCompletion:(void (^)(id, NSError *))completion
+                                  direction:(NSString *)direction {
+    PTYSession *activeSession = [self activeSession];
+    PTYSession *session;
+    if ([direction isEqualToString:@"left"]) {
+        session = [self sessionLeftOf:activeSession];
+    } else if ([direction isEqualToString:@"right"]) {
+        session = [self sessionRightOf:activeSession];
+    } else if ([direction isEqualToString:@"above"]) {
+        session = [self sessionAbove:activeSession];
+    } else if ([direction isEqualToString:@"below"]) {
+        session = [self sessionBelow:activeSession];
+    } else {
+        NSError *error = [NSError errorWithDomain:@"com.iterm2.select-pane-in-direction"
+                                             code:0
+                                         userInfo:@{ NSLocalizedDescriptionKey: @"Invalid direction. Should be left, right, above or below." }];
+        completion(nil, error);
+        return;
+    }
+    if (!session) {
+        completion(nil, nil);
+        return;
+    }
+    [self setActiveSession:session];
+    completion(session.guid, nil);
 }
 
 - (iTermVariableScope *)objectScope {

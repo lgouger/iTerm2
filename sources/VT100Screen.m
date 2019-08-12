@@ -2123,7 +2123,7 @@ basedAtAbsoluteLineNumber:(long long)absoluteLineNumber
     return coord;
 }
 
-- (void)setWorkingDirectory:(NSString *)workingDirectory onLine:(int)line isSuitableForOldPWD:(BOOL)isSuitableForOldPWD {
+- (void)setWorkingDirectory:(NSString *)workingDirectory onLine:(int)line pushed:(BOOL)pushed {
     DLog(@"setWorkingDirectory:%@ onLine:%d", workingDirectory, line);
     VT100WorkingDirectory *workingDirectoryObj = [[[VT100WorkingDirectory alloc] init] autorelease];
     if (!workingDirectory) {
@@ -2165,7 +2165,7 @@ basedAtAbsoluteLineNumber:(long long)absoluteLineNumber
     }
     [delegate_ screenLogWorkingDirectoryAtLine:line
                                  withDirectory:workingDirectory
-                           isSuitableForOldPWD:isSuitableForOldPWD];
+                                        pushed:pushed];
 }
 
 - (VT100RemoteHost *)setRemoteHost:(NSString *)host user:(NSString *)user onLine:(int)line {
@@ -3150,7 +3150,12 @@ basedAtAbsoluteLineNumber:(long long)absoluteLineNumber
         DLog(@"Don't have a remote host, so changing working directory");
         // TODO: There's a bug here where remote host can scroll off the end of history, causing the
         // working directory to come from PTYTask (which is what happens when nil is passed here).
-        [self setWorkingDirectory:nil onLine:[self lineNumberOfCursor] isSuitableForOldPWD:NO];
+        //
+        // NOTE: Even though this is kind of a pull, it happens at a good
+        // enough rate (not too common, not too rare when part of a prompt)
+        // that I'm comfortable calling it a push. I want it to do things like
+        // update the list of recently used directories.
+        [self setWorkingDirectory:nil onLine:[self lineNumberOfCursor] pushed:YES];
     } else {
         DLog(@"Already have a remote host so not updating working directory because of title change");
     }
@@ -3673,11 +3678,6 @@ basedAtAbsoluteLineNumber:(long long)absoluteLineNumber
     [self clearBuffer];
 }
 
-// NOTE: Call this only when you reasonably believe that the working directory will be kept
-// up-to-date (i.e., you expect future calls because this is a trigger or an escape sequence
-// from someone who ought to know what they're doing, like Shell Integration scripts).
-// It passes YES for isSuitableForOldPWD so this will override the "os magic" to get the pwd
-// forever.
 - (void)terminalCurrentDirectoryDidChangeTo:(NSString *)value {
     int cursorLine = [self numberOfLines] - [self height] + currentGrid_.cursorY;
     NSString *dir = value;
@@ -3687,8 +3687,7 @@ basedAtAbsoluteLineNumber:(long long)absoluteLineNumber
     if (dir.length) {
         [delegate_ screenSetPreferredProxyIcon:nil]; // Clear current proxy icon if exists.
         BOOL willChange = ![dir isEqualToString:[self workingDirectoryOnLine:cursorLine]];
-        // Pass YES for isSuitableForOldPWD to treat this as proof that shell integration is used.
-        [self setWorkingDirectory:dir onLine:cursorLine isSuitableForOldPWD:YES];
+        [self setWorkingDirectory:dir onLine:cursorLine pushed:YES];
         if (willChange) {
             [delegate_ screenCurrentDirectoryDidChangeTo:dir];
         }
@@ -4310,6 +4309,7 @@ basedAtAbsoluteLineNumber:(long long)absoluteLineNumber
     } else {
         DLog(@"No last command mark found.");
     }
+    [delegate_ screenCommandDidExitWithCode:returnCode];
 }
 
 - (void)terminalFinalTermCommand:(NSArray *)argv {
@@ -4362,6 +4362,9 @@ basedAtAbsoluteLineNumber:(long long)absoluteLineNumber
            @"zsh": @5,
            @"fish": @5 };
     NSInteger latestKnownVersion = [lastVersionByShell[shell ?: @""] integerValue];
+    if (shell) {
+        [delegate_ screenDidDetectShell:shell];
+    }
     if (!shell || versionNumber < latestKnownVersion) {
         [delegate_ screenSuggestShellIntegrationUpgrade];
     }
@@ -5517,8 +5520,10 @@ static void SwapInt(int *a, int *b) {
         currentGrid_.cursorY = linesRestored + 1;
         currentGrid_.cursorX = 0;
     }
+    BOOL addedBanner = NO;
     if (includeRestorationBanner && [iTermAdvancedSettingsModel showSessionRestoredBanner]) {
         [self appendSessionRestoredBanner];
+        addedBanner = YES;
     }
 
     // Reduce line buffer's max size to not include the grid height. This is its final state.
@@ -5570,7 +5575,11 @@ static void SwapInt(int *a, int *b) {
         _lastCommandOutputRange = [screenState[kScreenStateLastCommandOutputRangeKey] gridAbsCoordRange];
         _shellIntegrationInstalled = [screenState[kScreenStateShellIntegrationInstalledKey] boolValue];
 
+        VT100GridCoord savedCursor = primaryGrid_.cursor;
         [primaryGrid_ setStateFromDictionary:screenState[kScreenStatePrimaryGridStateKey]];
+        if (addedBanner && currentGrid_.preferredCursorPosition.x < 0 && currentGrid_.preferredCursorPosition.y < 0) {
+            primaryGrid_.cursor = savedCursor;
+        }
         [altGrid_ setStateFromDictionary:screenState[kScreenStateAlternateGridStateKey]];
     }
 }

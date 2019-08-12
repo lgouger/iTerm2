@@ -12,6 +12,7 @@
 #import "iTermPopupWindowController.h"
 #import "iTermSessionNameController.h"
 
+#import "GPBEnumArray+iTerm.h"
 #import "LineBuffer.h"
 #import "PTYTask.h"
 #import "PTYTextView.h"
@@ -239,6 +240,7 @@ typedef enum {
 - (void)sessionAddSwiftyStringsToGraph:(iTermSwiftyStringGraph *)graph;
 - (iTermVariableScope *)sessionTabScope;
 - (void)sessionDidReportSelectedTmuxPane:(PTYSession *)session;
+- (void)sessionDidUpdatePaneTitle:(PTYSession *)session;
 
 @end
 
@@ -503,6 +505,8 @@ typedef enum {
 @property(nonatomic, readonly) iTermEchoProbe *echoProbe;
 @property(nonatomic, readonly) BOOL canOpenPasswordManager;
 @property(nonatomic) BOOL shortLivedSingleUse;
+@property(nonatomic, retain) NSMutableDictionary<NSString *, NSString *> *hostnameToShell;  // example.com -> fish
+@property(nonatomic, readonly) NSString *sessionId;
 
 #pragma mark - methods
 

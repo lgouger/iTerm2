@@ -84,6 +84,7 @@ NSString *const iTermVariableKeyWindowCurrentTab = @"currentTab";
 NSString *const iTermVariableKeyWindowID = @"id";
 NSString *const iTermVariableKeyWindowFrame = @"frame";
 NSString *const iTermVariableKeyWindowStyle = @"style";
+NSString *const iTermVariableKeyWindowNumber = @"number";
 
 // NOTE: If you add here, also update +recordBuiltInVariables
 
@@ -392,7 +393,7 @@ NSString *const iTermVariableKeyWindowStyle = @"style";
 
     const BOOL changed = ![NSObject object:value isEqualToObject:[self valueByUnwrappingWeakVariables:_values[name]]];
     if (!changed) {
-        return nil;
+        return self;
     }
     iTermVariables *child = [iTermVariables castFrom:value];
     if (child && !weak) {
@@ -409,7 +410,7 @@ NSString *const iTermVariableKeyWindowStyle = @"style";
             DLog(@"Assigned %@ = %@ for %@", name, value, self);
             [self didChangeNonterminalValueWithPath:name];
         } else {
-            DLog(@"Set variable %@ = %@ (%@)", name, value, self);
+            DLog(@"Set variable %@ = %@ (%@)\n%@", name, value, self, [NSThread callStackSymbols]);
             const BOOL wasVariables = [[self valueByUnwrappingWeakVariables:_values[name]] isKindOfClass:[iTermVariables class]];
             _values[name] = [value copy];
             DLog(@"Assigned %@ = %@ for %@", name, value, self);

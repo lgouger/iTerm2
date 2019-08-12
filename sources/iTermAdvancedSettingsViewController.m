@@ -35,6 +35,9 @@ static char iTermAdvancedSettingsTableKey;
 
 - (void)setBackgroundStyle:(NSBackgroundStyle)backgroundStyle {
     if (@available(macOS 10.14, *)) {
+        if (self.editable) {
+            return;
+        }
         switch (backgroundStyle) {
             case NSBackgroundStyleNormal:
                 self.textColor = [NSColor labelColor];
@@ -85,11 +88,15 @@ static char iTermAdvancedSettingsTableKey;
 @end
 
 @interface iTermTableViewTextFieldWrapper : NSTableCellView
+@property (nonatomic) BOOL ignoreBackgroundStyle;
 @end
 
 @implementation iTermTableViewTextFieldWrapper
 
 - (void)setBackgroundStyle:(NSBackgroundStyle)backgroundStyle {
+    if (self.ignoreBackgroundStyle) {
+        return;
+    }
     iTermTableViewTextField *textField = self.subviews.firstObject;
     [textField setBackgroundStyle:backgroundStyle];
 }
@@ -323,6 +330,7 @@ static NSDictionary *gIntrospection;
 
 - (iTermTableViewTextFieldWrapper *)viewForMutableString:(NSString *)string row:(int)row {
     iTermTableViewTextFieldWrapper *wrapper = [_tableView makeViewWithIdentifier:@"mutablestring" owner:self] ?: [[iTermTableViewTextFieldWrapper alloc] initWithFrame:NSMakeRect(0, 0, 100, 100)];
+    wrapper.ignoreBackgroundStyle = YES;
     wrapper.frame = NSMakeRect(0, 0, 100, 100);
     iTermTableViewTextField *textField = wrapper.subviews.firstObject ?: [[iTermTableViewTextField alloc] init];
     [wrapper addSubview:textField];
@@ -332,8 +340,10 @@ static NSDictionary *gIntrospection;
     textField.editable = YES;
     textField.selectable = YES;
     textField.stringValue = string;
-    textField.bezeled = NO;
-    textField.drawsBackground = NO;
+    textField.bezeled = YES;
+    textField.drawsBackground = YES;
+    textField.backgroundColor = [NSColor textBackgroundColor];
+    textField.textColor = [NSColor labelColor];
     textField.usesSingleLineMode = YES;
     [textField sizeToFit];
     textField.frame = NSMakeRect(0, (wrapper.frame.size.height - textField.frame.size.height) / 2.0, wrapper.frame.size.width, textField.frame.size.height);

@@ -148,6 +148,13 @@ class Window:
         return session
 
     @property
+    def window_number(self) -> int:
+        """
+        :returns: The window's number. When less than 10, this is the number part of the shortcut to switch to the window.
+        """
+        return self.__number
+
+    @property
     def window_id(self) -> str:
         """
         :returns: the window's unique identifier.
@@ -409,7 +416,7 @@ class Window:
 
         See the Scripting Fundamentals documentation for more information on user-defined variables.
 
-        :param name: The variable's name.
+        :param name: The variable's name. Must begin with `user.`.
         :param value: The new value to assign.
 
         :throws: :class:`RPCException` if something goes wrong.

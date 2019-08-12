@@ -69,7 +69,7 @@ typedef struct {
 }
 
 - (void)awakeFromNib {
-    _badge.viewSize = self.bounds.size;
+    _badge.viewSize = self.superview.bounds.size;
 }
 
 - (void)setDelegate:(id<iTermBadgeConfigurationBadgeViewDelegate>)delegate {
@@ -291,17 +291,23 @@ typedef struct {
 
 - (void)updateImageViewFrame {
     NSRect myFrame = NSInsetRect(self.bounds, 6, 6);
+    myFrame.size.width = MAX(0, myFrame.size.width);
+    myFrame.size.height = MAX(0, myFrame.size.height);
     if (_loremIpsum.image.size.height == 0 || myFrame.size.height == 0) {
         _loremIpsum.frame = myFrame;
     }
     CGFloat imageAspectRatio = _loremIpsum.image.size.width / _loremIpsum.image.size.height;
+    if (imageAspectRatio != imageAspectRatio || _loremIpsum.image.size.height < 1) {
+        _loremIpsum.frame = NSZeroRect;
+        return;
+    }
     CGFloat myAspectRatio = myFrame.size.width / myFrame.size.height;
     if (imageAspectRatio > myAspectRatio) {
         // image is wider
         _loremIpsum.frame = NSMakeRect(myFrame.origin.x,
                                        myFrame.origin.y + myFrame.size.height - (myFrame.size.width / imageAspectRatio),
-                                       myFrame.size.width,
-                                       myFrame.size.width / imageAspectRatio);
+                                       MAX(0, myFrame.size.width),
+                                       MAX(0, myFrame.size.width / imageAspectRatio));
     } else {
         // image is taller
         _loremIpsum.frame = NSMakeRect(myFrame.size.width - (myFrame.size.height * imageAspectRatio),
@@ -318,8 +324,8 @@ typedef struct {
 
 - (void)layoutSubviews {
     _badge.dirty = YES;
-    _badge.viewSize = NSMakeSize(self.bounds.size.width * 2,
-                                 self.bounds.size.height * 2);
+    _badge.viewSize = NSMakeSize(self.superview.bounds.size.width,
+                                 self.superview.bounds.size.height);
     _loremIpsum.image = [_badge image];
     [self updateImageViewFrame];
 }
@@ -338,9 +344,8 @@ typedef struct {
 }
 
 - (NSSize)badgeLabelSizeFraction {
-    Profile *profile = [self.delegate badgeViewProfile];
-    const CGFloat width = [iTermProfilePreferences floatForKey:KEY_BADGE_MAX_WIDTH inProfile:profile];
-    const CGFloat height = [iTermProfilePreferences floatForKey:KEY_BADGE_MAX_HEIGHT inProfile:profile];
+    const CGFloat width = MIN(0.95, self.bounds.size.width / self.superview.bounds.size.width);
+    const CGFloat height = MIN(0.95, self.bounds.size.height / self.superview.bounds.size.height);
     return NSMakeSize(width, height);
 }
 

@@ -43,6 +43,7 @@
 #import "iTermScriptConsole.h"
 #import "iTermScriptHistory.h"
 #import "iTermStandardKeyMapper.h"
+#import "iTermStatusBarUnreadCountController.h"
 #import "iTermSoundPlayer.h"
 #import "iTermRawKeyMapper.h"
 #import "iTermTermkeyKeyMapper.h"
@@ -226,6 +227,7 @@ static NSString *const SESSION_ARRANGEMENT_IS_UTF_8 = @"Is UTF-8";  // TTY is in
 static NSString *const SESSION_ARRANGEMENT_HOTKEY = @"Session Hotkey";  // NSDictionary iTermShortcut dictionaryValue
 static NSString *const SESSION_ARRANGEMENT_FONT_OVERRIDES = @"Font Overrides";  // Not saved; just used internally when creating a new tmux session.
 static NSString *const SESSION_ARRANGEMENT_SHORT_LIVED_SINGLE_USE = @"Short Lived Single Use";  // BOOL
+static NSString *const SESSION_ARRANGEMENT_HOSTNAME_TO_SHELL = @"Hostname to Shell";  // NSString -> NSString (example: example.com -> fish)
 
 // Keys for dictionary in SESSION_ARRANGEMENT_PROGRAM
 static NSString *const kProgramType = @"Type";  // Value will be one of the kProgramTypeXxx constants.
@@ -528,6 +530,7 @@ static const NSUInteger kMaxHosts = 100;
 
     // When this is true, changing the font size does not cause the window size to change.
     BOOL _windowAdjustmentDisabled;
+    NSSize _badgeLabelSizeFraction;
 }
 
 + (NSMapTable<NSString *, PTYSession *> *)sessionMap {
@@ -653,6 +656,7 @@ static const NSUInteger kMaxHosts = 100;
         _commands = [[NSMutableArray alloc] init];
         _directories = [[NSMutableArray alloc] init];
         _hosts = [[NSMutableArray alloc] init];
+        _hostnameToShell = [[NSMutableDictionary alloc] init];
         _automaticProfileSwitcher = [[iTermAutomaticProfileSwitcher alloc] initWithDelegate:self];
         _throughputEstimator = [[iTermThroughputEstimator alloc] initWithHistoryOfDuration:5.0 / 30.0 secondsPerBucket:1 / 30.0];
         _cadenceController = [[iTermUpdateCadenceController alloc] initWithThroughputEstimator:_throughputEstimator];
@@ -746,9 +750,6 @@ static const NSUInteger kMaxHosts = 100;
                                                 [weakSelf useStringForFind:notification.string];
                                             }];
 
-        [self.variablesScope setValue:[self.sessionId stringByReplacingOccurrencesOfString:@":" withString:@"."]
-                     forVariableNamed:iTermVariableKeySessionTermID];
-
         if (!synthetic) {
             [[NSNotificationCenter defaultCenter] postNotificationName:PTYSessionCreatedNotification object:self];
         }
@@ -820,6 +821,7 @@ ITERM_WEAKLY_REFERENCEABLE
     [_keyLabelsStack release];
     [_missingSavedArrangementProfileGUID release];
     [_currentHost release];
+    [_hostnameToShell release];
 
     [_keystrokeSubscriptions release];
     [_keyboardFilterSubscriptions release];
@@ -1349,6 +1351,7 @@ ITERM_WEAKLY_REFERENCEABLE
     }
 
     aSession.shortLivedSingleUse = [arrangement[SESSION_ARRANGEMENT_SHORT_LIVED_SINGLE_USE] boolValue];
+    aSession.hostnameToShell = [arrangement[SESSION_ARRANGEMENT_HOSTNAME_TO_SHELL] mutableCopy];
 
     if (arrangement[SESSION_ARRANGEMENT_SUBSTITUTIONS]) {
         aSession.substitutions = arrangement[SESSION_ARRANGEMENT_SUBSTITUTIONS];
@@ -1820,7 +1823,8 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (void)didMoveSession {
-    [self.variablesScope setValue:self.sessionId forVariableNamed:iTermVariableKeySessionTermID];
+    // TODO: Is it really desirable to update this? It'll get out of sync with the environment variable & autolog filename.
+    [self setTermIDIfPossible];
 }
 
 - (void)triggerDidChangeNameTo:(NSString *)newName {
@@ -3689,6 +3693,9 @@ ITERM_WEAKLY_REFERENCEABLE
     _badgeFontName = [[iTermProfilePreferences stringForKey:KEY_BADGE_FONT inProfile:aDict] copy];
 
     self.badgeFormat = [iTermProfilePreferences stringForKey:KEY_BADGE_FORMAT inProfile:aDict];
+    _badgeLabelSizeFraction = NSMakeSize([iTermProfilePreferences floatForKey:KEY_BADGE_MAX_WIDTH inProfile:aDict],
+                                         [iTermProfilePreferences floatForKey:KEY_BADGE_MAX_HEIGHT inProfile:aDict]);
+
     // forces the badge to update
     _textview.badgeLabel = @"";
     [self updateBadgeLabel];
@@ -3849,6 +3856,7 @@ ITERM_WEAKLY_REFERENCEABLE
                                windowPane:self.tmuxPane
                                   session:self];
     }
+    BOOL needsTermID = (_delegate == nil);
     _delegate = delegate;
     if ([self isTmuxClient]) {
         [_tmuxController registerSession:self
@@ -3861,6 +3869,9 @@ ITERM_WEAKLY_REFERENCEABLE
     [self.variablesScope setValue:[delegate sessionTabVariables]
                  forVariableNamed:iTermVariableKeySessionTab
                              weak:YES];
+    if (needsTermID) {
+        [self setTermIDIfPossible];
+    }
 }
 
 - (NSString *)name {
@@ -4258,6 +4269,9 @@ ITERM_WEAKLY_REFERENCEABLE
     result[SESSION_ARRANGEMENT_ENVIRONMENT] = self.environment ?: @{};
     result[SESSION_ARRANGEMENT_IS_UTF_8] = @(self.isUTF8);
     result[SESSION_ARRANGEMENT_SHORT_LIVED_SINGLE_USE] = @(self.shortLivedSingleUse);
+    if (self.hostnameToShell) {
+        result[SESSION_ARRANGEMENT_HOSTNAME_TO_SHELL] = [[self.hostnameToShell copy] autorelease];
+    }
 
     NSDictionary *shortcutDictionary = [[[iTermSessionHotkeyController sharedInstance] shortcutForSession:self] dictionaryValue];
     if (shortcutDictionary) {
@@ -5674,10 +5688,22 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
                 name = @"client";
                 [self installTmuxStatusBarMonitor];
                 [self installTmuxTitleMonitor];
+                [self replaceWorkingDirectoryPollerWithTmuxWorkingDirectoryPoller];
                 break;
         }
         [self.variablesScope setValue:name forVariableNamed:iTermVariableKeySessionTmuxRole];
     });
+}
+
+- (void)replaceWorkingDirectoryPollerWithTmuxWorkingDirectoryPoller {
+    _pwdPoller.delegate = nil;
+    [_pwdPoller release];
+
+    _pwdPoller = [[iTermWorkingDirectoryPoller alloc] initWithTmuxGateway:_tmuxController.gateway
+                                                                    scope:self.variablesScope
+                                                               windowPane:self.tmuxPane];
+    _pwdPoller.delegate = self;
+    [_pwdPoller poll];
 }
 
 - (void)installTmuxStatusBarMonitor {
@@ -5685,7 +5711,7 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
     _tmuxStatusBarMonitor = [[iTermTmuxStatusBarMonitor alloc] initWithGateway:_tmuxController.gateway
                                                                          scope:self.variablesScope];
     _tmuxStatusBarMonitor.active = [iTermProfilePreferences boolForKey:KEY_SHOW_STATUS_BAR inProfile:self.profile];
-    if ([iTermAdvancedSettingsModel useTmuxStatusBar] ||
+    if ([iTermPreferences boolForKey:kPreferenceKeyUseTmuxStatusBar] ||
         [iTermStatusBarLayout shouldOverrideLayout:self.profile[KEY_STATUS_BAR_LAYOUT]]) {
         [self setSessionSpecificProfileValues:@{ KEY_STATUS_BAR_LAYOUT: [[iTermStatusBarLayout tmuxLayoutWithController:_tmuxController
                                                                                                                   scope:nil
@@ -5708,6 +5734,7 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
                                                                  block:^(NSString * _Nonnull title) {
                                                                      if (title) {
                                                                          [weakSelf setSessionSpecificProfileValues:@{ KEY_TMUX_PANE_TITLE: title ?: @""}];
+                                                                         [weakSelf.delegate sessionDidUpdatePaneTitle:self];
                                                                      }
                                                                  }];
     [_tmuxTitleMonitor updateOnce];
@@ -8846,11 +8873,15 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
                                                   y);
     mark.commandRange = VT100GridAbsCoordRangeMake(x, y, x, y);
     [_promptSubscriptions enumerateKeysAndObjectsUsingBlock:^(id  _Nonnull key, ITMNotificationRequest * _Nonnull obj, BOOL * _Nonnull stop) {
-        ITMNotification *notification = [[[ITMNotification alloc] init] autorelease];
-        notification.promptNotification = [[[ITMPromptNotification alloc] init] autorelease];
-        notification.promptNotification.session = self.guid;
-        [[iTermAPIHelper sharedInstance] postAPINotification:notification
-                                             toConnectionKey:key];
+        if (obj.argumentsOneOfCase == ITMNotificationRequest_Arguments_OneOfCase_GPBUnsetOneOfCase ||
+            [obj.promptMonitorRequest.modesArray it_contains:ITMPromptMonitorMode_Prompt]) {
+            ITMNotification *notification = [[[ITMNotification alloc] init] autorelease];
+            notification.promptNotification = [[[ITMPromptNotification alloc] init] autorelease];
+            notification.promptNotification.session = self.guid;
+            notification.promptNotification.prompt.placeholder = @"";
+            [[iTermAPIHelper sharedInstance] postAPINotification:notification
+                                                 toConnectionKey:key];
+        }
     }];
 }
 
@@ -9009,6 +9040,7 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
     panel.canChooseFiles = YES;
     panel.allowsMultipleSelection = YES;
 
+    [NSApp activateIgnoringOtherApps:YES];
     [panel beginSheetModalForWindow:_textview.window completionHandler:^(NSInteger result) {
         if (result == NSFileHandlingPanelOKButton) {
             [self writeTaskNoBroadcast:@"ok\n" encoding:NSISOLatin1StringEncoding forceEncoding:YES];
@@ -9305,7 +9337,7 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
 
 - (void)screenCurrentHostDidChange:(VT100RemoteHost *)host {
     DLog(@"Current host did change to %@ %@", host, self);
-    const BOOL hadHost = (_currentHost != nil);
+    NSString *previousHostName = _currentHost.hostname;
 
     NSNull *null = [NSNull null];
     NSDictionary *variablesUpdate = @{ iTermVariableKeySessionHostname: host.hostname ?: null,
@@ -9324,13 +9356,22 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
                                       path:path
                                        job:self.variablesScope.jobName];
 
-    if (hadHost) {
-        [self maybeResetTerminalStateOnHostChange];
+    // Ignore changes to username; only update on hostname changes. See issue 8030.
+    if (previousHostName && ![previousHostName isEqualToString:host.hostname]) {
+        [self maybeResetTerminalStateOnHostChange:host];
     }
     self.currentHost = host;
 }
 
-- (void)maybeResetTerminalStateOnHostChange {
+- (BOOL)shellIsFishForHost:(VT100RemoteHost *)host {
+    NSString *name = host.usernameAndHostname;
+    if (!name) {
+        return NO;
+    }
+    return [self.hostnameToShell[name] isEqualToString:@"fish"];
+}
+
+- (void)maybeResetTerminalStateOnHostChange:(VT100RemoteHost *)newRemoteHost {
     if (_xtermMouseReporting && self.terminal.mouseMode != MOUSE_REPORTING_NONE) {
         NSNumber *number = [[NSUserDefaults standardUserDefaults] objectForKey:kTurnOffMouseReportingOnHostChangeUserDefaultsKey];
         if ([number boolValue]) {
@@ -9347,15 +9388,7 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
             [self offerToTurnOffFocusReportingOnHostChange];
         }
     }
-    if (self.terminal.reportFocus) {
-        NSNumber *number = [[NSUserDefaults standardUserDefaults] objectForKey:kTurnOffFocusReportingOnHostChangeUserDefaultsKey];
-        if ([number boolValue]) {
-            self.terminal.reportFocus = NO;
-        } else if (!number) {
-            [self offerToTurnOffFocusReportingOnHostChange];
-        }
-    }
-    if (self.terminal.bracketedPasteMode) {
+    if (self.terminal.bracketedPasteMode && ![self shellIsFishForHost:newRemoteHost]) {
         NSNumber *number = [[NSUserDefaults standardUserDefaults] objectForKey:kTurnOffBracketedPasteOnHostChangeUserDefaultsKey];
         if ([number boolValue]) {
             self.terminal.bracketedPasteMode = NO;
@@ -9665,6 +9698,29 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
     _commandRange = VT100GridCoordRangeMake(-1, -1, -1, -1);
     DLog(@"Hide ACH because command ended");
     [[_delegate realParentWindow] hideAutoCommandHistoryForSession:self];
+    [_promptSubscriptions enumerateKeysAndObjectsUsingBlock:^(id  _Nonnull key, ITMNotificationRequest * _Nonnull obj, BOOL * _Nonnull stop) {
+        if ([obj.promptMonitorRequest.modesArray it_contains:ITMPromptMonitorMode_CommandStart]) {
+            ITMNotification *notification = [[[ITMNotification alloc] init] autorelease];
+            notification.promptNotification = [[[ITMPromptNotification alloc] init] autorelease];
+            notification.promptNotification.session = self.guid;
+            notification.promptNotification.commandStart.command = command;
+            [[iTermAPIHelper sharedInstance] postAPINotification:notification
+                                                 toConnectionKey:key];
+        }
+    }];
+}
+
+- (void)screenCommandDidExitWithCode:(int)code {
+    [_promptSubscriptions enumerateKeysAndObjectsUsingBlock:^(id  _Nonnull key, ITMNotificationRequest * _Nonnull obj, BOOL * _Nonnull stop) {
+        if ([obj.promptMonitorRequest.modesArray it_contains:ITMPromptMonitorMode_CommandEnd]) {
+            ITMNotification *notification = [[[ITMNotification alloc] init] autorelease];
+            notification.promptNotification = [[[ITMPromptNotification alloc] init] autorelease];
+            notification.promptNotification.session = self.guid;
+            notification.promptNotification.commandEnd.status = code;
+            [[iTermAPIHelper sharedInstance] postAPINotification:notification
+                                                 toConnectionKey:key];
+        }
+    }];
 }
 
 - (BOOL)screenShouldPlacePromptAtFirstColumn {
@@ -9862,17 +9918,20 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
     }
 }
 
-// isRemote is a misnomer. It's really "is unsuitable for old PWD", since it would be YES for
-// when shell integration had never been used and the lastDirectory is not updated reliably.
-- (void)setLastDirectory:(NSString *)lastDirectory isUnsuitableForOldPWD:(BOOL)isUnsuitableForOldPWD {
-    DLog(@"Set last directory to %@", lastDirectory);
-    if (lastDirectory) {
+- (void)setLastDirectory:(NSString *)lastDirectory remote:(BOOL)directoryIsRemote pushed:(BOOL)pushed {
+    DLog(@"setLastDirectory:%@ remote:%@ pushed:%@\n%@", lastDirectory, @(directoryIsRemote), @(pushed), [NSThread callStackSymbols]);
+    if (pushed && lastDirectory) {
         [_directories addObject:lastDirectory];
         [self trimDirectoriesIfNeeded];
     }
     [_lastDirectory autorelease];
     _lastDirectory = [lastDirectory copy];
-    _lastDirectoryIsUnsuitableForOldPWD = isUnsuitableForOldPWD;
+    _lastDirectoryIsUnsuitableForOldPWD = directoryIsRemote;
+    if (lastDirectory) {
+        DLog(@"Set path to %@", lastDirectory);
+        self.variablesScope.path = lastDirectory;
+    }
+    // Update the proxy icon
     [_delegate sessionCurrentDirectoryDidChange:self];
 }
 
@@ -9902,33 +9961,46 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
     _lastRemoteHost = [lastRemoteHost retain];
 }
 
-// isSuitableForOldPWD means that if we don't know what the hostname is then this should be used
-// in place of asking the OS what the PWD is from now on. It's useful for users who set up a trigger
-// to report the PWD but don't report the hostname, or for users who use the CurrentDir control
-// sequence but not RemoteHost. Issue 5878, May 2019 comments.
+// We trust push more than pull because pulls don't include hostname and are done unnecessarily
+// all the time.
 - (void)screenLogWorkingDirectoryAtLine:(int)line
                           withDirectory:(NSString *)directory
-                    isSuitableForOldPWD:(BOOL)isSuitableForOldPWD {
-    VT100RemoteHost *remoteHost = [_screen remoteHostOnLine:line];
-    BOOL isSame = ([directory isEqualToString:_lastDirectory] &&
-                   [remoteHost isEqualToRemoteHost:_lastRemoteHost]);
-    [[iTermShellHistoryController sharedInstance] recordUseOfPath:directory
-                                                           onHost:[_screen remoteHostOnLine:line]
-                                                         isChange:!isSame];
-    BOOL unsuitable;
-    if (remoteHost == nil && isSuitableForOldPWD) {
-        // Special dispensation. Trust the caller that this working directory will be kept up to date.
-        unsuitable = NO;
-    } else {
-        // In this case a nil remoteHost is considered unsuitable because we believe this is an
-        // odd one-off (such as by setting the title) and we can't count on it being updated
-        // reliably. We'll pull pwd from the child process via the kernel.
-        unsuitable = !remoteHost.isLocalhost;
+                                 pushed:(BOOL)pushed {
+    DLog(@"screenLogWorkingDirectoryAtLine:%@ withDirectory:%@ pushed:%@", @(line), directory, @(pushed));
+
+    if (pushed) {
+        // If we're currently polling for a working directory, do not create a
+        // mark for the result when the poll completes because this mark is
+        // from a higher-quality data source.
+        DLog(@"Invalidate outstanding PWD poller requests.");
+        [_pwdPoller invalidateOutstandingRequests];
     }
-    DLog(@"Calling setLastDirectory:%@ isUnsuitableForOldPWD:%@. remoteHost is %@\n%@",
-         directory, @(unsuitable), remoteHost, [NSThread callStackSymbols]);
-    [self setLastDirectory:directory isUnsuitableForOldPWD:unsuitable];
-    self.lastRemoteHost = remoteHost;
+
+    // Update shell integration DB.
+    VT100RemoteHost *remoteHost = [_screen remoteHostOnLine:line];
+    DLog(@"remoteHost is %@, is local is %@", remoteHost, @(!remoteHost.isLocalhost));
+    if (pushed) {
+        BOOL isSame = ([directory isEqualToString:_lastDirectory] &&
+                       [remoteHost isEqualToRemoteHost:_lastRemoteHost]);
+        [[iTermShellHistoryController sharedInstance] recordUseOfPath:directory
+                                                               onHost:[_screen remoteHostOnLine:line]
+                                                             isChange:!isSame];
+    }
+    // This has been a big ugly hairball for a long time. Because of the
+    // working directory poller I think it's safe to simplify it now. Before,
+    // we'd track whether the update was trustworthy and likely to happen
+    // again. These days, it should always be regular so that is not
+    // interesting. Instead, we just want to make sure we know if the directory
+    // is local or remote because we want to ignore local directories when we
+    // know the user is ssh'ed somewhere.
+    const BOOL directoryIsRemote = pushed && remoteHost && !remoteHost.isLocalhost;
+
+    // Update lastDirectory, proxy icon, "path" variable.
+    [self setLastDirectory:directory remote:directoryIsRemote pushed:pushed];
+
+    if (pushed) {
+        self.lastRemoteHost = remoteHost;
+    }
 }
 
 - (BOOL)screenAllowTitleSetting {
@@ -9971,6 +10043,13 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
             default:
                 break;
         }
+    }
+}
+
+- (void)screenDidDetectShell:(NSString *)shell {
+    NSString *name = self.currentHost.usernameAndHostname;
+    if (name && shell) {
+        self.hostnameToShell[name] = shell;
     }
 }
 
@@ -11256,11 +11335,21 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
     return _shell.pid;;
 }
 
-- (void)workingDirectoryPollerDidFindWorkingDirectory:(NSString *)pwd {
+- (void)workingDirectoryPollerDidFindWorkingDirectory:(NSString *)pwd invalidated:(BOOL)invalidated {
     if (_shellIntegrationEverUsed) {
         return;
     }
-    [self.variablesScope setValue:pwd forVariableNamed:iTermVariableKeySessionPath];
+    if (invalidated) {
+        DLog(@"Not creating a mark because of invalidation");
+        [self setLastDirectory:pwd remote:NO pushed:NO];
+        return;
+    }
+
+    // Updates the mark
+    DLog(@"Will create a mark");
+    [self.screen setWorkingDirectory:pwd
+                              onLine:[self.screen lineNumberOfCursor]
+                              pushed:NO];
 }
 
 #pragma mark - iTermStandardKeyMapperDelegate
@@ -11305,9 +11394,7 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
 }
 
 - (NSSize)badgeLabelSizeFraction {
-    const CGFloat width = [iTermProfilePreferences floatForKey:KEY_BADGE_MAX_WIDTH inProfile:self.profile];
-    const CGFloat height = [iTermProfilePreferences floatForKey:KEY_BADGE_MAX_HEIGHT inProfile:self.profile];
-    return NSMakeSize(width, height);
+    return _badgeLabelSizeFraction;
 }
 
 #pragma mark - iTermCopyModeHandlerDelegate
@@ -11385,8 +11472,27 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
                                                    target:self
                                                    action:@selector(sendTmuxCommandWithCompletion:command:)];
         [_methods registerFunction:method namespace:@"iterm2"];
+
+        method = [[iTermBuiltInMethod alloc] initWithName:@"set_status_bar_component_unread_count"
+                                            defaultValues:@{}
+                                                    types:@{ @"identifier": [NSString class],
+                                                             @"count": [NSNumber class] }
+                                        optionalArguments:[NSSet set]
+                                                  context:iTermVariablesSuggestionContextSession
+                                                   target:self
+                                                   action:@selector(setStatusBarComponentUnreadCountWithCompletion:identifier:count:)];
+        [_methods registerFunction:method namespace:@"iterm2"];
     }
     return _methods;
+}
+
+- (void)setStatusBarComponentUnreadCountWithCompletion:(void (^)(id, NSError *))completion
+                                            identifier:(NSString *)identifier
+                                                 count:(NSNumber *)count {
+    [[iTermStatusBarUnreadCountController sharedInstance] setUnreadCountForComponentWithIdentifier:identifier
+                                                                                             count:count.integerValue
+                                                                                         sessionID:self.guid];
+    completion(nil, nil);
 }
 
 - (void)sendTmuxCommandWithCompletion:(void (^)(id, NSError *))completion

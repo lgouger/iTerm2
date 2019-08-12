@@ -8,6 +8,7 @@
 #import "iTermStatusBarContainerView.h"
 
 #import "DebugLogging.h"
+#import "iTermUnreadCountView.h"
 #import "NSDictionary+iTerm.h"
 #import "NSEvent+iTerm.h"
 #import "NSImageView+iTerm.h"
@@ -23,6 +24,7 @@ NS_ASSUME_NONNULL_BEGIN
     NSTimer *_timer;
     BOOL _needsUpdate;
     NSView *_view;
+    iTermUnreadCountView *_unreadCountView;
 }
 
 - (nullable instancetype)initWithComponent:(id<iTermStatusBarComponent>)component {
@@ -34,26 +36,14 @@ NS_ASSUME_NONNULL_BEGIN
     self = [super initWithFrame:NSMakeRect(0, 0, preferredWidth, 21)];
     if (self) {
         self.wantsLayer = YES;
+        if (@available(macOS 10.14, *)) {
+            self.layer.masksToBounds = NO;
+        }
         _component = component;
         _backgroundColor = [component.configuration[iTermStatusBarComponentConfigurationKeyKnobValues][iTermStatusBarSharedBackgroundColorKey] colorValue];
         _view = component.statusBarComponentView;
         [self addSubview:_view];
-        const BOOL hasIcon = (icon != nil);
-        const CGFloat x = self.minX;
-        if (hasIcon) {
-            icon.template = YES;
-            _iconImageView = [NSImageView imageViewWithImage:icon];
-            [_iconImageView it_setTintColor:[NSColor labelColor]];
-            [_iconImageView sizeToFit];
-            [self addSubview:_iconImageView];
-            NSRect area = NSMakeRect(0, 0, iTermStatusBarViewControllerIconWidth, 21);
-            NSRect frame;
-            frame.size = NSMakeSize(icon.size.width, icon.size.height);
-            frame.origin.x = 0;
-            frame.origin.y = (area.size.height - frame.size.height) / 2.0;
-            _iconImageView.frame = frame;
-        }
-        _view.frame = NSMakeRect(x, 0, self.preferredWidthForComponentView, self.frame.size.height);
+        _view.frame = NSMakeRect(self.minX, 0, self.preferredWidthForComponentView, self.frame.size.height);
         _timer = [NSTimer scheduledWeakTimerWithTimeInterval:_component.statusBarComponentUpdateCadence
                                                       target:self
                                                     selector:@selector(reevaluateTimer:)
@@ -65,12 +55,47 @@ NS_ASSUME_NONNULL_BEGIN
             NSClickGestureRecognizer *recognizer = [[NSClickGestureRecognizer alloc] initWithTarget:self action:@selector(clickRecognized:)];
             [_view addGestureRecognizer:recognizer];
         }
+        [self updateIconIfNeeded];
+        _unreadCountView = [[iTermUnreadCountView alloc] init];
+        [self addSubview:_unreadCountView];
     }
     return self;
 }
 
 - (void)dealloc {
     [_timer invalidate];
+}
+
+- (void)updateIconIfNeeded {
+    NSImage *icon = _component.statusBarComponentIcon;
+    if (icon == _iconImageView.image) {
+        return;
+    }
+    [_iconImageView removeFromSuperview];
+    _iconImageView = nil;
+    const BOOL hasIcon = (icon != nil);
+    if (hasIcon) {
+        icon.template = YES;
+        _iconImageView = [NSImageView imageViewWithImage:icon];
+        NSColor *tintColor = [self.component statusBarTextColor] ?: [self.component.delegate statusBarComponentDefaultTextColor];
+        [_iconImageView it_setTintColor:tintColor];
+        [_iconImageView sizeToFit];
+        [self addSubview:_iconImageView];
+        NSRect area = NSMakeRect(0, 0, iTermStatusBarViewControllerIconWidth, 21);
+        NSRect frame;
+        frame.size = NSMakeSize(icon.size.width, icon.size.height);
+        frame.origin.x = 0;
+        frame.origin.y = (area.size.height - frame.size.height) / 2.0;
+        _iconImageView.frame = frame;
+    }
+}
+
+- (void)setUnreadCount:(NSInteger)count {
+    if (count == _unreadCount) {
+        return;
+    }
+    _unreadCount = count;
+    _unreadCountView.count = count;
 }
 
 - (CGFloat)minimumWidthIncludingIcon {
@@ -119,6 +144,7 @@ NS_ASSUME_NONNULL_BEGIN
         return;
     }
     _needsUpdate = NO;
+    [self updateIconIfNeeded];
     [self.component statusBarComponentUpdate];
 }
 
@@ -134,6 +160,7 @@ NS_ASSUME_NONNULL_BEGIN
     }
 
     [self.component statusBarComponentSizeView:_view toFitWidth:width];
+    [self updateIconIfNeeded];
     const CGFloat viewHeight = _view.frame.size.height;
     const CGFloat myHeight = self.frame.size.height;
     const CGFloat viewWidth = _view.frame.size.width;
@@ -142,6 +169,22 @@ NS_ASSUME_NONNULL_BEGIN
                              [self retinaRound:(myHeight - viewHeight) / 2 + _component.statusBarComponentVerticalOffset],
                              [self retinaRoundUp:self.preferredWidthForComponentView],
                              [self retinaRoundUp:viewHeight]);
+    CGFloat margin = -2;
+    if (@available(macOS 10.14, *)) { } else {
+        margin = 0;
+    }
+    _unreadCountView.frame = NSMakeRect(NSMaxX(self.bounds) - NSWidth(_unreadCountView.frame) - margin,
+                                        [self retinaRound:NSMidY(self.bounds) - NSHeight(_unreadCountView.frame) / 2.0],
+                                        NSWidth(_unreadCountView.frame),
+                                        NSHeight(_unreadCountView.frame));
+}
+
+- (BOOL)wantsDefaultClipping {
+    if (@available(macOS 10.14, *)) {
+        return NO;
+    } else {
+        return [super wantsDefaultClipping];
+    }
 }
 
 - (void)viewDidMoveToWindow {

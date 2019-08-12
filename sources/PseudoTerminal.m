@@ -74,6 +74,7 @@
 #import "NSAppearance+iTerm.h"
 #import "NSArray+iTerm.h"
 #import "NSColor+iTerm.h"
+#import "NSDate+iTerm.h"
 #import "NSEvent+iTerm.h"
 #import "NSImage+iTerm.h"
 #import "NSScreen+iTerm.h"
@@ -426,6 +427,12 @@ static NSRect iTermRectCenteredVerticallyWithinRect(NSRect frameToCenter, NSRect
 
     BOOL _anyPaneIsTransparent;
     BOOL _windowDidResize;
+    BOOL _willClose;
+    BOOL _updatingWindowType;  // updateWindowType is not reentrant
+    BOOL _suppressMakeCurrentTerminal;
+    NSArray *_screenConfigurationAtTimeOfForceFrame;
+    NSRect _forceFrame;
+    NSTimeInterval _forceFrameUntil;
 }
 
 @synthesize scope = _scope;
@@ -882,6 +889,7 @@ static NSRect iTermRectCenteredVerticallyWithinRect(NSRect frameToCenter, NSRect
     self.windowInitialized = YES;
     useTransparency_ = [iTermProfilePreferences boolForKey:KEY_INITIAL_USE_TRANSPARENCY inProfile:profile];
     number_ = [[iTermController sharedInstance] allocateWindowNumber];
+    [_scope setValue:@(number_ + 1) forVariableNamed:@"number"];
     if (windowType == WINDOW_TYPE_TRADITIONAL_FULL_SCREEN) {
         [self hideMenuBar];
     }
@@ -1121,6 +1129,7 @@ ITERM_WEAKLY_REFERENCEABLE
     [_toggleFullScreenModeCompletionBlocks release];
     [_currentTabTitleTextFieldDelegate release];
     [_methods release];
+    [_screenConfigurationAtTimeOfForceFrame release];
 
     [super dealloc];
 }
@@ -2697,6 +2706,7 @@ ITERM_WEAKLY_REFERENCEABLE
     dispatch_async(dispatch_get_main_queue(), ^{
         [titleTextField.window makeFirstResponder:titleTextField];
     });
+    [NSApp activateIgnoringOtherApps:YES];
     if ([alert runModal] == NSAlertFirstButtonReturn) {
         [self.scope setValue:titleTextField.stringValue.length ? titleTextField.stringValue : nil
             forVariableNamed:iTermVariableKeyWindowTitleOverrideFormat];
@@ -2864,7 +2874,9 @@ ITERM_WEAKLY_REFERENCEABLE
 
     const BOOL savedRestoringWindow = _restoringWindow;
     _restoringWindow = YES;
+    _suppressMakeCurrentTerminal = (self.hotkeyWindowType != iTermHotkeyWindowTypeNone);
     const BOOL restoreTabsOK = [self restoreTabsFromArrangement:arrangement sessions:sessions];
+    _suppressMakeCurrentTerminal = NO;
     _restoringWindow = savedRestoringWindow;
     if (!restoreTabsOK) {
         return NO;
@@ -3256,6 +3268,7 @@ ITERM_WEAKLY_REFERENCEABLE
                                                         object:nil
                                                       userInfo:nil];
     [self didFinishFullScreenTransitionSuccessfully:NO];
+    _willClose = YES;
 }
 
 - (void)windowWillMiniaturize:(NSNotification *)aNotification {
@@ -3319,6 +3332,7 @@ ITERM_WEAKLY_REFERENCEABLE
         [aSession updateDisplayBecause:@"windowDidBecomeKey"];
         [[aSession view] setBackgroundDimmed:NO];
         [aSession setFocused:aSession == [self currentSession]];
+        [aSession.view setNeedsDisplay:YES];
     }
     // Some users report that the first responder isn't always set properly. Let's try to fix that.
     // This attempt (4/20/13) is to fix bug 2431.
@@ -3694,6 +3708,7 @@ ITERM_WEAKLY_REFERENCEABLE
             [[aSession textview] endFindCursor];
         }
         [[aSession textview] removeUnderline];
+        [aSession.view setNeedsDisplay:YES];
     }
 
     if (togglingFullScreen_) {
@@ -3866,13 +3881,21 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (NSEdgeInsets)tabBarInsetsForCompactWindow NS_AVAILABLE_MAC(10_14) {
+    const CGFloat stoplightButtonsWidth = 75;
     switch ([iTermPreferences intForKey:kPreferenceKeyTabPosition]) {
         case PSMTab_TopTab:
             if ([self rootTerminalViewWindowNumberLabelShouldBeVisible]) {
-                return NSEdgeInsetsMake(0, 75 + iTermRootTerminalViewWindowNumberLabelMargin * 2 + iTermRootTerminalViewWindowNumberLabelWidth, 0, 0);
+                const CGFloat leftInset = (stoplightButtonsWidth +
+                                           iTermRootTerminalViewWindowNumberLabelMargin * 2 +
+                                           iTermRootTerminalViewWindowNumberLabelWidth +
+                                           MAX(0, [iTermAdvancedSettingsModel extraSpaceBeforeCompactTopTabBar]));
+                return NSEdgeInsetsMake(0,
+                                        leftInset,
+                                        0,
+                                        0);
             } else {
-                // Make room for stoplight buttons when there is not tab title.
-                return NSEdgeInsetsMake(0, 75, 0, 0);
+                // Make room for stoplight buttons when there is no tab title.
+                return NSEdgeInsetsMake(0, stoplightButtonsWidth, 0, 0);
             }
 
         case PSMTab_LeftTab:
@@ -4098,6 +4121,26 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (void)windowDidChangeScreen:(NSNotification *)notification {
+    // See comments on -forceFrame:
+    DLog(@"windowDidChangeScreen frame=%@ forceFrame=%@ time left in forceFrameUntil=%@ screenConfig=%@\n%@",
+         NSStringFromRect(self.window.frame),
+         NSStringFromRect(_forceFrame),
+         @([NSDate it_timeSinceBoot] - _forceFrameUntil),
+         _screenConfigurationAtTimeOfForceFrame,
+         [NSThread callStackSymbols]);
+    if (!NSEqualRects(self.window.frame, _forceFrame) &&
+        !NSEqualRects(NSZeroRect, _forceFrame) &&
+        [NSDate it_timeSinceBoot] < _forceFrameUntil &&
+        [[self screenConfiguration] isEqual:_screenConfigurationAtTimeOfForceFrame]) {
+        DLog(@"Schedule a set frame");
+        NSRect rect = _forceFrame;
+        DLog(@"Setting frame due to force-frame to %@", NSStringFromRect(rect));
+        [self.window setFrame:rect display:YES animate:NO];
+        DLog(@"Returning early");
+        return;
+    } else {
+        DLog(@"Allowing screen change to go on");
+    }
     BOOL canonicalize = ![self miniaturizedWindowShouldPreserveFrameUntilDeminiaturized];
     // This gets called when any part of the window enters or exits the screen and
     // appears to be spuriously called for nonnative fullscreen windows.
@@ -4123,9 +4166,46 @@ ITERM_WEAKLY_REFERENCEABLE
     DLog(@"Returning from windowDidChangeScreen:.");
 }
 
+- (NSArray *)screenConfiguration {
+    return [[NSScreen screens] mapWithBlock:^id(NSScreen *screen) {
+        return @{ @"frame": NSStringFromRect(screen.frame),
+                  @"visibleFrame": NSStringFromRect(screen.visibleFrame) };
+    }];
+}
+
+// When you replace the window with one of a different type and then order it
+// front, the window gets moved to the first screen after a little while. It's
+// not after one spin of the runloop, but just a little while later. I can't 
+// tell why. But it's horrible and I can't find a better workaround than to
+// just muscle it back to the frame we want if it changes for apparently no
+// reason for some time.
+- (void)forceFrame:(NSRect)frame {
+    if (![iTermAdvancedSettingsModel workAroundMultiDisplayOSBug]) {
+        return;
+    }
+    if (NSEqualRects(frame, NSIntersectionRect(frame, NSScreen.screens.firstObject.frame))) {
+        DLog(@"Frame is entirely in the first screen. Not forcing.");
+        return;
+    }
+    [self clearForceFrame];
+    _forceFrame = frame;
+    _screenConfigurationAtTimeOfForceFrame = [[self screenConfiguration] retain];
+    _forceFrameUntil = [NSDate it_timeSinceBoot] + 2;
+    DLog(@"Force frame to %@", NSStringFromRect(frame));
+    [self.window setFrame:frame display:YES animate:NO];
+}
+
+- (void)clearForceFrame {
+    [_screenConfigurationAtTimeOfForceFrame autorelease];
+    _screenConfigurationAtTimeOfForceFrame = nil;
+    _forceFrameUntil = 0;
+    _forceFrame = NSZeroRect;
+}
+
 - (void)windowWillMove:(NSNotification *)notification {
-    // AFAICT this is only called when you move the window by dragging it.
+    // AFAICT this is only called when you move the window by dragging it or double-click the title bar.
     DLog(@"Looks like the user started dragging the window.");
+    [self clearForceFrame];
     _windowIsMoving = YES;
     _screenBeforeMoving = [[NSScreen screens] indexOfObject:self.window.screen];
 }
@@ -4189,6 +4269,7 @@ ITERM_WEAKLY_REFERENCEABLE
     _contentView.toolbeltWidth = _contentView.toolbelt.frame.size.width;
     [_contentView updateToolbeltProportionsIfNeeded];
     [self updateVariables];
+    [_contentView windowDidResize];
 }
 
 - (void)clearTransientTitle {
@@ -4480,6 +4561,7 @@ ITERM_WEAKLY_REFERENCEABLE
                                                                     styleMask:styleMask
                                                                       backing:NSBackingStoreBuffered
                                                                         defer:defer] autorelease];
+    myWindow.collectionBehavior = [self desiredWindowCollectionBehavior];
     if (windowType != WINDOW_TYPE_LION_FULL_SCREEN) {
         // For some reason, you don't always get the frame you requested. I saw
         // this on OS 10.10 when creating normal windows on a 2-screen display. The
@@ -4504,8 +4586,14 @@ ITERM_WEAKLY_REFERENCEABLE
     return myWindow;
 }
 
-- (void)replaceWindowWithWindowOfType:(iTermWindowType)newWindowType {
-    NSWindow *oldWindow = self.window;
+- (BOOL)replaceWindowWithWindowOfType:(iTermWindowType)newWindowType {
+    if (_willClose) {
+        return NO;
+    }
+    if (newWindowType == _windowType) {
+        return NO;
+    }
+    NSWindow *oldWindow = [[self.window retain] autorelease];
     oldWindow.delegate = nil;
     [[_contentView retain] autorelease];
     [self setWindowWithWindowType:newWindowType
@@ -4518,6 +4606,7 @@ ITERM_WEAKLY_REFERENCEABLE
     self.window.opaque = NO;
     self.window.delegate = self;
     [oldWindow close];
+    return YES;
 }
 
 - (void)willEnterTraditionalFullScreenMode {
@@ -4529,12 +4618,13 @@ ITERM_WEAKLY_REFERENCEABLE
             [_shortcutAccessoryViewController removeFromParentViewController];
         }
     }
-    self.windowType = WINDOW_TYPE_TRADITIONAL_FULL_SCREEN;
     [self.window setOpaque:NO];
     self.window.alphaValue = 0;
     if (self.ptyWindow.isCompact) {
         [self replaceWindowWithWindowOfType:WINDOW_TYPE_TRADITIONAL_FULL_SCREEN];
+        self.windowType = WINDOW_TYPE_TRADITIONAL_FULL_SCREEN;
     } else {
+        self.windowType = WINDOW_TYPE_TRADITIONAL_FULL_SCREEN;
         self.window.styleMask = [self styleMask];
         [self.window setFrame:[self traditionalFullScreenFrameForScreen:self.window.screen]
                       display:YES];
@@ -4543,12 +4633,14 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (void)willExitTraditionalFullScreenMode {
-    self.windowType = self.savedWindowType;
+    BOOL shouldForce = NO;
     if ([PseudoTerminal windowType:self.savedWindowType shouldBeCompactWithSavedWindowType:self.savedWindowType]) {
-        [self replaceWindowWithWindowOfType:self.savedWindowType];
+        shouldForce = [self replaceWindowWithWindowOfType:self.savedWindowType];
+        self.windowType = self.savedWindowType;
     } else {
         // NOTE: Setting the style mask causes the presentation options to be
         // changed (menu/dock hidden) because refreshTerminal gets called.
+        self.windowType = self.savedWindowType;
         self.window.styleMask = [self styleMask];
     }
     [self showMenuBar];
@@ -4559,6 +4651,22 @@ ITERM_WEAKLY_REFERENCEABLE
         oldFrame_.size = [self preferredWindowFrameToPerfectlyFitCurrentSessionInInitialConfiguration];
     }
     [self.window setFrame:oldFrame_ display:YES];
+    switch ((iTermPreferencesTabStyle)[iTermPreferences intForKey:kPreferenceKeyTabStyle]) {
+        case TAB_STYLE_MINIMAL:
+        case TAB_STYLE_COMPACT:
+            if (shouldForce) {
+                [self forceFrame:oldFrame_];
+            }
+            break;
+
+        case TAB_STYLE_AUTOMATIC:
+        case TAB_STYLE_LIGHT:
+        case TAB_STYLE_LIGHT_HIGH_CONTRAST:
+        case TAB_STYLE_DARK:
+        case TAB_STYLE_DARK_HIGH_CONTRAST:
+            break;
+    }
+
     [self addShortcutAccessorViewControllerToTitleBarIfNeeded];
     PtyLog(@"toggleFullScreenMode - allocate new terminal");
 }
@@ -4614,34 +4722,13 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (void)didExitTraditionalFullScreenMode {
-    NSSize contentSize = [[[self window] contentView] frame].size;
+    NSSize contentSize = self.window.frame.size;
+    NSSize decorationSize = self.windowDecorationSize;
     if (_contentView.shouldShowToolbelt) {
-        contentSize.width -= _contentView.toolbelt.frame.size.width;
+        decorationSize.width += _contentView.toolbelt.frame.size.width;
     }
-    if ([self tabBarShouldBeVisible]) {
-        switch ([iTermPreferences intForKey:kPreferenceKeyTabPosition]) {
-            case PSMTab_LeftTab:
-                contentSize.width -= _contentView.leftTabBarWidth;
-                break;
-
-            case PSMTab_TopTab:
-            case PSMTab_BottomTab:
-                contentSize.height -= _contentView.tabBarControl.height;
-                break;
-        }
-    }
-    if ([self haveLeftBorder]) {
-        --contentSize.width;
-    }
-    if ([self haveRightBorder]) {
-        --contentSize.width;
-    }
-    if ([self haveBottomBorder]) {
-        --contentSize.height;
-    }
-    if ([self haveTopBorder]) {
-        --contentSize.height;
-    }
+    contentSize.width -= decorationSize.width;
+    contentSize.height -= decorationSize.height;
 
     [self fitWindowToTabSize:contentSize];
 }
@@ -4702,6 +4789,20 @@ ITERM_WEAKLY_REFERENCEABLE
     }
     PtyLog(@"toggleFullScreenMode returning");
     togglingFullScreen_ = false;
+
+    switch ((iTermPreferencesTabStyle)[iTermPreferences intForKey:kPreferenceKeyTabStyle]) {
+        case TAB_STYLE_MINIMAL:
+        case TAB_STYLE_COMPACT:
+            [self forceFrame:self.window.frame];
+            break;
+
+        case TAB_STYLE_AUTOMATIC:
+        case TAB_STYLE_LIGHT:
+        case TAB_STYLE_LIGHT_HIGH_CONTRAST:
+        case TAB_STYLE_DARK:
+        case TAB_STYLE_DARK_HIGH_CONTRAST:
+            break;
+    }
 
     [self.window performSelector:@selector(makeKeyAndOrderFront:) withObject:nil afterDelay:0];
     [self.window makeFirstResponder:[[self currentSession] textview]];
@@ -4799,13 +4900,45 @@ ITERM_WEAKLY_REFERENCEABLE
     return _contentView.scrollbarShouldBeVisible;
 }
 
+- (BOOL)windowTitleIsVisible {
+    switch (iTermThemedWindowType(_windowType)) {
+        case WINDOW_TYPE_TOP:
+        case WINDOW_TYPE_BOTTOM:
+        case WINDOW_TYPE_LEFT:
+        case WINDOW_TYPE_RIGHT:
+        case WINDOW_TYPE_TOP_PARTIAL:
+        case WINDOW_TYPE_BOTTOM_PARTIAL:
+        case WINDOW_TYPE_LEFT_PARTIAL:
+        case WINDOW_TYPE_RIGHT_PARTIAL:
+        case WINDOW_TYPE_NO_TITLE_BAR:
+        case WINDOW_TYPE_TRADITIONAL_FULL_SCREEN:
+        case WINDOW_TYPE_LION_FULL_SCREEN:
+            return NO;
+
+        case WINDOW_TYPE_COMPACT:
+            return [self rootTerminalViewShouldDrawWindowTitleInPlaceOfTabBar];
+
+        case WINDOW_TYPE_ACCESSORY:
+        case WINDOW_TYPE_NORMAL:
+            return YES;
+    }
+}
 - (void)windowWillStartLiveResize:(NSNotification *)notification {
+    [self clearForceFrame];
     liveResize_ = YES;
+    if (@available(macOS 10.14, *)) {
+        if (![self windowTitleIsVisible] && !self.anyFullScreen) {
+            [_contentView setShowsWindowSize:YES];
+        }
+    }
     [self updateUseMetalInAllTabs];
 }
 
 - (void)windowDidEndLiveResize:(NSNotification *)notification {
     NSScreen *screen = self.window.screen;
+    if (@available(macOS 10.14, *)) {
+        [_contentView setShowsWindowSize:NO];
+    }
 
     // Canonicalize the frame so that centered windows stay centered, edge-attached windows stay edge
     // attached.
@@ -4887,7 +5020,12 @@ ITERM_WEAKLY_REFERENCEABLE
         if (lionFullScreen_) {
             self.window.styleMask = self.styleMask | NSWindowStyleMaskFullScreen;
         } else {
+            NSRect frameBefore = self.window.frame;
             self.window.styleMask = [self styleMask];
+            if (!_fullScreen) {
+                // Changing the style mask can cause the frame to change.
+                [self.window setFrame:frameBefore display:YES];
+            }
         }
         [self repositionWidgets];
     }
@@ -5005,6 +5143,7 @@ ITERM_WEAKLY_REFERENCEABLE
     [self updateUseMetalInAllTabs];
     [self updateForTransparency:self.ptyWindow];
     [self didFinishFullScreenTransitionSuccessfully:YES];
+    [self updateVariables];
 }
 
 - (void)didFinishFullScreenTransitionSuccessfully:(BOOL)success {
@@ -5037,6 +5176,7 @@ ITERM_WEAKLY_REFERENCEABLE
         [_contentView didChangeCompactness];
         [_contentView layoutSubviews];
     }
+    [self updateVariables];
 }
 
 - (void)windowWillExitFullScreen:(NSNotification *)notification
@@ -5101,7 +5241,9 @@ ITERM_WEAKLY_REFERENCEABLE
                                                        savedWindowType:self.savedWindowType
                                                       hotkeyWindowType:_hotkeyWindowType];
     }
-    self.windowType = self.savedWindowType;
+    const iTermWindowType desiredWindowType = self.savedWindowType;
+    [self updateWindowForWindowType:desiredWindowType];
+    self.windowType = desiredWindowType;
     [self didChangeAnyFullScreen];
 
     [_contentView.tabBarControl updateFlashing];
@@ -5125,6 +5267,12 @@ ITERM_WEAKLY_REFERENCEABLE
     [_contentView layoutSubviews];
     [self updateForTransparency:self.ptyWindow];
     [self didFinishFullScreenTransitionSuccessfully:YES];
+    [self updateVariables];
+
+    // Windows forget their collection behavior when exiting full screen when the app is a LSUIElement. Issue 8048.
+    if ([[iTermApplication sharedApplication] isUIElement]) {
+        self.window.collectionBehavior = self.desiredWindowCollectionBehavior;
+    }
 }
 
 - (NSRect)windowWillUseStandardFrame:(NSWindow *)sender defaultFrame:(NSRect)defaultFrame {
@@ -6212,6 +6360,7 @@ ITERM_WEAKLY_REFERENCEABLE
     [alert addButtonWithTitle:@"OK"];
     [alert addButtonWithTitle:@"Cancel"];
     __weak __typeof(self) weakSelf = self;
+    [NSApp activateIgnoringOtherApps:YES];
     [alert beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse returnCode) {
         [weakSelf releaseTabTitleTextFieldDelegate];
         if (returnCode == NSAlertFirstButtonReturn) {
@@ -6495,6 +6644,24 @@ static CGFloat iTermDimmingAmount(PSMTabBarControl *tabView) {
         [[iTermController sharedInstance] launchBookmark:nil
                                               inTerminal:self
                                       respectTabbingMode:NO];
+    }
+}
+
+- (BOOL)tabViewCanDragSolitaryTab:(NSTabView *)tabView {
+    if (![iTermAdvancedSettingsModel convertTabDragToWindowDragForSolitaryTabInCompactOrMinimalTheme]) {
+        return YES;
+    }
+    iTermPreferencesTabStyle preferredStyle = [iTermPreferences intForKey:kPreferenceKeyTabStyle];
+    switch (preferredStyle) {
+        case TAB_STYLE_MINIMAL:
+        case TAB_STYLE_COMPACT:
+            return NO;
+        case TAB_STYLE_LIGHT:
+        case TAB_STYLE_DARK:
+        case TAB_STYLE_LIGHT_HIGH_CONTRAST:
+        case TAB_STYLE_DARK_HIGH_CONTRAST:
+        case TAB_STYLE_AUTOMATIC:
+            return YES;
     }
 }
 
@@ -8015,16 +8182,37 @@ static CGFloat iTermDimmingAmount(PSMTabBarControl *tabView) {
     if (self.windowType == _windowType) {
         return;
     }
+    // -updateWindowForWindowType: assigns a new contentView which causes
+    // -viewDidChangeEffectiveAppearance to be called, which eventually calls back into this method.
+    // Then cocoa 💩s when you try to change the content view from within setContentView:.
+    if (_updatingWindowType) {
+        return;
+    }
     assert(_windowType == WINDOW_TYPE_NORMAL || _windowType == WINDOW_TYPE_COMPACT);
     assert(self.windowType == WINDOW_TYPE_NORMAL || self.windowType == WINDOW_TYPE_COMPACT);
+
+    _updatingWindowType = YES;
+    [self updateWindowForWindowType:self.windowType];
+    _updatingWindowType = NO;
+
+    _windowType = self.windowType;
+}
+
+- (void)updateWindowForWindowType:(iTermWindowType)windowType {
+    if (_willClose) {
+        return;
+    }
     NSRect frame = self.window.frame;
     NSString *title = [[self.window.title copy] autorelease];
-    [self replaceWindowWithWindowOfType:self.windowType];
+    const BOOL changed = [self replaceWindowWithWindowOfType:windowType];
     [self.window setFrame:frame display:YES];
     [self.window orderFront:nil];
     [self repositionWidgets];
     self.window.title = title;
-    _windowType = self.windowType;
+
+    if (changed) {
+        [self forceFrame:frame];
+    }
 }
 
 - (void)refreshTerminal:(NSNotification *)aNotification {
@@ -8140,9 +8328,9 @@ static CGFloat iTermDimmingAmount(PSMTabBarControl *tabView) {
     return NO;
 }
 
-- (NSColor *)rootTerminalViewTabBarBackgroundColor {
+- (NSColor *)rootTerminalViewTabBarBackgroundColorIgnoringTabColor:(BOOL)ignoreTabColor {
     // This is for the fake title bar and for the status bar background color.
-    return [[iTermTheme sharedInstance] tabBarBackgroundColorForTabColor:self.currentSession.tabColor
+    return [[iTermTheme sharedInstance] tabBarBackgroundColorForTabColor:ignoreTabColor ? nil : self.currentSession.tabColor
                                                                    style:_contentView.tabBarControl.style];
 }
 
@@ -8299,6 +8487,12 @@ static CGFloat iTermDimmingAmount(PSMTabBarControl *tabView) {
     return NO;
 }
 
+- (VT100GridSize)rootTerminalViewCurrentSessionSize {
+    PTYSession *session = self.currentSession;
+    VT100GridSize size = VT100GridSizeMake(session.columns, session.rows);
+    return size;
+}
+
 - (void)updateTabBarStyle {
     id<PSMTabStyle> style = [[iTermTheme sharedInstance] tabStyleWithDelegate:self
                                                           effectiveAppearance:self.window.effectiveAppearance];
@@ -8331,11 +8525,14 @@ static CGFloat iTermDimmingAmount(PSMTabBarControl *tabView) {
 
     // If screens have separate spaces then all screens have a menu bar.
     if (currentScreen == menubarScreen || [NSScreen screensHaveSeparateSpaces]) {
-        DLog(@"set flags to auto-hide dock");
-        int flags = NSApplicationPresentationAutoHideDock;
+        NSApplicationPresentationOptions flags = 0;
+        if (currentScreen == menubarScreen) {
+            DLog(@"Set flag to auto-hide dock");
+            flags = NSApplicationPresentationAutoHideDock;
+        }
         if (![iTermPreferences boolForKey:kPreferenceKeyUIElement] &&
             [iTermPreferences boolForKey:kPreferenceKeyHideMenuBarInFullscreen]) {
-            DLog(@"Set flags to auto-hide menu bar");
+            DLog(@"Set flag to auto-hide menu bar");
             flags |= NSApplicationPresentationAutoHideMenuBar;
         }
         NSApplicationPresentationOptions presentationOptions =
@@ -8871,7 +9068,9 @@ static CGFloat iTermDimmingAmount(PSMTabBarControl *tabView) {
         } else {
             PtyLog(@"window not initialized, is fullscreen, or is being restored. Stack:\n%@", [NSThread callStackSymbols]);
         }
-        [[iTermController sharedInstance] setCurrentTerminal:self];
+        if (!_suppressMakeCurrentTerminal) {
+            [[iTermController sharedInstance] setCurrentTerminal:self];
+        }
     }
 }
 
@@ -8916,6 +9115,7 @@ static CGFloat iTermDimmingAmount(PSMTabBarControl *tabView) {
 
 - (void)setName:(NSString *)theSessionName forSession:(PTYSession *)aSession {
     [aSession didInitializeSessionWithName:theSessionName];
+    [aSession setSessionSpecificProfileValues:@{ KEY_NAME: theSessionName }];
 }
 
 // Assign a value to the 'uniqueNumber_' member variable which is used for storing
