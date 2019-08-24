@@ -21,10 +21,42 @@
     "mongod",
     "mongo",
     "mysql",
+    "pg_dump",
+    "pg_dumpall",
+    "pg_restore",
+    "pg_upgrade",
+    "pgbench",
+    "postgres",
+    "postmaster",
+    "psql",
+    "redis-benchmark",
+    "redis-check-aof",
+    "redis-check-rdb",
+    "redis-cli",
+    "redis-sentinel",
+    "redis-server",
     "sqlite3"
   ],
   "docker": [
+    "docker",
     "docker-compose"
+  ],
+  "elixir": [
+    "elixir",
+    "elixirc",
+    "iex",
+    "mix"
+  ],
+  "erlang": [
+    "beam",
+    "beam.smp",
+    "dialyzer",
+    "epmd",
+    "erl",
+    "erlc",
+    "escript",
+    "run_erl",
+    "to_erl"
   ],
   "ethereum": [
     "ethereum",
@@ -64,12 +96,15 @@
     "node"
   ],
   "npm": [
-    "npm"
+    "npm",
+    "npx"
   ],
   "perl": [
     "perl"
   ],
   "php": [
+    "composer",
+    "composer.phar",
     "php"
   ],
   "ruby": [
@@ -106,6 +141,8 @@
     "yarnpkg"
   ],
   "zip": [
+    "bzip2",
+    "bunzip2",
     "unzip",
     "zip",
     "gzip",
@@ -120,6 +157,8 @@
     "curl"
   ],
   "python": [
+    "easy_install",
+    "pip",
     "Python",
     "python",
     "python2",

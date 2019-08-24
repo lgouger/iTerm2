@@ -66,7 +66,6 @@ int kVT100ScreenMinRows = 2;
 static const int kDefaultScreenColumns = 80;
 static const int kDefaultScreenRows = 25;
 static const int kDefaultMaxScrollbackLines = 1000;
-static const int kDefaultTabstopWidth = 8;
 
 NSString * const kHighlightForegroundColor = @"kHighlightForegroundColor";
 NSString * const kHighlightBackgroundColor = @"kHighlightBackgroundColor";
@@ -3711,8 +3710,12 @@ basedAtAbsoluteLineNumber:(long long)absoluteLineNumber
     } else if (parts.count >= 4) {
         message = parts[0];
         length = [parts[1] intValue];
-        location.x = MIN(MAX(0, [parts[2] intValue]), location.x);
-        location.y = MIN(MAX(0, [parts[3] intValue]), location.y);
+        VT100GridCoord limit = {
+            .x = self.width - 1,
+            .y = self.height - 1
+        };
+        location.x = MIN(MAX(0, [parts[2] intValue]), limit.x);
+        location.y = MIN(MAX(0, [parts[3] intValue]), limit.y);
     }
     VT100GridCoord end = location;
     end.x += length;
@@ -4725,7 +4728,8 @@ basedAtAbsoluteLineNumber:(long long)absoluteLineNumber
 {
     [tabStops_ removeAllObjects];
     const int kInitialTabWindow = 1000;
-    for (int i = 0; i < kInitialTabWindow; i += kDefaultTabstopWidth) {
+    const int width = [iTermAdvancedSettingsModel defaultTabStopWidth];
+    for (int i = 0; i < kInitialTabWindow; i += width) {
         [tabStops_ addObject:[NSNumber numberWithInt:i]];
     }
 }

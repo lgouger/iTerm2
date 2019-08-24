@@ -531,6 +531,9 @@ static const NSUInteger kMaxHosts = 100;
     // When this is true, changing the font size does not cause the window size to change.
     BOOL _windowAdjustmentDisabled;
     NSSize _badgeLabelSizeFraction;
+
+    // To debug a problem where a session is divorced but its guid is not in the sessions instance profile model.
+    NSString *_divorceDecree;
 }
 
 + (NSMapTable<NSString *, PTYSession *> *)sessionMap {
@@ -864,6 +867,7 @@ ITERM_WEAKLY_REFERENCEABLE
     [_variablesScope release];
     [_printGuard release];
     [_methods release];
+    [_divorceDecree release];
 
     [super dealloc];
 }
@@ -1702,6 +1706,42 @@ ITERM_WEAKLY_REFERENCEABLE
     }
     [self.variablesScope setValuesFromDictionary:@{ iTermVariableKeySessionColumns: @(_screen.width),
                                                     iTermVariableKeySessionRows: @(_screen.height) }];
+}
+
+- (Profile *)profileForSplit {
+    if ([iTermAdvancedSettingsModel useDivorcedProfileToSplit]) {
+        if (self.isDivorced) {
+            // NOTE: This counts on splitVertically:before:profile:targetSession: rewriting the GUID.
+            return self.profile;
+        }
+    }
+
+    // Get the profile this session was originally created with. But look it up from its GUID because
+    // it might have changed since it was copied into originalProfile when the profile was
+    // first created.
+    Profile *result = nil;
+    Profile *originalProfile = [self originalProfile];
+    if (originalProfile && originalProfile[KEY_GUID]) {
+        result = [[ProfileModel sharedInstance] bookmarkWithGuid:originalProfile[KEY_GUID]];
+    }
+
+    // If that fails, use the current profile.
+    if (!result) {
+        result = self.profile;
+    }
+
+    // I don't think that'll ever fail, but to be safe try using the original profile.
+    if (!result) {
+        result = originalProfile;
+    }
+
+    // I really don't think this'll ever happen, but there's always a default profile to fall back
+    // on.
+    if (!result) {
+        result = [[ProfileModel sharedInstance] defaultBookmark];
+    }
+
+    return result;
 }
 
 - (void)setSplitSelectionMode:(SplitSelectionMode)mode move:(BOOL)move {
@@ -4869,18 +4909,30 @@ ITERM_WEAKLY_REFERENCEABLE
     return nil;
 }
 
-- (NSString*)divorceAddressBookEntryFromPreferences
-{
-    Profile* bookmark = [self profile];
-    NSString* guid = [bookmark objectForKey:KEY_GUID];
+- (void)setDivorceDecree:(NSString *)decree {
+    [_divorceDecree autorelease];
+    _divorceDecree = [decree copy];
+}
+
+#define DIVORCE_LOG(args...) do { \
+    DLog(args); \
+    [logs addObject:[NSString stringWithFormat:args]]; \
+} while (0)
+
+- (NSString *)divorceAddressBookEntryFromPreferences {
+    Profile *bookmark = [self profile];
+    NSString *guid = [bookmark objectForKey:KEY_GUID];
     if (_isDivorced) {
-        assert([[ProfileModel sessionsInstance] bookmarkWithGuid:guid]);
+        ITAssertWithMessage([[ProfileModel sessionsInstance] bookmarkWithGuid:guid] != nil,
+                            @"I am divorced with guid %@ but the sessions instance has no such guid. Log:\n%@\n\nModel log:\n%@",
+                            guid, _divorceDecree, [[ProfileModel sessionsInstance] debugHistoryForGuid:guid]);
         return guid;
     }
     _isDivorced = YES;
-    DLog(@"Remove profile with guid %@ from sessions instance", guid);
+    NSMutableArray<NSString *> *logs = [NSMutableArray array];
+    DIVORCE_LOG(@"Remove profile with guid %@ from sessions instance", guid);
     [[ProfileModel sessionsInstance] removeProfileWithGuid:guid];
-    DLog(@"Set profile %@ divorced, add to sessions instance", bookmark[KEY_GUID]);
+    DIVORCE_LOG(@"Set profile %@ divorced, add to sessions instance", bookmark[KEY_GUID]);
     [[ProfileModel sessionsInstance] addBookmark:[[bookmark copy] autorelease]];
 
     NSString *existingOriginalGuid = bookmark[KEY_ORIGINAL_GUID];
@@ -4895,13 +4947,17 @@ ITERM_WEAKLY_REFERENCEABLE
 
     // Allocate a new guid for this bookmark.
     guid = [ProfileModel freshGuid];
-    DLog(@"Allocating a new guid for this profile. The new guid is %@", guid);
+    DIVORCE_LOG(@"Allocating a new guid for this profile. The new guid is %@", guid);
+    [[ProfileModel sessionsInstance] addGuidToDebug:guid];
     [[ProfileModel sessionsInstance] setObject:guid
                                         forKey:KEY_GUID
                                     inBookmark:bookmark];
     [_overriddenFields removeAllObjects];
     [_overriddenFields addObjectsFromArray:@[ KEY_GUID, KEY_ORIGINAL_GUID] ];
     [self setProfile:[[ProfileModel sessionsInstance] bookmarkWithGuid:guid]];
+    [logs addObject:@"Stack trace:"];
+    [logs addObject:[[NSThread callStackSymbols] componentsJoinedByString:@"\n"]];
+    [self setDivorceDecree:[logs componentsJoinedByString:@"\n"]];
     return guid;
 }
 
@@ -7540,9 +7596,11 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
 
 - (void)textViewSplitVertically:(BOOL)vertically withProfileGuid:(NSString *)guid
 {
-    Profile *profile = [[ProfileModel sharedInstance] defaultBookmark];
+    Profile *profile;
     if (guid) {
         profile = [[ProfileModel sharedInstance] bookmarkWithGuid:guid];
+    } else {
+        profile = [self profileForSplit];
     }
     [[_delegate realParentWindow] splitVertically:vertically
                                      withBookmark:profile
@@ -8975,6 +9033,7 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
 - (void)screenDidAddNote:(PTYNoteViewController *)note {
     [_textview addViewForNote:note];
     [_textview setNeedsDisplay:YES];
+    [self.delegate sessionUpdateMetalAllowed];
 }
 
 - (void)screenDidEndEditingNote {
@@ -10164,7 +10223,7 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
     if ([self hasAnnouncementWithIdentifier:identifier]) {
         return;
     }
-    NSString *notice = @"The terminal attempted to access the clipboard but it was denied. Enable clipboard access in “Prefs > General > Applications in terminal may access clipboard”.";
+    NSString *notice = @"The terminal attempted to access the clipboard but it was denied. Enable clipboard access in “Prefs > General > Selection > Applications in terminal may access clipboard”.";
     iTermAnnouncementViewController *announcement =
     [iTermAnnouncementViewController announcementWithTitle:notice
                                                      style:kiTermAnnouncementViewStyleWarning
@@ -11320,7 +11379,7 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
 #pragma mark - iTermWorkingDirectoryPollerDelegate
 
 - (BOOL)workingDirectoryPollerShouldPoll {
-    if (_shellIntegrationEverUsed) {
+    if (_shellIntegrationEverUsed && ![iTermAdvancedSettingsModel disablePotentiallyInsecureEscapeSequences]) {
         DLog(@"Should not poll for working directory: shell integration used");
         return NO;
     }
@@ -11336,7 +11395,7 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
 }
 
 - (void)workingDirectoryPollerDidFindWorkingDirectory:(NSString *)pwd invalidated:(BOOL)invalidated {
-    if (_shellIntegrationEverUsed) {
+    if (_shellIntegrationEverUsed && ![iTermAdvancedSettingsModel disablePotentiallyInsecureEscapeSequences]) {
         return;
     }
     if (invalidated) {

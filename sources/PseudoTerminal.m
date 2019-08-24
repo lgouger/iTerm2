@@ -791,6 +791,9 @@ static NSRect iTermRectCenteredVerticallyWithinRect(NSRect frameToCenter, NSRect
     _savedWindowType = savedWindowType;
 
     DLog(@"initWithContentRect:%@ styleMask:%d", [NSValue valueWithRect:initialFrame], (int)styleMask);
+    // This is necessary to do here because the collection behavior is computed in setWindowWithWindowType,
+    // and the window may become full screen thereafter. That's no good for a hotkey window.to
+    _hotkeyWindowType = hotkeyWindowType;
     [self setWindowWithWindowType:windowType
                   savedWindowType:savedWindowType
            windowTypeForStyleMask:(windowType == WINDOW_TYPE_TRADITIONAL_FULL_SCREEN) ? windowType : savedWindowType
@@ -1671,8 +1674,34 @@ ITERM_WEAKLY_REFERENCEABLE
     return self.shouldUseMinimalStyle;
 }
 
-- (BOOL)ptyWindowFullScreen {
-    return self.lionFullScreen || togglingLionFullScreen_;
+- (PTYWindowTitleBarFlavor)ptyWindowTitleBarFlavor {
+    if (self.lionFullScreen || togglingLionFullScreen_) {
+        return PTYWindowTitleBarFlavorDefault;
+    }
+    switch (_windowType) {
+        case WINDOW_TYPE_LION_FULL_SCREEN:
+            // This shouldn't happen.
+            return PTYWindowTitleBarFlavorDefault;
+
+        case WINDOW_TYPE_TOP:
+        case WINDOW_TYPE_TOP_PARTIAL:
+            return PTYWindowTitleBarFlavorZeroPoints;
+
+        case WINDOW_TYPE_TRADITIONAL_FULL_SCREEN:
+        case WINDOW_TYPE_NORMAL:
+        case WINDOW_TYPE_BOTTOM:
+        case WINDOW_TYPE_LEFT:
+        case WINDOW_TYPE_RIGHT:
+        case WINDOW_TYPE_BOTTOM_PARTIAL:
+        case WINDOW_TYPE_LEFT_PARTIAL:
+        case WINDOW_TYPE_RIGHT_PARTIAL:
+        case WINDOW_TYPE_NO_TITLE_BAR:
+        case WINDOW_TYPE_COMPACT:
+        case WINDOW_TYPE_ACCESSORY:
+            return PTYWindowTitleBarFlavorOnePoint;
+    }
+
+    assert(NO);
 }
 
 - (void)closeSession:(PTYSession *)aSession {
@@ -4590,7 +4619,13 @@ ITERM_WEAKLY_REFERENCEABLE
     if (_willClose) {
         return NO;
     }
-    if (newWindowType == _windowType) {
+    iTermWindowType effectiveWindowType;
+    if (_windowType == WINDOW_TYPE_LION_FULL_SCREEN) {
+        effectiveWindowType = _savedWindowType;
+    } else {
+        effectiveWindowType = _windowType;
+    }
+    if (newWindowType == effectiveWindowType) {
         return NO;
     }
     NSWindow *oldWindow = [[self.window retain] autorelease];
@@ -4602,6 +4637,8 @@ ITERM_WEAKLY_REFERENCEABLE
                  hotkeyWindowType:_hotkeyWindowType
                      initialFrame:[self traditionalFullScreenFrameForScreen:self.window.screen]];
     [self.window.ptyWindow setLayoutDone];
+    [[_contentView retain] autorelease];
+    [_contentView removeFromSuperview];
     self.window.contentView = _contentView;
     self.window.opaque = NO;
     self.window.delegate = self;
@@ -5047,6 +5084,10 @@ ITERM_WEAKLY_REFERENCEABLE
             return NO;
 
         case PSMTab_TopTab:
+            if ([iTermPreferences boolForKey:kPreferenceKeyFlashTabBarInFullscreen] &&
+                ![iTermPreferences boolForKey:kPreferenceKeyShowFullscreenTabBar]) {
+                return NO;
+            }
             break;
     }
 
@@ -6633,6 +6674,8 @@ static CGFloat iTermDimmingAmount(PSMTabBarControl *tabView) {
         return @([iTermAdvancedSettingsModel minimalTabStyleTreatLeftInsetAsPartOfFirstTab]);
     } else if ([option isEqualToString:PSMTabBarControlOptionMinimumSpaceForLabel]) {
         return @([iTermAdvancedSettingsModel minimumTabLabelWidth]);
+    } else if ([option isEqualToString:PSMTabBarControlOptionHighVisibility]) {
+        return @([iTermAdvancedSettingsModel highVisibility]);
     }
     return nil;
 }
@@ -7578,41 +7621,7 @@ static CGFloat iTermDimmingAmount(PSMTabBarControl *tabView) {
 }
 
 - (Profile *)profileForSplittingCurrentSession {
-    Profile *theBookmark = nil;
-    PTYSession *sourceSession = self.currentSession;
-
-    if ([iTermAdvancedSettingsModel useDivorcedProfileToSplit]) {
-        if (sourceSession.isDivorced) {
-            // NOTE: This counts on splitVertically:before:profile:targetSession: rewriting the GUID.
-            return self.currentSession.profile;
-        }
-    }
-
-    // Get the bookmark this session was originally created with. But look it up from its GUID because
-    // it might have changed since it was copied into originalProfile when the bookmark was
-    // first created.
-    Profile* originalBookmark = [sourceSession originalProfile];
-    if (originalBookmark && [originalBookmark objectForKey:KEY_GUID]) {
-        theBookmark = [[ProfileModel sharedInstance] bookmarkWithGuid:[originalBookmark objectForKey:KEY_GUID]];
-    }
-
-    // If that fails, use its current bookmark.
-    if (!theBookmark) {
-        theBookmark = [[self currentSession] profile];
-    }
-
-    // I don't think that'll ever fail, but to be safe try using the original bookmark.
-    if (!theBookmark) {
-        theBookmark = originalBookmark;
-    }
-
-    // I really don't think this'll ever happen, but there's always a default bookmark to fall back
-    // on.
-    if (!theBookmark) {
-        theBookmark = [[ProfileModel sharedInstance] defaultBookmark];
-    }
-
-    return theBookmark;
+    return [self.currentSession profileForSplit] ?: [[ProfileModel sharedInstance] defaultBookmark];
 }
 
 - (IBAction)splitVertically:(id)sender {

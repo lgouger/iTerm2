@@ -32,6 +32,7 @@ extern NSString *const iTermAdvancedSettingsDidChange;
 #pragma mark - Accessors
 
 + (BOOL)aboutToPasteTabsWithCancel;
++ (BOOL)accelerateUploads;
 + (BOOL)acceptOSC7;
 + (double)activeUpdateCadence;
 + (int)adaptiveFrameRateThroughputThreshold;
@@ -65,6 +66,7 @@ extern NSString *const iTermAdvancedSettingsDidChange;
 + (BOOL)copyWithStylesByDefault;
 + (BOOL)darkThemeHasBlackTitlebar;
 + (CGFloat)defaultTabBarHeight;
++ (int)defaultTabStopWidth;
 + (NSString *)defaultURLScheme;
 + (BOOL)detectPasswordInput;
 + (BOOL)disableAdaptiveFrameRateInInteractiveApps;
@@ -104,6 +106,7 @@ extern NSString *const iTermAdvancedSettingsDidChange;
 + (BOOL)fullHeightCursor;
 + (NSString *)gitSearchPath;
 + (BOOL)hideStuckTooltips;
++ (BOOL)highVisibility;
 + (double)hotKeyDoubleTapMaxDelay;
 + (double)hotKeyDoubleTapMinDelay;
 + (double)hotkeyTermAnimationDuration;
@@ -220,6 +223,7 @@ extern NSString *const iTermAdvancedSettingsDidChange;
 // black or white.
 + (double)smartCursorColorFgThreshold;
 
++ (NSString *)spacelessApplicationSupport;
 + (NSString *)sshSchemePath;
 + (BOOL)sshURLsSupportPath;
 + (BOOL)startDebugLoggingAutomatically;
@@ -259,6 +263,7 @@ extern NSString *const iTermAdvancedSettingsDidChange;
 + (NSString *)URLCharacterSet;
 + (NSString *)URLCharacterSetExclusions;
 + (BOOL)useAdaptiveFrameRate;
++ (BOOL)useBlackFillerColorForTmuxInFullScreen;
 + (BOOL)useColorfgbgFallback;
 + (BOOL)useDivorcedProfileToSplit;
 + (BOOL)useExperimentalFontMetrics;

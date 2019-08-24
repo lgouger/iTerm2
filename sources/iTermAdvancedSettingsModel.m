@@ -203,6 +203,7 @@ DEFINE_BOOL(doubleClickTabToEdit, YES, SECTION_TABS @"Should double-clicking a t
 DEFINE_FLOAT(minimumTabLabelWidth, 35, SECTION_TABS @"Minimum width for tab labels.\nThe activity/bell icon will be hidden when the space for the label drops below this size (in points)");
 DEFINE_BOOL(disregardDockSettingToOpenTabsInsteadOfWindows, YES, SECTION_TABS @"Ignore System Preferences > Dock > Prefer tabs when opening documents?\nWhen set to No, asking to open a window will open a tab instead when system preferences is configured to prefer tabs over windows. When set to Yes, asking to open a window may open a tab instead.");
 DEFINE_BOOL(convertTabDragToWindowDragForSolitaryTabInCompactOrMinimalTheme, YES, SECTION_TABS @"In the Minimal and Compact themes when there is a single tab and the tab bar is visible, should tab drags automatically be converted to window drags?");
+DEFINE_BOOL(highVisibility, YES, SECTION_TABS @"High Contrast modes maximize visibility.\nWhen enabled, the dark high-contrast theme emphasizes visibility over beauty.");
 
 #pragma mark Mouse
 
@@ -270,6 +271,7 @@ DEFINE_BOOL(acceptOSC7, YES, SECTION_TERMINAL @"Accept OSC 7 to set username, ho
 DEFINE_BOOL(detectPasswordInput, YES, SECTION_TERMINAL @"Show key at cursor at password prompt?");
 DEFINE_BOOL(tabsWrapAround, NO, SECTION_TERMINAL @"Tabs wrap around to the next line.\nThis is useful for preserving tabs for later copying to the pasteboard. It breaks backward compatibility and may cause layout problems with programs that don’t expect this behavior.");
 DEFINE_STRING(sshSchemePath, @"ssh", SECTION_TERMINAL @"Command to run when handling an ssh:// URL.");
+DEFINE_INT(defaultTabStopWidth, 8, SECTION_TERMINAL @"Default tab stop width for new sessions.");
 
 #pragma mark Hotkey
 
@@ -325,6 +327,7 @@ DEFINE_BOOL(useOldStyleDropDownViews, NO, SECTION_GENERAL @"Use old-style find a
 DEFINE_BOOL(loadFromFindPasteboard, YES, SECTION_GENERAL @"Synchronize search queries across windows and applications.\nNormally, when you enter a search query in a Find field all find fields in all applications get updated to hold the same value. This is utter nonsense, and can be disabled by setting this preference to No.");
 DEFINE_STRING(dynamicProfilesPath, @"", SECTION_GENERAL @"Path to folder with dynamic profiles.\nWhen empty, ~/Library/Application Support/iTerm2/DynamicProfiles will be used. You must restart iTerm2 after modifying this setting.");
 DEFINE_STRING(gitSearchPath, @"", SECTION_GENERAL @"$PATH used when running git for the status bar component.\nChange this to use a custom install of git. You must restart iTerm2 for a change here to take effect.");
+DEFINE_STRING(spacelessApplicationSupport, @"ApplicationSupport", SECTION_GENERAL @"Create a symlink to “Application Support” with this name.\nSet this to empty string to prevent the creation of any symlink.");
 
 #pragma mark - Drawing
 
@@ -358,7 +361,7 @@ DEFINE_BOOL(underlineHyperlinks, YES, SECTION_DRAWING @"Underline OSC 8 hyperlin
 
 DEFINE_BOOL(ignoreHardNewlinesInURLs, NO, SECTION_SEMANTIC_HISTORY @"Ignore hard newlines for the purposes of locating URLs and file names for Semantic History.\nIf a hard newline occurs at the end of a line then ⌘-click will not see it all unless this setting is turned on. This is useful for some interactive applications. Turning this on will remove newlines from the \\3 and \\4 substitutions.");
 // Note: square brackets are included for ipv6 addresses like http://[2600:3c03::f03c:91ff:fe96:6a7a]/
-DEFINE_STRING(URLCharacterSet, @".?\\/:;%=&_-,+~#@!*'(（)）|[]", SECTION_SEMANTIC_HISTORY @"Non-alphanumeric characters considered part of a URL for Semantic History.\nLetters and numbers are always considered part of the URL. These non-alphanumeric characters are used in addition for the purposes of figuring out where a URL begins and ends.");
+DEFINE_STRING(URLCharacterSet, @".?\\/:;%=&_-,+~#@!*'(（)）|[]", SECTION_SEMANTIC_HISTORY @"Non-alphanumeric characters considered part of a URL or file name for Semantic History.\nLetters and numbers are always considered part of the URL. These non-alphanumeric characters are used in addition for the purposes of figuring out where a URL begins and ends. You must restart iTerm2 for changes to this setting to take effect.");
 DEFINE_STRING(URLCharacterSetExclusions, @"¬", SECTION_SEMANTIC_HISTORY @"Characters never considered part of a URL.\nThe characters in this string may never occur in a URL; when one is seen that delineates the beginning or end of a URL.");
 DEFINE_INT(maxSemanticHistoryPrefixOrSuffix, 2000, SECTION_SEMANTIC_HISTORY @"Maximum number of bytes of text before and after click location to take into account.\nThis also limits the size of the \\3 and \\4 substitutions.");
 DEFINE_STRING(pathsToIgnore, @"", SECTION_SEMANTIC_HISTORY @"Paths to ignore for Semantic History.\nSeparate paths with a comma. Any file under one of these paths will not be openable with Semantic History. It is wise to add network file systems to this list, since they can be very slow.");
@@ -421,6 +424,7 @@ DEFINE_BOOL(noSyncNewWindowOrTabFromTmuxOpensTmux, NO, SECTION_TMUX @"Suppress a
 DEFINE_BOOL(noSyncNewWindowFromTmuxOpensTmux, NO, SECTION_TMUX @"Suppress alert asking what kind of window to open in tmux integration.\nNOTE: This only takes effect if the now-deprecated “Suppress alert asking what kind of tab/window to open in tmux integration” setting is off.");
 DEFINE_BOOL(noSyncNewTabFromTmuxOpensTmux, NO, SECTION_TMUX @"Suppress alert asking what kind of tab to open in tmux integration.\nNOTE: This only takes effect if the now-deprecated “Suppress alert asking what kind of tab/window to open in tmux integration” setting is off.");
 DEFINE_BOOL(tolerateUnrecognizedTmuxCommands, NO, SECTION_TMUX @"Tolerate unrecognized commands from server.\nIf enabled, an unknown command from tmux (such as output from ssh or wall) will end the session. Turning this off helps detect dead ssh sessions.");
+DEFINE_BOOL(useBlackFillerColorForTmuxInFullScreen, NO, SECTION_TMUX @"Use black for filler area in tmux windows in full screen.");
 
 #pragma mark Warnings
 
@@ -524,6 +528,7 @@ DEFINE_BOOL(clearBellIconAggressively, YES, SECTION_EXPERIMENTAL @"Clear bell ic
 DEFINE_BOOL(workAroundNumericKeypadBug, YES, SECTION_EXPERIMENTAL @"Treat the equals sign on the numeric keypad as a key on the numeric keypad.\nFor mysterious reasons, macOS does not treat this key as belonging to the numeric keypad. Enable this setting to work around the bug.");
 DEFINE_BOOL(tmuxVariableWindowSizesSupported, NO, SECTION_EXPERIMENTAL @"Allow variable window sizes in tmux integration");
 DEFINE_BOOL(aggressiveBaseCharacterDetection, NO, SECTION_EXPERIMENTAL @"Detect base unicode characters with lookup table.\nApple's algorithm for segmenting composed characters makes bad choices, such as for Tamil. Enable this to reduce text overlapping.");
+DEFINE_BOOL(accelerateUploads, YES, SECTION_EXPERIMENTAL @"Make uploads with it2ul really fast.");
 
 #pragma mark - Scripting
 #define SECTION_SCRIPTING @"Scripting: "

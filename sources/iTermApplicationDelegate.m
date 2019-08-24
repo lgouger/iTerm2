@@ -1289,6 +1289,8 @@ static BOOL hasBecomeActive = NO;
     if ([iTermAPIHelper isEnabled]) {
         [iTermAPIHelper sharedInstance];  // starts the server. Won't ask the user since it's enabled.
     }
+    // This causes it to enable secure keyboard entry if needed.
+    [iTermSecureKeyboardEntryController sharedInstance];
 }
 
 - (NSMenu *)statusBarMenu {
@@ -2004,7 +2006,18 @@ static BOOL hasBecomeActive = NO;
                                                                                         pythonVersion:nil
                                                                             minimumEnvironmentVersion:0
                                                                                    requiredToContinue:NO
-                                                                                       withCompletion:^(iTermPythonRuntimeDownloaderStatus ok) {}];
+                                                                                       withCompletion:
+     ^(iTermPythonRuntimeDownloaderStatus status) {
+         if (status == iTermPythonRuntimeDownloaderStatusNotNeeded) {
+             [iTermWarning showWarningWithTitle:@"You’re up to date!"
+                                        actions:@[ @"OK" ]
+                                      accessory:nil
+                                     identifier:nil
+                                    silenceable:kiTermWarningTypePersistent
+                                        heading:@"Python Runtime"
+                                         window:nil];
+         }
+     }];
 }
 
 - (IBAction)buildScriptMenu:(id)sender {
