@@ -1355,7 +1355,7 @@ ITERM_WEAKLY_REFERENCEABLE
     }
 
     aSession.shortLivedSingleUse = [arrangement[SESSION_ARRANGEMENT_SHORT_LIVED_SINGLE_USE] boolValue];
-    aSession.hostnameToShell = [arrangement[SESSION_ARRANGEMENT_HOSTNAME_TO_SHELL] mutableCopy];
+    aSession.hostnameToShell = [[arrangement[SESSION_ARRANGEMENT_HOSTNAME_TO_SHELL] mutableCopy] autorelease];
 
     if (arrangement[SESSION_ARRANGEMENT_SUBSTITUTIONS]) {
         aSession.substitutions = arrangement[SESSION_ARRANGEMENT_SUBSTITUTIONS];
@@ -1524,7 +1524,7 @@ ITERM_WEAKLY_REFERENCEABLE
          ^(NSString * _Nonnull filename) {
              if (filename) {
                  [aSession.shell startLoggingToFileWithPath:filename
-                                               shouldAppend:NO];
+                                               shouldAppend:[iTermAdvancedSettingsModel autologAppends]];
              }
              [aSession autorelease];
              runCommandBlock(finish);
@@ -4486,8 +4486,6 @@ ITERM_WEAKLY_REFERENCEABLE
     if (processInfo) {
         [self updateTitleWithProcessInfo:processInfo];
         return;
-    } else {
-        [self updateTitleWithProcessInfo:nil];
     }
     __weak __typeof(self) weakSelf = self;
     [_shell fetchProcessInfoForCurrentJobWithCompletion:^(iTermProcessInfo *processInfo) {
@@ -4496,7 +4494,7 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (void)updateTitleWithProcessInfo:(iTermProcessInfo *)processInfo {
-    DLog(@"Job for pid %@ is %@, pid=%@", @(_shell.pid), processInfo.name, @(processInfo.processID));
+    DLog(@"%@ Job for pid %@ is %@, pid=%@", self, @(_shell.pid), processInfo.name, @(processInfo.processID));
     [self setCurrentForegroundJobProcessInfo:processInfo];
 
     if ([_delegate sessionBelongsToVisibleTab]) {
@@ -4511,11 +4509,15 @@ ITERM_WEAKLY_REFERENCEABLE
 }
 
 - (void)setCurrentForegroundJobProcessInfo:(iTermProcessInfo *)processInfo {
+    DLog(@"%p set job name to %@", self, processInfo.name);
     [self.variablesScope setValue:processInfo.name forVariableNamed:iTermVariableKeySessionJob];
     [self.variablesScope setValue:processInfo.commandLine forVariableNamed:iTermVariableKeySessionCommandLine];
     [self.variablesScope setValue:@(processInfo.processID) forVariableNamed:iTermVariableKeySessionJobPid];
-    if (!_exited && _shell.pid > 0) {
-        [self.variablesScope setValue:@(_shell.pid) forVariableNamed:iTermVariableKeySessionChildPid];
+
+    NSNumber *effectiveShellPID = _shell.tmuxClientProcessID ?: @(_shell.pid);
+    if (!_exited && effectiveShellPID.intValue > 0) {
+        [self.variablesScope setValue:effectiveShellPID
+                     forVariableNamed:iTermVariableKeySessionChildPid];
     }
 
     [self tryAutoProfileSwitchWithHostname:self.variablesScope.hostname
@@ -5742,6 +5744,7 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
                 break;
             case TMUX_CLIENT:
                 name = @"client";
+                [self loadTmuxProcessID];
                 [self installTmuxStatusBarMonitor];
                 [self installTmuxTitleMonitor];
                 [self replaceWorkingDirectoryPollerWithTmuxWorkingDirectoryPoller];
@@ -5749,6 +5752,29 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
         }
         [self.variablesScope setValue:name forVariableNamed:iTermVariableKeySessionTmuxRole];
     });
+}
+
+- (void)loadTmuxProcessID {
+    if (!_tmuxController.serverIsLocal) {
+        return;
+    }
+    NSString *command = [NSString stringWithFormat:@"display-message -t '%@' -p '#{pane_pid}'", @(self.tmuxPane)];
+    DLog(@"Request pane PID with command %@", command);
+    [_tmuxController.gateway sendCommand:command
+                          responseTarget:self
+                        responseSelector:@selector(didFetchTmuxPid:)
+                          responseObject:nil
+                                   flags:kTmuxGatewayCommandShouldTolerateErrors];
+}
+
+- (void)didFetchTmuxPid:(NSString *)pidString {
+    if (pidString && self.tmuxMode == TMUX_CLIENT && _tmuxController.serverIsLocal) {
+        NSNumber *pid = @([pidString integerValue]);
+        if (pid.intValue > 0) {
+            _shell.tmuxClientProcessID = pid;
+            [self updateTitles];
+        }
+    }
 }
 
 - (void)replaceWorkingDirectoryPollerWithTmuxWorkingDirectoryPoller {
@@ -11473,7 +11499,7 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
 }
 
 - (iTermCopyModeState *)copyModeHandlerCreateState:(iTermCopyModeHandler *)handler NOT_COPY_FAMILY {
-    iTermCopyModeState *state = [[iTermCopyModeState alloc] init];
+    iTermCopyModeState *state = [[[iTermCopyModeState alloc] init] autorelease];
     state.coord = VT100GridCoordMake(_screen.cursorX - 1,
                                      _screen.cursorY - 1 + _screen.numberOfScrollbackLines);
     state.numberOfLines = _screen.numberOfLines;
