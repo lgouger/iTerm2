@@ -39,6 +39,7 @@ static NSString * const kColorGalleryURL = @"https://www.iterm2.com/colorgallery
     IBOutlet CPKColorWell *_foregroundColor;
     IBOutlet CPKColorWell *_backgroundColor;
     IBOutlet NSButton *_useBrightBold;  // Respect bold
+    IBOutlet NSButton *_brightenBoldText;
     IBOutlet CPKColorWell *_boldColor;
     IBOutlet CPKColorWell *_linkColor;
     IBOutlet CPKColorWell *_selectionColor;
@@ -209,6 +210,12 @@ static NSString * const kColorGalleryURL = @"https://www.iterm2.com/colorgallery
                           type:kPreferenceInfoTypeCheckbox];
     info.observer = ^{ [weakSelf updateColorControlsEnabled]; };
 
+    info = [self defineControl:_brightenBoldText
+                           key:KEY_BRIGHTEN_BOLD_TEXT
+                   displayName:@"Brighten bold text"
+                          type:kPreferenceInfoTypeCheckbox];
+    info.observer = ^{ [weakSelf updateColorControlsEnabled]; };
+
     [self addViewToSearchIndex:_presetsPopupButton
                    displayName:@"Color presets"
                        phrases:@[]
@@ -344,8 +351,8 @@ static NSString * const kColorGalleryURL = @"https://www.iterm2.com/colorgallery
     if ([openPanel runModal] == NSModalResponseOK) {
         // Get an array containing the full filenames of all
         // files and directories selected.
-        for (NSString* filename in [openPanel legacyFilenames]) {
-            [iTermColorPresets importColorPresetFromFile:filename];
+        for (NSURL *url in openPanel.URLs) {
+            [iTermColorPresets importColorPresetFromFile:url.path];
         }
     }
 }

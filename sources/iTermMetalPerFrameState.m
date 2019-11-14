@@ -758,6 +758,7 @@ ambiguousIsDoubleWidth:(BOOL)ambiguousIsDoubleWidth
                                                                                    _configuration->_blinkAllowed);
         const BOOL isBoxDrawingCharacter = (characterIsDrawable &&
                                             !line[x].complexChar &&
+                                            line[x].code > 127 &&
                                             [boxCharacterSet characterIsMember:line[x].code]);
         // Foreground colors
         // Build up a compact key describing all the inputs to a text color
@@ -1052,7 +1053,7 @@ ambiguousIsDoubleWidth:(BOOL)ambiguousIsDoubleWidth
                     if (isBackgroundForDefault) {
                         return kColorMapBackground;
                     } else {
-                        if (isBold && _configuration->_useBoldColor) {
+                        if (isBold && _configuration->_useCustomBoldColor) {
                             return kColorMapBold;
                         } else {
                             return kColorMapForeground;
@@ -1067,7 +1068,7 @@ ambiguousIsDoubleWidth:(BOOL)ambiguousIsDoubleWidth
             // display setting (esc[1m) as "bold or bright". We make it a
             // preference.
             if (isBold &&
-                _configuration->_useBoldColor &&
+                _configuration->_brightenBold &&
                 (theIndex < 8) &&
                 !isBackground) { // Only colors 0-7 can be made "bright".
                 theIndex |= 8;  // set "bright" bit.
@@ -1143,7 +1144,10 @@ ambiguousIsDoubleWidth:(BOOL)ambiguousIsDoubleWidth
     NSMutableDictionary<NSNumber *, iTermCharacterBitmap *> *result = [NSMutableDictionary dictionary];
     [characterSource.parts enumerateObjectsUsingBlock:^(NSNumber * _Nonnull partNumber, NSUInteger idx, BOOL * _Nonnull stop) {
         int part = partNumber.intValue;
-        if (isAscii && part != iTermImagePartFromDeltas(0, 0)) {
+        if (isAscii &&
+            part != iTermImagePartFromDeltas(0, 0) &&
+            part != iTermImagePartFromDeltas(-1, 0) &&
+            part != iTermImagePartFromDeltas(1, 0)) {
             return;
         }
         result[partNumber] = [characterSource bitmapForPart:part];

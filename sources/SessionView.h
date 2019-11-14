@@ -114,6 +114,7 @@ extern NSString *const SessionViewWasSelectedForInspectionNotification;
 
 // Returns the accepted size.
 - (NSSize)sessionViewScrollViewWillResize:(NSSize)proposedSize;
+- (void)sessionViewScrollViewDidResize;
 
 // User double clicked on title view.
 - (void)sessionViewDoubleClickOnTitleBar;
@@ -225,7 +226,7 @@ typedef NS_ENUM(NSUInteger, iTermSessionViewFindDriver) {
 - (void)createSplitSelectionView;
 - (SplitSessionHalf)removeSplitSelectionView;
 
-- (void)setHoverURL:(NSString *)url;
+- (BOOL)setHoverURL:(NSString *)url;
 - (BOOL)hasHoverURL;
 - (void)reallyUpdateMetalViewFrame;
 - (void)invalidateStatusBar;

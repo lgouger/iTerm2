@@ -203,9 +203,11 @@ static const NSUInteger kRectangularSelectionModifierMask = (kRectangularSelecti
         VT100GridCoordEquals(coord, VT100GridCoordInvalid) ||
         ![iTermPreferences boolForKey:kPreferenceKeyCmdClickOpensURLs] ||
         coord.y < 0) {
-        [self removeUnderline];
-        [self updateCursor:event action:nil];
-        [self setNeedsDisplay:YES];
+        const BOOL changedUnderline = [self removeUnderline];
+        const BOOL cursorChanged = [self updateCursor:event action:nil];
+        if (changedUnderline || cursorChanged) {
+            [self setNeedsDisplay:YES];
+        }
         return;
     }
 
@@ -279,7 +281,12 @@ static const NSUInteger kRectangularSelectionModifierMask = (kRectangularSelecti
 - (void)contextMenuActionRunCommandInWindow:(id)sender {
     NSString *command = [sender representedObject];
     DLog(@"Run command in window: %@", command);
-    [[iTermController sharedInstance] openSingleUseWindowWithCommand:command];
+    [[iTermController sharedInstance] openSingleUseWindowWithCommand:command
+                                                              inject:nil
+                                                         environment:nil
+                                                                 pwd:nil
+                                                             options:iTermSingleUseWindowOptionsDoNotEscapeArguments
+                                                          completion:nil];
 }
 
 + (void)runCommand:(NSString *)command {
@@ -302,7 +309,7 @@ static const NSUInteger kRectangularSelectionModifierMask = (kRectangularSelecti
 
 #pragma mark - Mouse Cursor
 
-- (void)updateCursor:(NSEvent *)event action:(URLAction *)action {
+- (BOOL)updateCursor:(NSEvent *)event action:(URLAction *)action {
     NSString *hover = nil;
     BOOL changed = NO;
     if (([event it_modifierFlags] & kDragPaneModifiers) == kDragPaneModifiers) {
@@ -326,7 +333,7 @@ static const NSUInteger kRectangularSelectionModifierMask = (kRectangularSelecti
     if (changed) {
         [self.enclosingScrollView setDocumentCursor:cursor_];
     }
-    [self.delegate textViewShowHoverURL:hover];
+    return [self.delegate textViewShowHoverURL:hover];
 }
 
 - (BOOL)setCursor:(NSCursor *)cursor {

@@ -89,7 +89,7 @@
 - (void)resetDirty;
 
 // Save the current state to a new frame in the dvr.
-- (void)saveToDvr;
+- (void)saveToDvr:(NSIndexSet *)cleanLines;
 
 // If this returns true then the textview will broadcast iTermTabContentsChanged
 // when a dirty char is found.
@@ -98,6 +98,8 @@
 // Smallest range that contains all dirty chars for a line at a screen location.
 // NOTE: y is a grid index and cannot refer to scrollback history.
 - (VT100GridRange)dirtyRangeForLine:(int)y;
+
+- (BOOL)textViewGetAndResetHasScrolled;
 
 // Returns the last modified date for a given line.
 - (NSDate *)timestampForLine:(int)y;

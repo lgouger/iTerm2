@@ -56,6 +56,20 @@ class App:
         windows = App._windows_from_list_sessions_response(connection, list_sessions_response)
         buried_sessions = App._buried_sessions_from_list_sessions_response(connection, list_sessions_response)
         app = App(connection, windows, buried_sessions)
+
+        def get_tab_from_session(session):
+            w, t = app.get_window_and_tab_for_session(session)
+            return t
+        def get_window_from_session(session):
+            w, t = app.get_window_and_tab_for_session(session)
+            return w
+        def get_window_from_tab(tab):
+            return app.get_window_for_tab(tab.tab_id)
+
+        iterm2.Session.get_tab = get_tab_from_session
+        iterm2.Session.get_window = get_window_from_session
+        iterm2.Tab.get_window = get_window_from_tab
+
         await app._async_listen()
         await app.async_refresh_focus()
         await app.async_refresh_broadcast_domains()
@@ -229,28 +243,31 @@ class App:
         for new_window in new_windows:
             for new_tab in new_window.tabs:
                 for new_session in new_tab.sessions:
+                    # Update existing sessions
                     old = self.get_session_by_id(new_session.session_id)
                     if old is not None:
                         # Upgrade the old session's state
                         old.update_from(new_session)
                         # Replace references to the new session in the new tab with the old session
                         new_tab.update_session(old)
-                    old_tab = self.get_tab_by_id(new_tab.tab_id)
-                    if old_tab is not None:
-                        # Upgrade the old tab's state. This copies the root over. The new tab
-                        # has references to old sessions, so it's ok. The only problem is that
-                        # splitters are left in the old state.
-                        old_tab.update_from(new_tab)
-                        # Replace the reference in the new window to the old tab.
-                        new_window.update_tab(old_tab)
-                    if new_window.window_id not in new_ids:
-                        new_ids.append(new_window.window_id)
-                        old_window = self.get_window_by_id(new_window.window_id)
-                        if old_window is not None:
-                            old_window.update_from(new_window)
-                            windows.append(old_window)
-                        else:
-                            windows.append(new_window)
+                # Update existing tabs
+                old_tab = self.get_tab_by_id(new_tab.tab_id)
+                if old_tab is not None:
+                    # Upgrade the old tab's state. This copies the root over. The new tab
+                    # has references to old sessions, so it's ok. The only problem is that
+                    # splitters are left in the old state.
+                    old_tab.update_from(new_tab)
+                    # Replace the reference in the new window to the old tab.
+                    new_window.update_tab(old_tab)
+            # Update existing windows.
+            if new_window.window_id not in new_ids:
+                new_ids.append(new_window.window_id)
+                old_window = self.get_window_by_id(new_window.window_id)
+                if old_window is not None:
+                    old_window.update_from(new_window)
+                    windows.append(old_window)
+                else:
+                    windows.append(new_window)
 
         new_sessions = list(all_sessions(self.terminal_windows))
 
@@ -323,7 +340,7 @@ class App:
         return domain_list
 
     @property
-    def current_terminal_window(self) -> typing.Union[iterm2.window.Window, None]:
+    def current_window(self) -> typing.Optional[iterm2.window.Window]:
         """Gets the topmost terminal window.
 
         The current terminal window is the window that receives keyboard input
@@ -334,12 +351,22 @@ class App:
         return self.get_window_by_id(self.current_terminal_window_id)
 
     @property
-    def terminal_windows(self) -> typing.List[iterm2.window.Window]:
+    def current_terminal_window(self) -> typing.Union[iterm2.window.Window, None]:
+        """Deprecated in favor of current_window."""
+        return self.current_window
+
+    @property
+    def windows(self) -> typing.List[iterm2.window.Window]:
         """Returns a list of all terminal windows.
 
         :returns: A list of :class:`Window`
         """
         return self.__terminal_windows
+
+    @property
+    def terminal_windows(self) -> typing.List[iterm2.window.Window]:
+        """Deprecated in favor of `windows`"""
+        return self.windows
 
     @property
     def buried_sessions(self) -> typing.List[iterm2.session.Session]:

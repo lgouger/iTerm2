@@ -190,21 +190,23 @@ typedef NS_OPTIONS(NSUInteger, iTermSingleUseWindowOptions) {
     iTermSingleUseWindowOptionsCloseOnTermination = (1 << 1),
     // Bury it immediately?
     iTermSingleUseWindowOptionsInitiallyBuried = (1 << 2),
+    // Don't escape arguments
+    iTermSingleUseWindowOptionsDoNotEscapeArguments = (1 << 3)
 };
 
-- (PTYSession *)openSingleUseWindowWithCommand:(NSString *)command;
 - (PTYSession *)openSingleUseWindowWithCommand:(NSString *)command
-                                        inject:(NSData *)injection
-                                   environment:(NSDictionary *)environment;
-- (PTYSession *)openSingleUseWindowWithCommand:(NSString *)command
-                                        inject:(NSData *)injection
-                                   environment:(NSDictionary *)environment
-                                    completion:(void (^)(void))completion;
-- (PTYSession *)openSingleUseWindowWithCommand:(NSString *)command
+                                     arguments:(NSArray<NSString *> *)arguments
                                         inject:(NSData *)injection
                                    environment:(NSDictionary *)environment
                                            pwd:(NSString *)initialPWD
                                options:(iTermSingleUseWindowOptions)options
+                                    completion:(void (^)(void))completion;
+
+- (PTYSession *)openSingleUseWindowWithCommand:(NSString *)rawCommand
+                                        inject:(NSData *)injection
+                                   environment:(NSDictionary *)environment
+                                           pwd:(NSString *)initialPWD
+                                       options:(iTermSingleUseWindowOptions)options
                                     completion:(void (^)(void))completion;
 @end
 

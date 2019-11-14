@@ -6,6 +6,8 @@
 //
 
 #import "TmuxHistoryParser.h"
+
+#import "iTermMalloc.h"
 #import "ScreenChar.h"
 #import "VT100Terminal.h"
 
@@ -46,7 +48,7 @@
 
         if (string) {
             // Allocate double space in case they're all double-width characters.
-            screenChars = malloc(sizeof(screen_char_t) * 2 * string.length);
+            screenChars = iTermMalloc(sizeof(screen_char_t) * 2 * string.length);
             int len = 0;
             StringToScreenChars(string,
                                 screenChars,
@@ -83,6 +85,7 @@
     NSArray *lines = [response componentsSeparatedByString:@"\n"];
     NSMutableArray *screenLines = [NSMutableArray array];
     VT100Terminal *terminal = [[[VT100Terminal alloc] init] autorelease];
+    terminal.tmuxMode = YES;
     [terminal setEncoding:NSUTF8StringEncoding];
     for (NSString *line in lines) {
         NSData *data = [self dataForHistoryLine:line

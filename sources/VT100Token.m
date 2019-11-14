@@ -7,7 +7,11 @@
 //
 
 #import "VT100Token.h"
+
 #import "DebugLogging.h"
+#import "iTermAdvancedSettingsModel.h"
+#import "iTermMalloc.h"
+
 #include <stdlib.h>
 
 @interface VT100Token ()
@@ -246,7 +250,7 @@
 
     _asciiData.length = length;
     if (length > sizeof(_asciiData.staticBuffer)) {
-        _asciiData.buffer = malloc(length);
+        _asciiData.buffer = iTermMalloc(length);
     } else {
         _asciiData.buffer = _asciiData.staticBuffer;
     }
@@ -277,11 +281,57 @@
         _screenChars.buffer = _screenChars.staticBuffer;
         memset(_screenChars.buffer, 0, _asciiData.length * sizeof(screen_char_t));
     }
-    for (int i = 0; i < _asciiData.length; i++) {
+    const NSInteger length = _asciiData.length;
+    for (NSInteger i = 0; i < length; i++) {
         _screenChars.buffer[i].code = _asciiData.buffer[i];
     }
     _screenChars.length = _asciiData.length;
     _asciiData.screenChars = &_screenChars;
+}
+
+- (void)translateFromScreenTerminal {
+    switch (type) {
+        case VT100CSI_SGR:
+            if (self.csi) {
+                [self translateSGRFromScreenTerminal];
+            }
+            break;
+        case VT100CSI_DECSET:
+        case VT100CSI_DECRST: [self translateDECSETFromScreenTerminal];
+            break;
+        default:
+            break;
+    }
+}
+
+// There is a lot more that can be done to perform this translation but remapping italic->inverse
+// is particularly visible.
+- (void)translateSGRFromScreenTerminal {
+    for (int i = 0; i < self.csi->count; i++) {
+        switch (self.csi->p[i]) {
+            case 3:
+                if ([iTermAdvancedSettingsModel convertItalicsToReverseVideoForTmux]) {
+                    self.csi->p[i] = 7;
+                }
+                break;
+            case 23:
+                if ([iTermAdvancedSettingsModel convertItalicsToReverseVideoForTmux]) {
+                    self.csi->p[i] = 27;
+                }
+                break;
+        }
+    }
+}
+
+- (void)translateDECSETFromScreenTerminal {
+    for (int i = 0; i < self.csi->count; i++) {
+        switch (self.csi->p[i]) {
+            case 5:
+                // screen doesn't support reversing the whole screen.
+                self.csi->p[i] = -1;
+                break;
+        }
+    }
 }
 
 @end

@@ -1,4 +1,6 @@
 #import <Foundation/Foundation.h>
+
+#import "iTermMalloc.h"
 #import "iTermParser.h"
 #import "ScreenChar.h"
 
@@ -268,5 +270,7 @@ typedef struct {
 
 // Returns a string for |asciiData|, for convenience (this is slow).
 - (NSString *)stringForAsciiData;
+
+- (void)translateFromScreenTerminal;
 
 @end

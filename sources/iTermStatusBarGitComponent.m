@@ -159,7 +159,15 @@ static const NSTimeInterval iTermStatusBarGitComponentDefaultCadence = 2;
 }
 
 - (NSArray<NSAttributedString *> *)attributedStringVariants {
-    return @[ self.attributedStringValue ?: [self attributedStringWithString:@""] ];
+    NSArray<NSAttributedString *> *result = [[[self variantsOfCurrentStateBranch] mapWithBlock:^id(NSString *branch) {
+        return [self attributedStringValueForBranch:branch];
+    }] sortedArrayUsingComparator:^NSComparisonResult(NSAttributedString * _Nonnull obj1, NSAttributedString * _Nonnull obj2) {
+        return [@(obj1.length) compare:@(obj2.length)];
+    }];
+    if (result.count == 0) {
+        return @[ [self attributedStringWithString:@""] ];
+    }
+    return result;
 }
 
 - (NSParagraphStyle *)paragraphStyle {
@@ -206,7 +214,36 @@ static const NSTimeInterval iTermStatusBarGitComponentDefaultCadence = 2;
     return self.currentState && _gitPoller.enabled;
 }
 
-- (nullable NSAttributedString *)attributedStringValue {
+- (NSArray<NSString *> *)variantsOfBranch:(NSString *)branch {
+    NSIndexSet *dividers = [branch indicesOfCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"-_./+,"]];
+    NSMutableArray<NSString *> *result = [NSMutableArray array];
+    [dividers enumerateIndexesUsingBlock:^(NSUInteger idx, BOOL * _Nonnull stop) {
+        const NSRange composedRange = [branch rangeOfComposedCharacterSequenceAtIndex:idx];
+        const NSInteger limit = NSMaxRange(composedRange);
+        NSString *const branchPrefix = [branch substringToIndex:limit];
+        [result addObject:[branchPrefix stringByAppendingString:@"…"]];
+    }];
+    [result addObject:branch];
+    return [result uniq];
+}
+
+- (NSArray<NSString *> *)variantsOfCurrentStateBranch {
+    NSString *branch = self.currentState.branch;
+    if (!branch) {
+        return nil;
+    }
+
+    iTermTuple<NSString *, NSString *> *remoteAndBranch = [branch it_stringBySplittingOnFirstSubstring:@"/"];
+    if (remoteAndBranch) {
+        NSArray<NSString *> *variants = [self variantsOfBranch:remoteAndBranch.secondObject];
+        return [variants mapWithBlock:^id(NSString *anObject) {
+            return [NSString stringWithFormat:@"%@/%@", remoteAndBranch.firstObject, anObject];
+        }];
+    }
+    return [self variantsOfBranch:branch];
+}
+
+- (nullable NSAttributedString *)attributedStringValueForBranch:(NSString *)branchString {
     if (_status) {
         return [self attributedStringWithString:_status];
     }
@@ -237,7 +274,7 @@ static const NSTimeInterval iTermStatusBarGitComponentDefaultCadence = 2;
     if (self.currentState.xcode.length > 0) {
         return [self attributedStringWithString:@"⚠️"];
     }
-    NSAttributedString *branch = self.currentState.branch ? [self attributedStringWithString:self.currentState.branch] : nil;
+    NSAttributedString *branch = branchString ? [self attributedStringWithString:branchString] : nil;
     if (!branch) {
         return nil;
     }
@@ -623,18 +660,15 @@ static NSArray<NSString *> *NonEmptyLinesInString(NSString *output) {
     
     _status = status;
     [self updateTextFieldIfNeeded];
-    NSArray<NSString *> *escaped = [args mapWithBlock:^id(NSString *arg) {
-        return [arg stringWithEscapedShellCharactersIncludingNewlines:YES];
-    }];
     NSString *gitWrapper = [[NSBundle bundleForClass:self.class] pathForResource:@"iterm2_git_wrapper" ofType:@"sh"];
-    NSString *command = [NSString stringWithFormat:@"%@ %@", gitWrapper, [escaped componentsJoinedByString:@" "]];
     __weak __typeof(self) weakSelf = self;
     iTermSingleUseWindowOptions options = (iTermSingleUseWindowOptionsCloseOnTermination |
                                            iTermSingleUseWindowOptionsShortLived);
     if (bury) {
         options |= iTermSingleUseWindowOptionsInitiallyBuried;
     }
-    _session = [[iTermController sharedInstance] openSingleUseWindowWithCommand:command
+    _session = [[iTermController sharedInstance] openSingleUseWindowWithCommand:gitWrapper
+                                                                      arguments:args
                                                                          inject:nil
                                                                     environment:nil
                                                                             pwd:pwd

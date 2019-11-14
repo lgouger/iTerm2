@@ -822,10 +822,6 @@ NSLog(@"Known bug: %s should be true, but %s is.", #expressionThatShouldBeTrue, 
 - (void)screenPromptDidStartAtLine:(int)line {
 }
 
-- (BOOL)screenInTmuxMode {
-    return NO;
-}
-
 - (NSIndexSet *)selectionIndexesOnLine:(int)line
                    containingCharacter:(unichar)c
                                inRange:(NSRange)range {
@@ -909,6 +905,17 @@ NSLog(@"Known bug: %s should be true, but %s is.", #expressionThatShouldBeTrue, 
 
 - (void)screenDidDetectShell:(NSString *)shell {
 }
+
+- (void)screenCommandDidExitWithCode:(int)code {
+}
+
+- (BOOL)screenConfirmDownloadCanExceedSize:(NSInteger)limit {
+    return YES;
+}
+
+- (void)screenWillReceiveFileNamed:(NSString *)name ofSize:(NSInteger)size preconfirmed:(BOOL)preconfirmed {
+}
+
 
 
 #pragma mark - iTermSelectionDelegate
@@ -2744,10 +2751,10 @@ NSLog(@"Known bug: %s should be true, but %s is.", #expressionThatShouldBeTrue, 
     VT100Screen *screen = [self screenWithWidth:20 height:3];
     screen.delegate = (id<VT100ScreenDelegate>)self;
     [self appendLines:@[ @"Line 1", @"Line 2"] toScreen:screen];
-    [screen saveToDvr];
+    [screen saveToDvr:nil];
 
     [self appendLines:@[ @"Line 3"] toScreen:screen];
-    [screen saveToDvr];
+    [screen saveToDvr:nil];
 
     DVRDecoder *decoder = [screen.dvr getDecoder];
     [decoder seek:0];

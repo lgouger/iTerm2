@@ -724,7 +724,11 @@ static BOOL hasBecomeActive = NO;
     // Display prompt if we need to
     if (!quittingBecauseLastWindowClosed_ &&  // cmd-q
         [iTermPreferences boolForKey:kPreferenceKeyPromptOnQuit]) {  // preference is to prompt on quit cmd
-        [reason addReason:[iTermPromptOnCloseReason alwaysConfirmQuitPreferenceEnabled]];
+        if (terminals.count > 0) {
+            [reason addReason:[iTermPromptOnCloseReason alwaysConfirmQuitPreferenceEnabled]];
+        } else if ([iTermPreferences boolForKey:kPreferenceKeyPromptOnQuitEvenIfThereAreNoWindows]) {
+            [reason addReason:[iTermPromptOnCloseReason alwaysConfirmQuitPreferenceEvenIfThereAreNoWindowsEnabled]];
+        }
     }
     quittingBecauseLastWindowClosed_ = NO;
     if ([iTermPreferences boolForKey:kPreferenceKeyConfirmClosingMultipleTabs] && numSessions > 1) {
@@ -1436,12 +1440,21 @@ static BOOL hasBecomeActive = NO;
     [closeWindow setKeyEquivalentModifierMask:NSEventModifierFlagCommand];
 }
 
-- (void)updateAddressBookMenu:(NSNotification*)aNotification {
-    DLog(@"Updating address book menu");
+- (void)updateAddressBookMenu:(NSNotification *)aNotification {
+    DLog(@"Updating Profile menu");
     JournalParams params;
-    params.selector = @selector(newSessionInTabAtIndex:);
+    if ([iTermAdvancedSettingsModel openProfilesInNewWindow]) {
+        params.selector = @selector(newSessionInWindowAtIndex:);
+        params.alternateSelector = @selector(newSessionInTabAtIndex:);
+        [bookmarkMenu itemAtIndex:2].title = [[bookmarkMenu itemAtIndex:2].title stringByReplacingOccurrencesOfString:@"Window" withString:@"Tab"];
+        [bookmarkMenu itemAtIndex:3].title = [[bookmarkMenu itemAtIndex:3].title stringByReplacingOccurrencesOfString:@"Window" withString:@"Tab"];
+    } else {
+        params.selector = @selector(newSessionInTabAtIndex:);
+        params.alternateSelector = @selector(newSessionInWindowAtIndex:);
+        [bookmarkMenu itemAtIndex:2].title = [[bookmarkMenu itemAtIndex:2].title stringByReplacingOccurrencesOfString:@"Tab" withString:@"Window"];
+        [bookmarkMenu itemAtIndex:3].title = [[bookmarkMenu itemAtIndex:3].title stringByReplacingOccurrencesOfString:@"Tab" withString:@"Window"];
+    }
     params.openAllSelector = @selector(newSessionsInWindow:);
-    params.alternateSelector = @selector(newSessionInWindowAtIndex:);
     params.alternateOpenAllSelector = @selector(newSessionsInWindow:);
     params.target = [iTermController sharedInstance];
 
@@ -2046,14 +2059,17 @@ static BOOL hasBecomeActive = NO;
          if (![iTermAPIHelper sharedInstanceFromExplicitUserAction]) {
              return;
          }
-         NSString *command = [[[[[iTermPythonRuntimeDownloader sharedInstance] pathToStandardPyenvPythonWithPythonVersion:nil] stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"apython"] stringWithEscapedShellCharactersIncludingNewlines:YES];
+         NSString *apython = [[[[[iTermPythonRuntimeDownloader sharedInstance] pathToStandardPyenvPythonWithPythonVersion:nil] stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"apython"] stringWithBackslashEscapedShellCharactersIncludingNewlines:YES];
          NSURL *bannerURL = [[NSBundle mainBundle] URLForResource:@"repl_banner" withExtension:@"txt"];
-         command = [command stringByAppendingFormat:@" --banner=\"`cat %@`\"", [bannerURL.path stringWithEscapedShellCharactersIncludingNewlines:YES]];
+         NSString *bannerArg = [NSString stringWithFormat:@"--banner=\\\"`cat %@`\\\"", [bannerURL.path stringWithBackslashEscapedShellCharactersIncludingNewlines:YES]];
          NSString *cookie = [[iTermWebSocketCookieJar sharedInstance] randomStringForCooke];
          NSDictionary *environment = @{ @"ITERM2_COOKIE": cookie };
-         [[iTermController sharedInstance] openSingleUseWindowWithCommand:command
+         [[iTermController sharedInstance] openSingleUseWindowWithCommand:apython
+                                                                arguments:@[ bannerArg ]
                                                                    inject:nil
                                                               environment:environment
+                                                                      pwd:nil
+                                                                  options:iTermSingleUseWindowOptionsDoNotEscapeArguments
                                                                completion:nil];
     }];
 }
@@ -2180,6 +2196,8 @@ static BOOL hasBecomeActive = NO;
             return @"a tab is being dragged.";
         case iTermMetalUnavailableReasonSessionHasNoWindow:
             return @"the current session has no window (this shouldn't happen).";
+        case iTermMetalUnavailableReasonDropTargetsVisible:
+            return @"secure copy drop targets are visible.";
     }
 
     return @"of an internal error. Please file a bug report!";
@@ -2350,6 +2368,14 @@ static BOOL hasBecomeActive = NO;
 
 - (void)iTermPasswordManagerEnterPassword:(NSString *)password broadcast:(BOOL)broadcast {
   [[[[iTermController sharedInstance] currentTerminal] currentSession] enterPassword:password];
+}
+
+- (BOOL)iTermPasswordManagerCanEnterUserName {
+    return YES;
+}
+
+- (void)iTermPasswordManagerEnterUserName:(NSString *)username broadcast:(BOOL)broadcast {
+    [[[[iTermController sharedInstance] currentTerminal] currentSession] writeTask:[username stringByAppendingString:@"\n"]];
 }
 
 - (BOOL)iTermPasswordManagerCanEnterPassword {

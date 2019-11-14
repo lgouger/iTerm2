@@ -17,6 +17,7 @@
 #import "iTermController.h"
 #import "iTermDisclosableView.h"
 #import "iTermLSOF.h"
+#import "iTermMalloc.h"
 #import "iTermObject.h"
 #import "iTermPreferences.h"
 #import "iTermProfilePreferences.h"
@@ -24,6 +25,7 @@
 #import "iTermScriptFunctionCall.h"
 #import "iTermScriptHistory.h"
 #import "iTermSelection.h"
+#import "iTermSessionLauncher.h"
 #import "iTermStatusBarComponent.h"
 #import "iTermStatusBarViewController.h"
 #import "iTermVariableReference.h"
@@ -90,8 +92,8 @@ static iTermAPIHelper *sAPIHelperInstance;
 }
 
 - (NSString *)invocationOfRegistrationRequest:(ITMRPCRegistrationRequest *)req {
-    return [iTermAPIHelper invocationWithName:req.name
-                                     defaults:req.defaultsArray];
+    return [iTermAPIHelper invocationWithFullyQualifiedName:req.it_fullyQualifiedName
+                                                   defaults:req.defaultsArray];
 }
 
 @end
@@ -150,11 +152,32 @@ static iTermAPIHelper *sAPIHelperInstance;
     return YES;
 }
 
+- (NSString *)it_namespace {
+    switch (self.roleSpecificAttributesOneOfCase) {
+        case ITMRPCRegistrationRequest_RoleSpecificAttributes_OneOfCase_GPBUnsetOneOfCase:
+            return nil;
+            break;
+        case ITMRPCRegistrationRequest_RoleSpecificAttributes_OneOfCase_SessionTitleAttributes:
+            return [NSString stringWithFormat:@"title.%@", [self.sessionTitleAttributes.uniqueIdentifier stringByReplacingOccurrencesOfString:@"-" withString:@"_"]];
+        case ITMRPCRegistrationRequest_RoleSpecificAttributes_OneOfCase_StatusBarComponentAttributes:
+            return [NSString stringWithFormat:@"statusbar.%@", [self.statusBarComponentAttributes.uniqueIdentifier  stringByReplacingOccurrencesOfString:@"-" withString:@"_"]];
+    }
+}
+
 - (NSString *)it_stringRepresentation {
     NSArray<NSString *> *argNames = [self.argumentsArray mapWithBlock:^id(ITMRPCRegistrationRequest_RPCArgumentSignature *anObject) {
         return anObject.name;
     }];
-    return iTermFunctionSignatureFromNameAndArguments(self.name, argNames);
+    NSString *namespace = self.it_namespace;
+    return iTermFunctionSignatureFromNamespaceAndNameAndArguments(namespace, self.name, argNames);
+}
+
+- (NSString *)it_fullyQualifiedName {
+    NSString *namespace = self.it_namespace;
+    if (!namespace) {
+        return self.name;
+    }
+    return [NSString stringWithFormat:@"%@.%@", namespace, self.name];
 }
 
 - (NSSet<NSString *> *)it_allArgumentNames {
@@ -216,16 +239,16 @@ static iTermAPIHelper *sAPIHelperInstance;
 @end
 
 @interface ITMServerOriginatedRPC(Extensions)
-@property (nonatomic, readonly) NSString *it_stringRepresentation;
+- (NSString *)it_stringRepresentationWithNamespace:(NSString *)namespace;
 @end
 
 @implementation ITMServerOriginatedRPC(Extensions)
 
-- (NSString *)it_stringRepresentation {
+- (NSString *)it_stringRepresentationWithNamespace:(NSString *)namespace {
     NSArray<NSString *> *argNames = [self.argumentsArray mapWithBlock:^id(ITMServerOriginatedRPC_RPCArgument *anObject) {
         return anObject.name;
     }];
-    return iTermFunctionSignatureFromNameAndArguments(self.name, argNames);
+    return iTermFunctionSignatureFromNamespaceAndNameAndArguments(namespace, self.name, argNames);
 }
 
 @end
@@ -272,7 +295,7 @@ static iTermAPIHelper *sAPIHelperInstance;
 
 - (void)attachToOwner:(NSObject *)owner failure:(void (^)(void))failure {
     assert(!_associatedObjectKey);
-    _associatedObjectKey = malloc(1);
+    _associatedObjectKey = iTermMalloc(1);
     [owner it_setAssociatedObject:self forKey:_associatedObjectKey];
     _failure = [failure copy];
 }
@@ -374,7 +397,11 @@ static iTermAPIHelper *sAPIHelperInstance;
     warning.warningType = forced ? kiTermWarningTypePersistent : kiTermWarningTypePermanentlySilenceable;
     warning.title = @"The Python API allows scripts you run to control iTerm2 and access all its data.";
     static BOOL showing;
-    assert(!showing);
+    if (showing) {
+        // This can happen because the call to -runModal below starts a runloop and a delayed perform can then call this.
+        DLog(@"Reentrancy detected\n%@", [NSThread callStackSymbols]);
+        return NO;
+    }
     showing = YES;
     const iTermWarningSelection selection = [warning runModal];
     showing = NO;
@@ -765,7 +792,7 @@ static iTermAPIHelper *sAPIHelperInstance;
     for (NSString *signature in self.serverOriginatedRPCSubscriptions) {
         iTermTuple<id, ITMNotificationRequest *> *tuple = self.serverOriginatedRPCSubscriptions[signature];
         ITMNotificationRequest *request = tuple.secondObject;
-        if (![request.rpcRegistrationRequest.name isEqualToString:name]) {
+        if (![request.rpcRegistrationRequest.it_fullyQualifiedName isEqualToString:name]) {
             continue;
         }
         if ([request.rpcRegistrationRequest it_satisfiesExplicitParameters:explicitParameters
@@ -777,12 +804,22 @@ static iTermAPIHelper *sAPIHelperInstance;
     return nil;
 }
 
-- (ITMServerOriginatedRPC *)serverOriginatedRPCWithName:(NSString *)name
+- (void)splitFullyQualifiedRPCName:(NSString *)fqName
+                         namespace:(out NSString **)namespacePtr
+                      relativeName:(out NSString **)relativeNamePtr {
+    iTermFunctionCallSplitFullyQualifiedName(fqName, namespacePtr, relativeNamePtr);
+}
+
+- (ITMServerOriginatedRPC *)serverOriginatedRPCWithName:(NSString *)fullyQualifiedName
                                               arguments:(NSDictionary *)arguments
                                                   error:(out NSError **)error {
 
     ITMServerOriginatedRPC *rpc = [[ITMServerOriginatedRPC alloc] init];
-    rpc.name = name;
+    NSString *namespace;
+    NSString *relativeName;
+    [self splitFullyQualifiedRPCName:fullyQualifiedName namespace:&namespace relativeName:&relativeName];
+
+    rpc.name = relativeName;
     for (NSString *argumentName in [arguments.allKeys sortedArrayUsingSelector:@selector(compare:)]) {
         id argumentValue = arguments[argumentName];
         NSString *jsonValue;
@@ -792,8 +829,9 @@ static iTermAPIHelper *sAPIHelperInstance;
             jsonValue = [NSJSONSerialization it_jsonStringForObject:argumentValue];
             if (!jsonValue) {
                 NSString *reason = [NSString stringWithFormat:@"Could not JSON encode value “%@”", arguments[argumentName]];
-                NSString *signature = iTermFunctionSignatureFromNameAndArguments(name,
-                                                                                 arguments.allKeys);
+                NSString *signature = iTermFunctionSignatureFromNamespaceAndNameAndArguments(namespace,
+                                                                                             relativeName,
+                                                                                             arguments.allKeys);
                 NSString *connectionKey = [self connectionKeyForRPCWithSignature:signature];
                 NSDictionary *userinfo = @{ NSLocalizedDescriptionKey: reason };
                 if (connectionKey) {
@@ -822,38 +860,53 @@ static iTermAPIHelper *sAPIHelperInstance;
 }
 
 // Build a proto buffer and dispatch it.
-- (void)dispatchRPCWithName:(NSString *)name
+- (void)dispatchRPCWithName:(NSString *)fullyQualifiedName
                   arguments:(NSDictionary *)arguments
                  completion:(iTermServerOriginatedRPCCompletionBlock)completion {
     NSError *error = nil;
-    ITMServerOriginatedRPC *rpc = [self serverOriginatedRPCWithName:name arguments:arguments error:&error];
+    ITMServerOriginatedRPC *rpc = [self serverOriginatedRPCWithName:fullyQualifiedName arguments:arguments error:&error];
     if (error) {
         completion(nil, error);
     }
-    [self dispatchServerOriginatedRPC:rpc completion:completion];
+    NSString *namespace;
+    NSString *relativeName;
+    [self splitFullyQualifiedRPCName:fullyQualifiedName namespace:&namespace relativeName:&relativeName];
+    [self dispatchServerOriginatedRPC:rpc namespace:namespace completion:completion];
 }
 
-- (NSString *)signatureOfAnyRegisteredFunctionWithName:(NSString *)name {
+- (NSString *)fullyQualifiedNameFromRelativeName:(NSString *)relativeName
+                                       namespace:(NSString *)namespace {
+    if (!namespace) {
+        return relativeName;
+    }
+    return [NSString stringWithFormat:@"%@.%@", namespace, relativeName];
+}
+
+- (NSString *)signatureOfAnyRegisteredFunctionWithName:(NSString *)name
+                                             namespace:(NSString *)namespace {
+    NSString *fqName = [self fullyQualifiedNameFromRelativeName:name namespace:namespace];
     for (NSString *key in self.serverOriginatedRPCSubscriptions) {
         iTermTuple<id, ITMNotificationRequest *> *sub = self.serverOriginatedRPCSubscriptions[key];
         ITMNotificationRequest *request = sub.secondObject;
-        if ([request.rpcRegistrationRequest.name isEqual:name]) {
+        if ([request.rpcRegistrationRequest.it_fullyQualifiedName isEqual:fqName]) {
             return request.rpcRegistrationRequest.it_stringRepresentation;
         }
     }
-    return [iTermBuiltInFunctions.sharedInstance signatureOfAnyRegisteredFunctionWithName:name];
+    return [iTermBuiltInFunctions.sharedInstance signatureOfAnyRegisteredFunctionWithName:fqName];
 }
 
 // Dispatches a well-formed proto buffer or gives an error if not connected.
 - (void)dispatchServerOriginatedRPC:(ITMServerOriginatedRPC *)rpc
+                          namespace:(NSString *)namespace
                          completion:(iTermServerOriginatedRPCCompletionBlock)completion {
-    NSString *signature = rpc.it_stringRepresentation;
+    NSString *signature = [rpc it_stringRepresentationWithNamespace:namespace];
     iTermTuple<id, ITMNotificationRequest *> *sub = self.serverOriginatedRPCSubscriptions[signature];
 
     id connectionKey = sub.firstObject;
     if (!connectionKey) {
         NSString *reason = [NSString stringWithFormat:@"No function registered for invocation “%@”. Ensure the script is running and the function name and argument names are correct.", signature];
-        NSString *bestMatch = [self signatureOfAnyRegisteredFunctionWithName:rpc.name];
+        NSString *bestMatch = [self signatureOfAnyRegisteredFunctionWithName:rpc.name
+                                                                   namespace:namespace];
         if (bestMatch) {
             reason = [reason stringByAppendingFormat:@" There is a similarly named function available with a different signature: %@", bestMatch];
         }
@@ -943,7 +996,7 @@ static iTermAPIHelper *sAPIHelperInstance;
             continue;
         }
         ITMRPCRegistrationRequest *sig = req.rpcRegistrationRequest;
-        NSString *functionName = sig.name;
+        NSString *functionName = [sig it_fullyQualifiedName];
         NSArray<NSString *> *args = [sig.argumentsArray mapWithBlock:^id(ITMRPCRegistrationRequest_RPCArgumentSignature *anObject) {
             return anObject.name;
         }];
@@ -952,8 +1005,8 @@ static iTermAPIHelper *sAPIHelperInstance;
     return result;
 }
 
-+ (NSString *)invocationWithName:(NSString *)name
-                        defaults:(NSArray<ITMRPCRegistrationRequest_RPCArgument*> *)defaultsArray {
++ (NSString *)invocationWithFullyQualifiedName:(NSString *)fullyQualifiedName
+                                      defaults:(NSArray<ITMRPCRegistrationRequest_RPCArgument*> *)defaultsArray {
     NSArray<ITMRPCRegistrationRequest_RPCArgument*> *sortedDefaults =
         [defaultsArray sortedArrayUsingComparator:^NSComparisonResult(ITMRPCRegistrationRequest_RPCArgument * _Nonnull obj1,
                                                                       ITMRPCRegistrationRequest_RPCArgument * _Nonnull obj2) {
@@ -963,7 +1016,7 @@ static iTermAPIHelper *sAPIHelperInstance;
         return [NSString stringWithFormat:@"%@:%@", def.name, def.path];
     }];
     defaults = [defaults sortedArrayUsingSelector:@selector(compare:)];
-    return [NSString stringWithFormat:@"%@(%@)", name, [defaults componentsJoinedByString:@","]];
+    return [NSString stringWithFormat:@"%@(%@)", fullyQualifiedName, [defaults componentsJoinedByString:@","]];
 }
 
 + (NSString *)userDefaultsKeyForNameOfScriptVendingStatusBarComponentWithID:(NSString *)uniqueID {
@@ -1004,8 +1057,9 @@ static iTermAPIHelper *sAPIHelperInstance;
 }
 
 - (BOOL)haveRegisteredFunctionWithName:(NSString *)name
+                             namespace:(NSString *)namespace
                              arguments:(NSArray<NSString *> *)arguments {
-    NSString *stringSignature = iTermFunctionSignatureFromNameAndArguments(name, arguments);
+    NSString *stringSignature = iTermFunctionSignatureFromNamespaceAndNameAndArguments(namespace, name, arguments);
     return [self haveRegisteredFunctionWithSignature:stringSignature];
 }
 
@@ -1152,11 +1206,18 @@ static iTermAPIHelper *sAPIHelperInstance;
     return (response == NSAlertSecondButtonReturn);
 }
 
-- (NSDictionary *)apiServerAuthorizeProcess:(pid_t)pid
-                              preauthorized:(BOOL)preauthorized
-                                     reason:(out NSString *__autoreleasing *)reason
-                                displayName:(out NSString *__autoreleasing *)displayName {
-    iTermAPIAuthorizationController *controller = [[iTermAPIAuthorizationController alloc] initWithProcessID:pid];
+- (NSString *)formatPIDs:(NSArray<NSNumber *> *)pids {
+    if (pids.count == 1) {
+        return [NSString stringWithFormat:@"PID %@", pids[0]];
+    }
+    return [NSString stringWithFormat:@"one of these PIDs: %@", [pids componentsJoinedByString:@", "]];
+}
+
+- (NSDictionary *)apiServerAuthorizeProcesses:(NSArray<NSNumber *> *)pids
+                                preauthorized:(BOOL)preauthorized
+                                       reason:(out NSString *__autoreleasing *)reason
+                                  displayName:(out NSString *__autoreleasing *)displayName {
+    iTermAPIAuthorizationController *controller = [[iTermAPIAuthorizationController alloc] initWithProcessIDs:pids];
     *reason = [controller identificationFailureReason];
     if (*reason) {
         return nil;
@@ -1179,8 +1240,8 @@ static iTermAPIHelper *sAPIHelperInstance;
 
         case iTermAPIAuthorizationSettingRecentConsent:
             // No need to reauth, allow it.
-            *reason = [NSString stringWithFormat:@"Allowing continued API access to process id %d, name %@, bundle ID %@. User gave consent recently.",
-                       pid, controller.humanReadableName, controller.fullCommandOrBundleID];
+            *reason = [NSString stringWithFormat:@"Allowing continued API access to %@, name %@, bundle ID %@. User gave consent recently.",
+                       [self formatPIDs:pids], controller.humanReadableName, controller.fullCommandOrBundleID];
             return controller.identity;
 
         case iTermAPIAuthorizationSettingExpiredConsent:
@@ -1543,37 +1604,6 @@ static iTermAPIHelper *sAPIHelperInstance;
     response.status = ITMNotificationResponse_Status_Ok;
     return response;
 }
-
-- (void)performBlockWhenFunctionRegisteredWithName:(NSString *)name
-                                         arguments:(NSArray<NSString *> *)arguments
-                                           timeout:(NSTimeInterval)timeout
-                                             block:(void (^)(BOOL))block {
-    if ([self haveRegisteredFunctionWithName:name arguments:arguments]) {
-        block(NO);
-        return;
-    }
-
-    __block BOOL called = NO;
-    __block id observer =
-        [[NSNotificationCenter defaultCenter] addObserverForName:iTermAPIRegisteredFunctionsDidChangeNotification object:nil queue:nil usingBlock:^(NSNotification * _Nonnull notification) {
-            if (called) {
-                return;
-            }
-            if ([self haveRegisteredFunctionWithName:name arguments:arguments]) {
-                called = YES;
-                [[NSNotificationCenter defaultCenter] removeObserver:observer];
-                block(NO);
-            }
-        }];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(timeout * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if (!called) {
-            called = YES;
-            [[NSNotificationCenter defaultCenter] removeObserver:observer];
-            block(YES);
-        }
-    });
-}
-
 
 - (NSArray<PTYSession *> *)allSessions {
     return [[[iTermController sharedInstance] terminals] flatMapWithBlock:^id(PseudoTerminal *windowController) {
@@ -2045,27 +2075,27 @@ static iTermAPIHelper *sAPIHelperInstance;
         }
     }
 
-    PTYSession *session = [[iTermController sharedInstance] launchBookmark:profile
-                                                                inTerminal:term
-                                                                   withURL:nil
-                                                          hotkeyWindowType:iTermHotkeyWindowTypeNone
-                                                                   makeKey:YES
-                                                               canActivate:YES
-                                                        respectTabbingMode:NO
-                                                                   command:nil
-                                                                     block:^PTYSession *(Profile *profile, PseudoTerminal *term) {
-                                                                         profile = [self profileByCustomizing:profile withProperties:request.customProfilePropertiesArray];
-                                                                         return [term createTabWithProfile:profile
-                                                                                               withCommand:nil
-                                                                                               environment:nil
-#warning TODO: This doesn't really need to block the main thread since this method is async.
-                                                                                               synchronous:YES
-                                                                                                completion:nil];
-                                                                     }
-#warning TODO: This doesn't really need to block the main thread since this method is async.
-                                                               synchronous:YES
-                                                                completion:nil];
+    iTermSessionLauncher *launcher = [[iTermSessionLauncher alloc] initWithProfile:profile windowController:term];
+    launcher.canActivate = NO;
+    launcher.makeSession = ^(NSDictionary * _Nonnull profile, PseudoTerminal * _Nonnull term, void (^ _Nonnull completion)(PTYSession * _Nullable)) {
+        profile = [self profileByCustomizing:profile withProperties:request.customProfilePropertiesArray];
+        PTYSession *session = [term createTabWithProfile:profile
+                                             withCommand:nil
+                                             environment:nil
+                                             synchronous:NO
+                                              completion:nil];
+        completion(session);
+    };
+    __weak iTermSessionLauncher *weakLauncher = launcher;
+    __weak __typeof(self) weakSelf = self;
+    [launcher launchWithCompletion:^(BOOL ok) {
+        [weakSelf didCreateSession:weakLauncher.session forRequest:request handler:handler];
+    }];
+}
 
+- (void)didCreateSession:(PTYSession *)session
+              forRequest:(ITMCreateTabRequest *)request
+                 handler:(void (^)(ITMCreateTabResponse *))handler {
     if (!session) {
         ITMCreateTabResponse *response = [[ITMCreateTabResponse alloc] init];
         response.status = ITMCreateTabResponse_Status_MissingSubstitution;
@@ -2073,7 +2103,7 @@ static iTermAPIHelper *sAPIHelperInstance;
         return;
     }
 
-    term = [[iTermController sharedInstance] terminalWithSession:session];
+    PseudoTerminal *term = [[iTermController sharedInstance] terminalWithSession:session];
     PTYTab *tab = [term tabForSession:session];
 
     ITMCreateTabResponse_Status status = ITMCreateTabResponse_Status_Ok;
@@ -2141,22 +2171,28 @@ static iTermAPIHelper *sAPIHelperInstance;
 
     ITMSplitPaneResponse *response = [[ITMSplitPaneResponse alloc] init];
     response.status = ITMSplitPaneResponse_Status_Ok;
+    dispatch_group_t group = dispatch_group_create();
     for (PTYSession *session in sessions) {
         PseudoTerminal *term = [[iTermController sharedInstance] terminalWithSession:session];
+        dispatch_group_enter(group);
         PTYSession *newSession = [term splitVertically:request.splitDirection == ITMSplitPaneRequest_SplitDirection_Vertical
                                                 before:request.before
                                                profile:profile
                                          targetSession:session
-#warning TODO: This doesn't really need to block the main thread since this method is async.
-                                           synchronous:YES];
-        if (newSession == nil && !session.isTmuxClient) {
-            response.status = ITMSplitPaneResponse_Status_CannotSplit;
-        } else if (newSession && newSession.guid) {  // The test for newSession.guid is just to quiet the analyzer
+                                           synchronous:NO
+                                            completion:^(BOOL ok){
+                                                dispatch_group_leave(group);
+                                            }];
+        if (newSession && newSession.guid) {  // The test for newSession.guid is just to quiet the analyzer
             [response.sessionIdArray addObject:newSession.guid];
+        } else if (newSession == nil && !session.isTmuxClient) {
+            response.status = ITMSplitPaneResponse_Status_CannotSplit;
         }
     }
 
-    handler(response);
+    dispatch_group_notify(group, dispatch_get_main_queue(), ^{
+        handler(response);
+    });
 }
 
 - (Profile *)profileByCustomizing:(Profile *)profile withProperties:(NSArray<ITMProfileProperty*> *)customProfilePropertiesArray {
@@ -2515,22 +2551,15 @@ static iTermAPIHelper *sAPIHelperInstance;
         windowController = [PseudoTerminal castFrom:tab.realParentWindow];
     }
 
-    if (request.selectSession) {
-        if (!session) {
-            response.status = ITMActivateResponse_Status_InvalidOption;
-            handler(response);
-            return;
+    if (request.hasActivateApp) {
+        NSApplicationActivationOptions options = 0;
+        if (request.activateApp.raiseAllWindows) {
+            options |= NSApplicationActivateAllWindows;
         }
-        [tab setActiveSession:session];
-    }
-
-    if (request.selectTab) {
-        if (!tab) {
-            response.status = ITMActivateResponse_Status_InvalidOption;
-            handler(response);
-            return;
+        if (request.activateApp.ignoringOtherApps) {
+            options |= NSApplicationActivateIgnoringOtherApps;
         }
-        [windowController.tabView selectTabViewItemWithIdentifier:tab];
+        [[NSRunningApplication currentApplication] activateWithOptions:options];
     }
 
     if (request.orderWindowFront) {
@@ -2542,15 +2571,22 @@ static iTermAPIHelper *sAPIHelperInstance;
         [windowController.window makeKeyAndOrderFront:nil];
     }
 
-    if (request.hasActivateApp) {
-        NSApplicationActivationOptions options = 0;
-        if (request.activateApp.raiseAllWindows) {
-            options |= NSApplicationActivateAllWindows;
+    if (request.selectTab) {
+        if (!tab) {
+            response.status = ITMActivateResponse_Status_InvalidOption;
+            handler(response);
+            return;
         }
-        if (request.activateApp.ignoringOtherApps) {
-            options |= NSApplicationActivateIgnoringOtherApps;
+        [windowController.tabView selectTabViewItemWithIdentifier:tab];
+    }
+
+    if (request.selectSession) {
+        if (!session) {
+            response.status = ITMActivateResponse_Status_InvalidOption;
+            handler(response);
+            return;
         }
-        [[NSRunningApplication currentApplication] activateWithOptions:options];
+        [tab setActiveSession:session];
     }
 
     response.status = ITMActivateResponse_Status_Ok;
@@ -3255,6 +3291,9 @@ static BOOL iTermCheckSplitTreesIsomorphic(ITMSplitTreeNode *node1, ITMSplitTree
         case ITMPreferencesRequest_Request_Request_OneOfCase_SetDefaultProfileRequest:
             result.setDefaultProfileResult = [self handleSetDefaultProfileWithGUID:request.setDefaultProfileRequest.guid];
             break;
+        case ITMPreferencesRequest_Request_Request_OneOfCase_GetDefaultProfileRequest:
+            result.getDefaultProfileResult = [self handleGetDefaultProfile];
+            break;
     }
     return result;
 }
@@ -3287,6 +3326,12 @@ static BOOL iTermCheckSplitTreesIsomorphic(ITMSplitTreeNode *node1, ITMSplitTree
     }
     result.status = ITMPreferencesResponse_Result_SetPreferenceResult_Status_Ok;
 
+    return result;
+}
+
+- (ITMPreferencesResponse_Result_GetDefaultProfileResult *)handleGetDefaultProfile {
+    ITMPreferencesResponse_Result_GetDefaultProfileResult *result = [[ITMPreferencesResponse_Result_GetDefaultProfileResult alloc] init];
+    result.guid = [[[ProfileModel sharedInstance] defaultBookmark] objectForKey:KEY_GUID];
     return result;
 }
 

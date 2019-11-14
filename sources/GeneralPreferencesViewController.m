@@ -47,6 +47,7 @@ enum {
 
     // Warn when quitting
     IBOutlet id _promptOnQuit;
+    IBOutlet NSButton *_evenIfThereAreNoWindows;
 
     // Instant replay memory usage.
     IBOutlet NSTextField *_irMemory;
@@ -86,6 +87,12 @@ enum {
     // Copy includes trailing newline
     IBOutlet NSButton *_copyLastNewline;
 
+    // Triple click selects full, wrapped lines.
+    IBOutlet NSButton *_tripleClickSelectsFullLines;
+
+    // Double click perform smart selection
+    IBOutlet NSButton *_doubleClickPerformsSmartSelection;
+
     // Allow clipboard access by terminal applications
     IBOutlet NSButton *_allowClipboardAccessFromTerminal;
 
@@ -101,6 +108,8 @@ enum {
 
     // Zoom vertically only
     IBOutlet NSButton *_maxVertically;
+
+    IBOutlet NSButton *_separateWindowTitlePerTab;
 
     // Lion-style fullscreen
     IBOutlet NSButton *_lionStyleFullscreen;
@@ -192,8 +201,16 @@ enum {
             relatedView:nil
                    type:kPreferenceInfoTypeCheckbox];
 
-    [self defineControl:_promptOnQuit
-                    key:kPreferenceKeyPromptOnQuit
+    info = [self defineControl:_promptOnQuit
+                           key:kPreferenceKeyPromptOnQuit
+                   relatedView:nil
+                          type:kPreferenceInfoTypeCheckbox];
+    info.onChange = ^{
+        [weakSelf updateEnabledState];
+    };
+
+    [self defineControl:_evenIfThereAreNoWindows
+                    key:kPreferenceKeyPromptOnQuitEvenIfThereAreNoWindows
             relatedView:nil
                    type:kPreferenceInfoTypeCheckbox];
 
@@ -387,6 +404,15 @@ enum {
             relatedView:_wordCharsLabel
                    type:kPreferenceInfoTypeStringTextField];
 
+    [self defineControl:_tripleClickSelectsFullLines
+                    key:kPreferenceKeyTripleClickSelectsFullWrappedLines
+            relatedView:nil
+                   type:kPreferenceInfoTypeCheckbox];
+    [self defineControl:_doubleClickPerformsSmartSelection
+                    key:kPreferenceKeyDoubleClickPerformsSmartSelection
+            relatedView:nil
+                   type:kPreferenceInfoTypeCheckbox];
+
     [self defineControl:_smartPlacement
                     key:kPreferenceKeySmartWindowPlacement
             relatedView:nil
@@ -404,6 +430,11 @@ enum {
 
     [self defineControl:_lionStyleFullscreen
                     key:kPreferenceKeyLionStyleFullscreen
+            relatedView:nil
+                   type:kPreferenceInfoTypeCheckbox];
+
+    [self defineControl:_separateWindowTitlePerTab
+                    key:kPreferenceKeySeparateWindowTitlePerTab
             relatedView:nil
                    type:kPreferenceInfoTypeCheckbox];
 
@@ -426,6 +457,12 @@ enum {
                     key:kPreferenceKeyUseTmuxStatusBar
             relatedView:nil
                    type:kPreferenceInfoTypeCheckbox];
+    [self updateEnabledState];
+}
+
+- (void)updateEnabledState {
+    [super updateEnabledState];
+    _evenIfThereAreNoWindows.enabled = [self boolForKey:kPreferenceKeyPromptOnQuit];
 }
 
 - (void)updateAdvancedGPUEnabled {

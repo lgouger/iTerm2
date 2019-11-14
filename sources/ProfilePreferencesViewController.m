@@ -16,6 +16,7 @@
 #import "iTermKeyBindingMgr.h"
 #import "iTermProfilePreferences.h"
 #import "iTermProfilePreferencesTabViewWrapperView.h"
+#import "iTermSavePanel.h"
 #import "iTermSizeRememberingView.h"
 #import "iTermVariableScope.h"
 #import "iTermWarning.h"
@@ -620,6 +621,9 @@ andEditComponentWithIdentifier:(NSString *)identifier
                                     window:self.view.window] == kiTermWarningSelection1) {
         return;
     }
+    if (destination.profileIsDynamic) {
+        [self showDynamicProfileWarning];
+    }
 
     NSMutableDictionary* copyOfSource = [sourceProfile mutableCopy];
     [copyOfSource setObject:profileGuid forKey:KEY_GUID];
@@ -706,7 +710,7 @@ andEditComponentWithIdentifier:(NSString *)identifier
     }
 }
 
-- (IBAction)copyAllProfilesJson:(id)sender {
+- (NSString *)jsonForAllProfilesWithErrorCount:(int *)errorCount {
     ProfileModel *model = [_delegate profilePreferencesModel];
     NSMutableString *profiles = [@"{\n\"Profiles\": [\n" mutableCopy];
     BOOL first = YES;
@@ -728,17 +732,8 @@ andEditComponentWithIdentifier:(NSString *)identifier
         }
     }
     [profiles appendString:@"\n]\n}\n"];
-
-    NSPasteboard *pasteboard = [NSPasteboard generalPasteboard];
-    [pasteboard clearContents];
-    [pasteboard writeObjects:@[ profiles ]];
-
-    if (errors) {
-        NSAlert *alert = [[NSAlert alloc] init];
-        alert.messageText = @"Error";
-        alert.informativeText = @"An error occurred. Check Console.app for details.";
-        [alert runModal];
-    }
+    *errorCount = errors;
+    return profiles;
 }
 
 - (IBAction)importJSONProfiles:(id)sender {
@@ -858,25 +853,72 @@ andEditComponentWithIdentifier:(NSString *)identifier
     return YES;
 }
 
-- (IBAction)copyProfileJson:(id)sender {
+- (BOOL)saveString:(NSString *)string toPath:(NSString *)path {
+    NSError *error = nil;
+    [string writeToFile:path atomically:NO encoding:NSUTF8StringEncoding error:&error];
+    if (error) {
+        NSAlert *alert = [[NSAlert alloc] init];
+        alert.messageText = @"Error";
+        alert.informativeText = [NSString stringWithFormat:@"Couldn't save to %@: %@", path,
+                                 [error localizedDescription]];
+        [alert runModal];
+        return NO;
+    }
+    return YES;
+}
+
+- (IBAction)saveProfileAsJSON:(id)sender {
     NSDictionary* profile = [self selectedProfile];
     if (!profile) {
         NSBeep();
         return;
     }
+
+    iTermSavePanel *savePanel = [iTermSavePanel showWithOptions:0
+                                                     identifier:@"SaveProfile"
+                                               initialDirectory:NSHomeDirectory()
+                                                defaultFilename:[self.selectedProfile[KEY_NAME] stringByAppendingPathExtension:@"json"] ?: @"UnknownProfile.json"
+                                               allowedFileTypes:@[ @"json" ]];
+    if (!savePanel.path) {
+        return;
+    }
     NSError *error = nil;
     NSString *string = [self jsonForProfile:profile error:&error];
-
-    if (string) {
-        NSPasteboard *pasteboard = [NSPasteboard generalPasteboard];
-        [pasteboard clearContents];
-        [pasteboard writeObjects:@[ string ]];
-    } else {
+    if (!string) {
         NSAlert *alert = [[NSAlert alloc] init];
         alert.messageText = @"Error";
         alert.informativeText = [NSString stringWithFormat:@"Couldn't convert profile to JSON: %@",
                                  [error localizedDescription]];
         [alert runModal];
+        return;
+    }
+
+    if ([self saveString:string toPath:savePanel.path]) {
+        [[NSWorkspace sharedWorkspace] activateFileViewerSelectingURLs:@[ [NSURL fileURLWithPath:savePanel.path] ]];
+    }
+}
+
+- (IBAction)saveAllProfilesAsJSON:(id)sender {
+    iTermSavePanel *savePanel = [iTermSavePanel showWithOptions:0
+                                                     identifier:@"SaveProfile"
+                                               initialDirectory:NSHomeDirectory()
+                                                defaultFilename:@"Profiles.json"
+                                               allowedFileTypes:@[ @"json" ]];
+    if (!savePanel.path) {
+        return;
+    }
+    int errors = 0;
+    NSString *string = [self jsonForAllProfilesWithErrorCount:&errors];
+    if (errors) {
+        NSAlert *alert = [[NSAlert alloc] init];
+        alert.messageText = @"Error";
+        alert.informativeText = [NSString stringWithFormat:@"Couldn't convert one or more profiles to JSON. Check Console.app for errors."];
+        [alert runModal];
+        return;
+    }
+
+    if ([self saveString:string toPath:savePanel.path]) {
+        [[NSWorkspace sharedWorkspace] activateFileViewerSelectingURLs:@[ [NSURL fileURLWithPath:savePanel.path] ]];
     }
 }
 
@@ -932,6 +974,9 @@ andEditComponentWithIdentifier:(NSString *)identifier
     }
     _needsWarning = YES;
     __weak __typeof(self) weakSelf = self;
+    if (viewController.delegate.profilePreferencesCurrentModel == [ProfileModel sessionsInstance]) {
+        return;
+    }
     dispatch_async(dispatch_get_main_queue(), ^{
         [weakSelf showWarningIfNeeded];
     });
@@ -942,7 +987,10 @@ andEditComponentWithIdentifier:(NSString *)identifier
         return;
     }
     _needsWarning = NO;
-    
+    [self showDynamicProfileWarning];
+}
+
+- (void)showDynamicProfileWarning {
     Profile *profile = [self selectedProfile];
     NSString *guid = [NSString castFrom:[profile objectForKey:KEY_GUID]];
     if (!guid) {

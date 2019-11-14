@@ -141,6 +141,7 @@ static NSString *const iTermImageRendererTextureMetadataKeyImageMissing = @"iTer
     const CGSize cellSize = self.cellConfiguration.cellSize;
     const CGPoint offset = CGPointMake(self.margins.left, self.margins.bottom);
     const CGFloat height = self.configuration.viewportSize.y;
+    const CGFloat scale = self.configuration.scale;
 
     [_runs enumerateObjectsUsingBlock:^(iTermMetalImageRun * _Nonnull run, NSUInteger idx, BOOL * _Nonnull stop) {
         id key = [self keyForRun:run];
@@ -149,14 +150,18 @@ static NSString *const iTermImageRendererTextureMetadataKeyImageMissing = @"iTer
         NSSize chunkSize = NSMakeSize(textureSize.width / run.imageInfo.size.width,
                                       textureSize.height / run.imageInfo.size.height);
         const CGRect textureFrame = NSMakeRect((chunkSize.width * run.startingCoordInImage.x) / textureSize.width,
-                                               (textureSize.height - cellSize.height - chunkSize.height * run.startingCoordInImage.y) / textureSize.height,
+                                               (textureSize.height - chunkSize.height * (run.startingCoordInImage.y + 1)) / textureSize.height,
                                                (chunkSize.width * run.length) / textureSize.width,
                                                (chunkSize.height) / textureSize.height);
 
-        id<MTLBuffer> vertexBuffer = [self->_cellRenderer newQuadWithFrame:CGRectMake(run.startingCoordOnScreen.x * cellSize.width + offset.x,
-                                                                                      height - (run.startingCoordOnScreen.y + 1) * cellSize.height - offset.y,
-                                                                                      run.length * cellSize.width,
-                                                                                      cellSize.height)
+        // This is done to match the point-based calculation in the legacy renderer.
+        const CGFloat spacing = round((self.cellConfiguration.cellSizeWithoutSpacing.height - cellSize.height) / (2.0 * scale)) * scale;
+        const CGRect destinationFrame = CGRectMake(run.startingCoordOnScreen.x * cellSize.width + offset.x,
+                                                   height - (run.startingCoordOnScreen.y + 1) * cellSize.height - offset.y - spacing,
+                                                   run.length * cellSize.width,
+                                                   cellSize.height);
+
+        id<MTLBuffer> vertexBuffer = [self->_cellRenderer newQuadWithFrame:destinationFrame
                                                               textureFrame:textureFrame
                                                                poolContext:self.poolContext];
 

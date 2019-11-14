@@ -241,9 +241,6 @@ typedef NS_ENUM(int, VT100TerminalColorIndex) {
 // Handles input during tmux mode. A single line of input will be in the token's string.
 - (void)terminalHandleTmuxInput:(VT100Token *)token;
 
-// Are we currently in tmux mode?
-- (BOOL)terminalInTmuxMode;
-
 // Returns the size of the terminal in cells.
 - (int)terminalWidth;
 - (int)terminalHeight;
@@ -307,10 +304,11 @@ typedef NS_ENUM(int, VT100TerminalColorIndex) {
 - (void)terminalAppendDataToPasteboard:(NSData *)data;
 
 // Download of a base64-encoded file
-// nil = name unknown, -1 = size unknown.
-- (void)terminalWillReceiveFileNamed:(NSString *)name ofSize:(int)size;
-- (void)terminalWillReceiveInlineFileNamed:(NSString *)name
-                                    ofSize:(int)size
+// nil = name unknown, -1 = size unknown. Return YES to accept it.
+- (BOOL)terminalWillReceiveFileNamed:(NSString *)name
+                              ofSize:(NSInteger)size;
+- (BOOL)terminalWillReceiveInlineFileNamed:(NSString *)name
+                                    ofSize:(NSInteger)size
                                      width:(int)width
                                      units:(VT100TerminalUnits)widthUnits
                                     height:(int)height

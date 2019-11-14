@@ -27,6 +27,7 @@
 
 #import "DebugLogging.h"
 #import "iTermAdvancedSettingsModel.h"
+#import "iTermMalloc.h"
 #import "iTermSwiftyStringParser.h"
 #import "iTermTuple.h"
 #import "iTermVariableScope.h"
@@ -133,6 +134,12 @@
 
 + (NSString *)shellEscapableCharacters {
     return @"\\ ()\"&'!$<>;|*?[]#`\t{}";
+}
+
+- (NSString *)stringWithBackslashEscapedShellCharactersIncludingNewlines:(BOOL)includingNewlines {
+    NSMutableString *aMutableString = [[NSMutableString alloc] initWithString:self];
+    [aMutableString escapeShellCharactersWithBackslashIncludingNewlines:includingNewlines];
+    return [NSString stringWithString:aMutableString];
 }
 
 - (NSString *)stringWithEscapedShellCharactersIncludingNewlines:(BOOL)includingNewlines {
@@ -247,6 +254,22 @@
             escape = NO;
             if (escapes[@(c)]) {
                 [currentValue appendString:escapes[@(c)]];
+            } else if (inDoubleQuotes) {
+                // Determined by testing with bash.
+                if (c == '"') {
+                    [currentValue appendString:@"\""];
+                } else if (c == '\\') {
+                    [currentValue appendString:@"\\"];
+                } else {
+                    [currentValue appendFormat:@"\\%C", c];
+                }
+            } else if (inSingleQuotes) {
+                // Determined by testing with bash.
+                if (c == '\'') {
+                    [currentValue appendFormat:@"\\"];
+                } else {
+                    [currentValue appendFormat:@"\\%C", c];
+                }
             } else {
                 [currentValue appendFormat:@"%C", c];
             }
@@ -1141,7 +1164,7 @@ static TECObjectRef CreateTECConverterForUTF8Variants(TextEncodingVariant varian
 
     size_t in_len = sizeof(unichar) * [self length];
     size_t out_len;
-    unichar *in = malloc(in_len);
+    unichar *in = iTermMalloc(in_len);
     if (!in) {
         return self;
     }
@@ -1153,7 +1176,7 @@ static TECObjectRef CreateTECConverterForUTF8Variants(TextEncodingVariant varian
     if (!precompose) {
         out_len *= 2;
     }
-    out = malloc(sizeof(unichar) * out_len);
+    out = iTermMalloc(sizeof(unichar) * out_len);
     if (!out) {
         free(in);
         return self;
@@ -1365,13 +1388,36 @@ static TECObjectRef CreateTECConverterForUTF8Variants(TextEncodingVariant varian
 }
 
 - (iTermTuple *)keyValuePair {
-    NSRange range = [self rangeOfString:@"="];
+    return [self it_stringBySplittingOnFirstSubstring:@"="];
+}
+
+- (iTermTuple<NSString *, NSString *> *)it_stringBySplittingOnFirstSubstring:(NSString *)substring {
+    NSRange range = [self rangeOfString:substring];
     if (range.location == NSNotFound) {
         return nil;
     } else {
         return [iTermTuple tupleWithObject:[self substringToIndex:range.location]
                                  andObject:[self substringFromIndex:range.location + 1]];
     }
+}
+
+- (NSRange)rangeOfCharacterFromSet:(NSCharacterSet *)searchSet fromIndex:(NSInteger)index {
+    if (index >= self.length) {
+        return NSMakeRange(NSNotFound, 0);
+    }
+    return [self rangeOfCharacterFromSet:searchSet options:0 range:NSMakeRange(index, self.length - index)];
+}
+
+- (NSIndexSet *)indicesOfCharactersInSet:(NSCharacterSet *)characterSet {
+    NSMutableIndexSet *result = [[NSMutableIndexSet alloc] init];
+    NSInteger start = 0;
+    NSRange range = [self rangeOfCharacterFromSet:characterSet fromIndex:start];
+    while (range.location != NSNotFound) {
+        [result addIndex:range.location];
+        start = range.location + 1;
+        range = [self rangeOfCharacterFromSet:characterSet fromIndex:start];
+    }
+    return result;
 }
 
 - (NSString *)stringByPerformingSubstitutions:(NSDictionary *)substitutions {
@@ -2159,7 +2205,30 @@ static TECObjectRef CreateTECConverterForUTF8Variants(TextEncodingVariant varian
 }
 
 - (void)escapeShellCharactersIncludingNewlines:(BOOL)includingNewlines {
-    NSString* charsToEscape = [NSString shellEscapableCharacters];
+    if ([iTermAdvancedSettingsModel escapeWithQuotes]) {
+        [self escapeShellCharactersWithSingleQuotesIncludingNewlines:includingNewlines];
+    } else {
+        [self escapeShellCharactersWithBackslashIncludingNewlines:includingNewlines];
+    }
+}
+
+- (void)escapeShellCharactersWithSingleQuotesIncludingNewlines:(BOOL)includingNewlines {
+    // Only need to escape single quote and backslash in a single-quoted string
+    NSMutableString *charsToEscape = [@"\\'" mutableCopy];
+    NSMutableCharacterSet *charsToSearch = [NSMutableCharacterSet characterSetWithCharactersInString:[NSString shellEscapableCharacters]];
+    if (includingNewlines) {
+        [charsToEscape appendString:@"\r\n"];
+        [charsToSearch addCharactersInString:@"\r\n"];
+    }
+    if ([self rangeOfCharacterFromSet:charsToSearch].location != NSNotFound) {
+        [self escapeCharacters:charsToEscape];
+        [self insertString:@"'" atIndex:0];
+        [self appendString:@"'"];
+    }
+}
+
+- (void)escapeShellCharactersWithBackslashIncludingNewlines:(BOOL)includingNewlines {
+    NSString *charsToEscape = [NSString shellEscapableCharacters];
     if (includingNewlines) {
         charsToEscape = [charsToEscape stringByAppendingString:@"\r\n"];
     }
@@ -2168,8 +2237,8 @@ static TECObjectRef CreateTECConverterForUTF8Variants(TextEncodingVariant varian
 
 - (void)escapeCharacters:(NSString *)charsToEscape {
     for (int i = 0; i < [charsToEscape length]; i++) {
-        NSString* before = [charsToEscape substringWithRange:NSMakeRange(i, 1)];
-        NSString* after = [@"\\" stringByAppendingString:before];
+        NSString *before = [charsToEscape substringWithRange:NSMakeRange(i, 1)];
+        NSString *after = [@"\\" stringByAppendingString:before];
         [self replaceOccurrencesOfString:before
                               withString:after
                                  options:0

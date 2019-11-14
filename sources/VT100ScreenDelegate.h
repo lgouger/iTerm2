@@ -124,9 +124,6 @@
 // Handle a line of input in tmux mode in the token's string.
 - (void)screenHandleTmuxInput:(VT100Token *)token;
 
-// Are we in tmux mode?
-- (BOOL)screenInTmuxMode;
-
 // Returns if ambiguous characters are treated as fullwidth.
 - (BOOL)screenShouldTreatAmbiguousCharsAsDoubleWidth;
 
@@ -208,7 +205,7 @@
 - (BOOL)screenIsAppendingToPasteboard;
 - (void)screenAppendDataToPasteboard:(NSData *)data;
 
-- (void)screenWillReceiveFileNamed:(NSString *)name ofSize:(int)size;
+- (void)screenWillReceiveFileNamed:(NSString *)name ofSize:(NSInteger)size preconfirmed:(BOOL)preconfirmed;
 - (void)screenDidFinishReceivingFile;
 - (void)screenDidFinishReceivingInlineFile;
 - (void)screenDidReceiveBase64FileData:(NSString *)data;
@@ -265,5 +262,6 @@
 - (void)screenDidReceiveLineFeed;
 - (void)screenSoftAlternateScreenModeDidChange;
 - (void)screenReportKeyUpDidChange:(BOOL)reportKeyUp;
+- (BOOL)screenConfirmDownloadCanExceedSize:(NSInteger)limit;
 
 @end

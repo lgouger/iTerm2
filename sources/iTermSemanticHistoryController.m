@@ -261,7 +261,7 @@ NSString *const kSemanticHistoryColumnNumberKey = @"semanticHistory.columnNumber
     }
     NSArray<NSString *> *fallbackParts = @[ emacs ];
     NSString *fallback = [[fallbackParts mapWithBlock:^id(NSString *anObject) {
-        return [anObject stringWithEscapedShellCharactersIncludingNewlines:YES];
+        return [anObject stringWithBackslashEscapedShellCharactersIncludingNewlines:YES];
     }] componentsJoinedByString:@" "];
     
     // Run emacsclient -a "emacs <args>" <args>
@@ -432,6 +432,7 @@ NSString *const kSemanticHistoryColumnNumberKey = @"semanticHistory.columnNumber
     warning.warningActions = @[ [iTermWarningAction warningActionWithLabel:@"OK" block:nil],
                                 [iTermWarningAction warningActionWithLabel:@"View" block:^(iTermWarningSelection selection) {
                                     [[iTermController sharedInstance] openSingleUseWindowWithCommand:@"/usr/bin/true"
+                                                                                           arguments:nil
                                                                                               inject:inject
                                                                                          environment:nil
                                                                                                  pwd:@"/"
@@ -709,7 +710,10 @@ NSString *const kSemanticHistoryColumnNumberKey = @"semanticHistory.columnNumber
                                                 suffix:(NSString *)afterStringIn
                                       workingDirectory:(NSString *)workingDirectory
                                         trimWhitespace:(BOOL)trimWhitespace
-                                            completion:(void (^)(NSString *path, int prefixChars, int suffixChars))completion {
+                                            completion:(void (^)(NSString *path,
+                                                                 int prefixChars,
+                                                                 int suffixChars,
+                                                                 BOOL workingDirectoryIsLocal))completion {
     iTermPathFinder *pathfinder = [[iTermPathFinder alloc] initWithPrefix:beforeStringIn
                                                                    suffix:afterStringIn
                                                          workingDirectory:workingDirectory
@@ -721,7 +725,10 @@ NSString *const kSemanticHistoryColumnNumberKey = @"semanticHistory.columnNumber
         if (!strongPathfinder) {
             return;
         }
-        completion(strongPathfinder.path, strongPathfinder.prefixChars, strongPathfinder.suffixChars);
+        completion(strongPathfinder.path,
+                   strongPathfinder.prefixChars,
+                   strongPathfinder.suffixChars,
+                   pathfinder.workingDirectoryIsLocal);
     }];
     return pathfinder;
 }

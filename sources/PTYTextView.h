@@ -141,6 +141,7 @@ typedef NS_ENUM(NSInteger, PTYTextViewSelectionExtensionUnit) {
 - (BOOL)textViewAmbiguousWidthCharsAreDoubleWidth;
 - (PTYScroller *)textViewVerticalScroller;
 - (BOOL)textViewHasCoprocess;
+- (void)textViewStopCoprocess;
 - (void)textViewPostTabContentsChangedNotification;
 - (void)textViewInvalidateRestorableState;
 - (void)textViewDidFindDirtyRects;
@@ -193,7 +194,7 @@ typedef NS_ENUM(NSInteger, PTYTextViewSelectionExtensionUnit) {
 // Describes the current user, host, and path.
 - (NSURL *)textViewCurrentLocation;
 - (void)textViewBurySession;
-- (void)textViewShowHoverURL:(NSString *)url;
+- (BOOL)textViewShowHoverURL:(NSString *)url;
 
 - (BOOL)textViewCopyMode;
 - (BOOL)textViewCopyModeSelecting;
@@ -215,6 +216,8 @@ typedef NS_ENUM(NSInteger, PTYTextViewSelectionExtensionUnit) {
 - (CGFloat)textViewBadgeTopMargin;
 - (CGFloat)textViewBadgeRightMargin;
 - (iTermVariableScope *)textViewVariablesScope;
+- (BOOL)textViewTerminalBackgroundColorDeterminesWindowDecorationColor;
+- (void)textViewDidUpdateDropTargetVisibility;
 @end
 
 @interface iTermHighlightedRow : NSObject
@@ -264,8 +267,11 @@ typedef NS_ENUM(NSInteger, PTYTextViewSelectionExtensionUnit) {
 @property(nonatomic, assign) BOOL asciiLigatures;
 @property(nonatomic, assign) BOOL nonAsciiLigatures;
 
-// Use a bright version of the text color for bold text, and use specified bold color?
-@property(nonatomic, assign) BOOL useBoldColor;
+// Use the custom bold color
+@property(nonatomic, readonly) BOOL useCustomBoldColor;
+
+// Brighten bold text?
+@property(nonatomic, assign) BOOL brightenBold;
 
 // Ok to render italic text as italics?
 @property(nonatomic, assign) BOOL useItalicFont;
@@ -459,8 +465,8 @@ typedef void (^PTYTextViewDrawingHookBlock)(iTermTextDrawingHelper *);
 // Update the scroller color for light or dark backgrounds.
 - (void)updateScrollerForBackgroundColor;
 
-// Remove underline indicating clickable URL.
-- (void)removeUnderline;
+// Remove underline indicating clickable URL. Returns if it changed.
+- (BOOL)removeUnderline;
 
 // Update the scroll position and schedule a redraw. Returns true if anything
 // onscreen is blinking.
@@ -627,6 +633,7 @@ scrollToFirstResult:(BOOL)scrollToFirstResult;
 - (void)performBlockWithFlickerFixerGrid:(void (NS_NOESCAPE ^)(void))block;
 
 - (id)contentWithAttributes:(BOOL)attributes;
+- (void)setUseBoldColor:(BOOL)flag brighten:(BOOL)brighten;
 
 #pragma mark - Testing only
 

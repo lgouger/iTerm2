@@ -7,7 +7,6 @@
 //
 
 #import "FutureMethods.h"
-#import "NSSavePanel+iTerm.h"
 
 static NSString *const kApplicationServicesFramework = @"/System/Library/Frameworks/ApplicationServices.framework";
 static NSString *const kMultitouchSupportFramework =  @"/System/Library/PrivateFrameworks/MultitouchSupport.framework";
@@ -116,16 +115,6 @@ MTActuatorIsOpenFunction *iTermGetMTActuatorIsOpenFunction(void) {
     return function;
 }
 
-
-@implementation NSOpenPanel (Utility)
-- (NSArray *)legacyFilenames {
-    NSMutableArray *filenames = [NSMutableArray array];
-    for (NSURL *url in self.URLs) {
-        [filenames addObject:url.path];
-    }
-    return filenames;
-}
-@end
 
 @implementation NSFont(Future)
 

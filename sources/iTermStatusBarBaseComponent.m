@@ -115,6 +115,10 @@ const double iTermStatusBarBaseComponentDefaultPriority = 5;
             NSStringFromClass([self class]), self, @(self.statusBarComponentPriority)];
 }
 
+- (BOOL)statusBarComponentIsInternal {
+    return NO;
+}
+
 - (NSString *)statusBarComponentIdentifier {
     return [NSString stringWithFormat:@"com.iterm2.%@", NSStringFromClass(self.class)];
 }
@@ -318,7 +322,7 @@ const double iTermStatusBarBaseComponentDefaultPriority = 5;
     NSViewController *viewController = [[iTermWebViewWrapperViewController alloc] initWithWebView:webView
                                                                                         backupURL:nil];
     popover.contentViewController = viewController;
-    popover.contentSize = viewController.view.frame.size;
+    popover.contentSize = size;
     NSView *view = self.statusBarComponentView;
     popover.behavior = NSPopoverBehaviorSemitransient;
     popover.delegate = self;

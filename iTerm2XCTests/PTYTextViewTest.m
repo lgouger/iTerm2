@@ -387,7 +387,7 @@ static NSString *const kDiffScriptPath = @"/tmp/diffs";
 - (void)selectPaneAboveInCurrentTerminal {
 }
 
-- (void)saveToDvr {
+- (void)saveToDvr:(NSIndexSet *)cleanLines {
 }
 
 - (void)removeInaccessibleNotes {
@@ -2472,6 +2472,11 @@ static NSString *const kDiffScriptPath = @"/tmp/diffs";
     return @[];
 }
 
+- (BOOL)textViewGetAndResetHasScrolled {
+    return NO;
+}
+
+
 
 - (int)numberOfLines {
     return 4;
@@ -2695,7 +2700,8 @@ static NSString *const kDiffScriptPath = @"/tmp/diffs";
     return YES;
 }
 
-- (void)textViewShowHoverURL:(NSString *)url {
+- (BOOL)textViewShowHoverURL:(NSString *)url {
+    return NO;
 }
 
 - (BOOL)textViewInInteractiveApplication {
@@ -2748,6 +2754,15 @@ static NSString *const kDiffScriptPath = @"/tmp/diffs";
     return nil;
 }
 
+- (void)textViewDidUpdateDropTargetVisibility {
+}
+
+- (void)textViewStopCoprocess {
+}
+
+- (BOOL)textViewTerminalBackgroundColorDeterminesWindowDecorationColor {
+    return NO;
+}
 
 - (NSFont *)badgeLabelFontOfSize:(CGFloat)pointSize {
     return [NSFont systemFontOfSize:[NSFont systemFontSize]];

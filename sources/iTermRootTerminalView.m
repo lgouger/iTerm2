@@ -17,6 +17,7 @@
 #import "PTYWindow.h"
 #import "iTermAdvancedSettingsModel.h"
 #import "iTermDragHandleView.h"
+#import "iTermFakeWindowTitleLabel.h"
 #import "iTermGenericStatusBarContainer.h"
 #import "iTermPreferences.h"
 #import "iTermWindowSizeView.h"
@@ -76,14 +77,6 @@ typedef struct {
 
 @end
 
-@interface iTermFakeWindowTitleLabel : NSTextField
-@property (nonatomic, copy) NSString *windowTitle;
-@property (nonatomic, strong) NSImage *windowIcon;
-@end
-
-@implementation iTermFakeWindowTitleLabel
-@end
-
 @implementation iTermRootTerminalView {
     BOOL _tabViewFrameReduced;
     BOOL _haveShownToolbelt;
@@ -98,6 +91,12 @@ typedef struct {
     iTermGenericStatusBarContainer *_statusBarContainer;
     NSDictionary *_desiredToolbeltProportions;
     iTermWindowSizeView *_windowSizeView NS_AVAILABLE_MAC(10_14);
+
+    iTermLayerBackedSolidColorView *_titleBackgroundView NS_AVAILABLE_MAC(10_14);
+    iTermLayerBackedSolidColorView *_topBorderView NS_AVAILABLE_MAC(10_14);
+    iTermLayerBackedSolidColorView *_rightBorderView NS_AVAILABLE_MAC(10_14);
+    iTermLayerBackedSolidColorView *_bottomBorderView NS_AVAILABLE_MAC(10_14);
+    iTermLayerBackedSolidColorView *_leftBorderView NS_AVAILABLE_MAC(10_14);
 }
 
 - (instancetype)initWithFrame:(NSRect)frameRect
@@ -345,19 +344,44 @@ typedef struct {
 }
 
 - (NSRect)frameForWindowTitleLabel {
+    return [self frameForWindowTitleLabel:_windowTitleLabel
+                           getLeftAligned:nil];
+}
+
+- (NSRect)frameForWindowTitleLabel:(NSTextField *)textField
+                    getLeftAligned:(BOOL *)leftAlignedPtr {
     if (_tabBarControlOnLoan) {
         return NSZeroRect;
     }
     const CGFloat tabBarHeight = _tabBarControl.height;
-    const CGFloat baselineOffset = -_windowTitleLabel.font.descender;
-    const CGFloat capHeight = _windowTitleLabel.font.capHeight;
+    const CGFloat baselineOffset = -textField.font.descender;
+    const CGFloat capHeight = textField.font.capHeight;
     const CGFloat myHeight = self.frame.size.height;
     const NSEdgeInsets insets = [self.delegate tabBarInsets];
-    const CGFloat sideInset = MAX(MAX(insets.left, insets.right), iTermRootTerminalViewWindowNumberLabelMargin);
-    NSRect rect = NSMakeRect([self retinaRound:sideInset],
+
+    // Prefer to center it, using the same inset on both sides. There's no need
+    // to have an inset on the right otherwise so if the title doesn't fit then
+    // left-align it and make it as wide as the available space.
+    // This mirrors what NSWindow's title does.
+    const CGFloat mostGenerousInset = MAX(MAX(insets.left, insets.right), iTermRootTerminalViewWindowNumberLabelMargin);
+    const CGFloat containerWidth = NSWidth(self.frame) - ([self shouldShowToolbelt] ? NSWidth(_toolbelt.frame) : 0);
+    const CGFloat desiredWidth = [textField fittingSize].width;
+    CGFloat leftInset = mostGenerousInset;
+    CGFloat rightInset = mostGenerousInset;
+    CGFloat proposedWidth = containerWidth - leftInset - rightInset;
+    const CGFloat overage = desiredWidth - proposedWidth;
+    if (overage > 0) {
+        rightInset = MAX(4, rightInset - overage);
+        if (leftAlignedPtr) {
+            DLog(@"Use left alignment with text “%@” desiredWidth %@, proposedWidth %@, containerWidth %@",
+                 textField.stringValue, @(desiredWidth), @(proposedWidth), @(containerWidth));
+            *leftAlignedPtr = YES;
+        }
+    }
+    NSRect rect = NSMakeRect([self retinaRound:leftInset],
                              [self retinaRound:myHeight - tabBarHeight + (tabBarHeight - capHeight) / 2.0 - baselineOffset],
-                             ceil(MAX(0, self.frame.size.width - sideInset * 2)),
-                             ceil(_windowTitleLabel.frame.size.height));
+                             ceil(MAX(0, containerWidth - leftInset - rightInset)),
+                             ceil(textField.frame.size.height));
     return [self retinaRoundRect:rect];
 }
 
@@ -396,8 +420,10 @@ typedef struct {
     if (!needCustomButtons) {
         [_standardWindowButtonsView removeFromSuperview];
         _standardWindowButtonsView = nil;
-        for (int i = 0; i < self.numberOfWindowButtons; i++) {
-            [[self.window standardWindowButton:self.windowButtonTypes[i]] setHidden:NO];
+        if ([self.delegate rootTerminalViewShouldRevealStandardWindowButtons]) {
+            for (int i = 0; i < self.numberOfWindowButtons; i++) {
+                [[self.window standardWindowButton:self.windowButtonTypes[i]] setHidden:NO];
+            }
         }
         return;
     }
@@ -424,6 +450,32 @@ typedef struct {
 
         [_standardWindowButtonsView addSubview:button];
         _standardButtons[@(self.windowButtonTypes[i])] = button;
+        if (self.windowButtonTypes[i] == NSWindowZoomButton) {
+            // 😠
+            // In issue 8401 a user reported that option-clicking the zoom button doesn't work after
+            // exiting full screen.
+            //
+            // A disassembly of -[NSWindow _setNeedsZoom:] shows that option-clicking only works if
+            // -[NSWindow _lastLeftHit] == -[NSWindow standardWindowButton:2]. So for some reason,
+            // Apple intended option+zoom to only work with their own zoom button.
+            //
+            // Chrome ran into the same thing here:
+            // https://bugs.chromium.org/p/chromium/issues/detail?id=393808
+            //
+            // Worth reading for the mention of _evilHackToClearlastLeftHitInWindow.
+            //
+            // Their analysis is different than mine. I see that _lastLeftHit is actually MY button,
+            // which is not what they saw. I suspect a different etiology.
+            //
+            // I don't recall why I implemented zoomButtonEvent: in the first place; I suspect it
+            // was a less well-informed attempt to work around this issue when I added compact
+            // windows originally. Since I can't use the "real" button for this window, this seems
+            // like the only reasonable fix.
+            //
+            // Apologies to my future self for whatever bugs this introduces.
+            button.target = _standardWindowButtonsView;
+            button.action = @selector(zoomButtonEvent);
+        }
         x += stride;
         dispatch_async(dispatch_get_main_queue(), ^{
             [button setNeedsDisplay];
@@ -442,17 +494,21 @@ typedef struct {
     [super flagsChanged:event];
 }
 
+- (NSRect)frameForTitleBackgroundView {
+    const CGFloat height = [_delegate rootTerminalViewHeightOfTabBar:self];
+    return NSMakeRect(0,
+                      self.frame.size.height - height,
+                      self.frame.size.width,
+                      height);
+}
+
 - (void)drawRect:(NSRect)dirtyRect {
     if (@available(macOS 10.14, *)) {
         if ([_delegate rootTerminalViewShouldDrawWindowTitleInPlaceOfTabBar]) {
             // Draw background color for fake title bar.
             NSColor *const backgroundColor = [_delegate rootTerminalViewTabBarBackgroundColorIgnoringTabColor:NO];
-            const CGFloat height = [_delegate rootTerminalViewHeightOfTabBar:self];
             [backgroundColor set];
-            NSRectFill(NSMakeRect(0,
-                                  self.frame.size.height - height,
-                                  self.frame.size.width,
-                                  height));
+            NSRectFill(self.frameForTitleBackgroundView);
         }
 
         NSBezierPath *path = [NSBezierPath bezierPath];
@@ -488,6 +544,8 @@ typedef struct {
 
         return;
     }
+
+    // 10.12 and 10.13 code path
     if (_useMetal) {
         return;
     } else {
@@ -495,10 +553,117 @@ typedef struct {
     }
 }
 
+- (NSRect)frameForLeftBorderView {
+    return NSMakeRect(0, 0, 1, self.bounds.size.height);
+}
+
+- (NSRect)frameForRightBorderView {
+    return NSMakeRect(self.bounds.size.width - 1, 0, 1, self.bounds.size.height);
+}
+
+- (NSRect)frameForTopBorderView {
+    return NSMakeRect(0, self.bounds.size.height - 1, self.bounds.size.width, 1);
+}
+
+- (NSRect)frameForBottomBorderView {
+    return NSMakeRect(0, 0, self.bounds.size.width, 1);
+}
+
+- (void)updateTitleAndBorderViews NS_AVAILABLE_MAC(10_14) {
+#warning TODO: Test on 10.15
+    const BOOL haveLayer = _useMetal;
+    const BOOL wantsTitleBackgroundView = haveLayer && [_delegate rootTerminalViewShouldDrawWindowTitleInPlaceOfTabBar];
+    if (wantsTitleBackgroundView) {
+        if (!_titleBackgroundView) {
+            _titleBackgroundView = [[iTermLayerBackedSolidColorView alloc] initWithFrame:self.frameForTitleBackgroundView];
+            _titleBackgroundView.autoresizingMask = NSViewWidthSizable | NSViewMinYMargin;
+        }
+        _titleBackgroundView.color = [_delegate rootTerminalViewTabBarBackgroundColorIgnoringTabColor:NO];
+        _titleBackgroundView.frame = self.frameForTitleBackgroundView;
+        if (_titleBackgroundView.superview != self) {
+            [self insertSubview:_titleBackgroundView atIndex:0];
+        }
+    } else {
+        [_titleBackgroundView removeFromSuperview];
+    }
+
+    const BOOL wantsLeftBorder = haveLayer && self.delegate.haveLeftBorder;
+    const BOOL wantsTopBorder = haveLayer && self.delegate.haveTopBorder;
+    const BOOL wantsRightBorder = haveLayer && self.delegate.haveRightBorderRegardlessOfScrollBar;
+    const BOOL wantsBottomBorder = haveLayer && self.delegate.haveBottomBorder;
+
+    if (wantsLeftBorder) {
+        const NSRect frame = [self frameForLeftBorderView];
+        if (!_leftBorderView) {
+            _leftBorderView = [[iTermLayerBackedSolidColorView alloc] initWithFrame:frame];
+            _leftBorderView.color = [NSColor colorWithWhite:0.5 alpha:1];
+            _leftBorderView.autoresizingMask = NSViewHeightSizable | NSViewMaxXMargin;
+        }
+        _leftBorderView.frame = frame;
+        if (_leftBorderView.superview != self) {
+            [self addSubview:_leftBorderView];
+        }
+    } else {
+        [_leftBorderView removeFromSuperview];
+    }
+    if (wantsTopBorder) {
+        const NSRect frame = [self frameForTopBorderView];
+        if (!_topBorderView) {
+            _topBorderView = [[iTermLayerBackedSolidColorView alloc] initWithFrame:frame];
+            _topBorderView.color = [NSColor colorWithWhite:0.5 alpha:1];
+            _topBorderView.autoresizingMask = NSViewWidthSizable | NSViewMinYMargin;
+        }
+        _topBorderView.frame = frame;
+        if (_topBorderView.superview != self) {
+            [self addSubview:_topBorderView];
+        }
+    } else {
+        [_topBorderView removeFromSuperview];
+    }
+    if (wantsRightBorder) {
+        const NSRect frame = [self frameForRightBorderView];
+        if (!_rightBorderView) {
+            _rightBorderView = [[iTermLayerBackedSolidColorView alloc] initWithFrame:frame];
+            _rightBorderView.color = [NSColor colorWithWhite:0.5 alpha:1];
+            _rightBorderView.autoresizingMask = NSViewHeightSizable | NSViewMinXMargin;
+        }
+        _rightBorderView.frame = frame;
+        if (_rightBorderView.superview != self) {
+            [self addSubview:_rightBorderView];
+        }
+    } else {
+        [_rightBorderView removeFromSuperview];
+    }
+    if (wantsBottomBorder) {
+        const NSRect frame = [self frameForBottomBorderView];
+        if (!_bottomBorderView) {
+            _bottomBorderView = [[iTermLayerBackedSolidColorView alloc] initWithFrame:frame];
+            _bottomBorderView.color = [NSColor colorWithWhite:0.5 alpha:1];
+            _bottomBorderView.autoresizingMask = NSViewWidthSizable | NSViewMaxYMargin;
+        }
+        _bottomBorderView.frame = frame;
+        if (_bottomBorderView.superview != self) {
+            [self addSubview:_bottomBorderView];
+        }
+    } else {
+        [_bottomBorderView removeFromSuperview];
+    }
+}
+
 - (void)setUseMetal:(BOOL)useMetal {
     _useMetal = useMetal;
     if (@available(macOS 10.14, *)) {
         self.tabView.drawsBackground = NO;
+        if (@available(macOS 10.15, *)) { } else {
+            if (useMetal) {
+                self.wantsLayer = YES;
+                self.layer = [[CALayer alloc] init];
+            } else {
+                self.wantsLayer = NO;
+                self.layer = nil;
+            }
+        }
+        [self updateTitleAndBorderViews];
     } else {
         self.tabView.drawsBackground = !_useMetal;
     }
@@ -517,36 +682,20 @@ typedef struct {
     _windowTitle = [title copy];
 
     [self setWindowTitleLabelToString:_windowTitle icon:[self.delegate rootTerminalViewCurrentTabIcon]];
+    if (!_windowTitleLabel.hidden) {
+        [self layoutWindowPaneDecorations];
+    }
 }
 
 - (void)setWindowTitleLabelToString:(NSString *)title icon:(NSImage *)icon {
-    NSMutableParagraphStyle *paragraphStyle = [[NSMutableParagraphStyle alloc] init];
-    paragraphStyle.alignment = NSTextAlignmentCenter;
-    paragraphStyle.lineBreakMode = NSLineBreakByTruncatingTail;
-    NSDictionary *attributes = @{ NSFontAttributeName: _windowTitleLabel.font,
-                                  NSForegroundColorAttributeName: _windowTitleLabel.textColor,
-                                  NSParagraphStyleAttributeName: paragraphStyle };
-    NSAttributedString *attributedString = [[NSAttributedString alloc] initWithString:title ?: @""
-                                                                           attributes:attributes];
-    if (icon) {
-        NSTextAttachment *textAttachment = [[NSTextAttachment alloc] init];
-        textAttachment.image = icon;
-        NSFont *font = _windowTitleLabel.font;
-        const CGFloat lineHeight = ceilf(font.capHeight);
-        textAttachment.bounds = NSMakeRect(0,
-                                           - (icon.size.height - lineHeight) / 2.0,
-                                           icon.size.width,
-                                           icon.size.height);
-        NSMutableAttributedString *iconAttributedString = [[NSAttributedString attributedStringWithAttachment:textAttachment] mutableCopy];
-        [iconAttributedString addAttribute:NSParagraphStyleAttributeName value:paragraphStyle range:NSMakeRange(0, iconAttributedString.length)];
-        [iconAttributedString appendAttributedString:[[NSAttributedString alloc] initWithString:@" " attributes:attributes]];
-        [iconAttributedString appendAttributedString:attributedString];
-        _windowTitleLabel.attributedStringValue = iconAttributedString;
-    } else {
-        _windowTitleLabel.stringValue = title ?: @"";
-    }
-    _windowTitleLabel.windowTitle = title;
-    _windowTitleLabel.windowIcon = icon;
+    [_windowTitleLabel setTitle:title icon:icon alignmentProvider:
+     ^NSTextAlignment(NSTextField * _Nonnull scratch) {
+         BOOL leftAligned = NO;
+         [self frameForWindowTitleLabel:scratch
+                         getLeftAligned:&leftAligned];
+
+         return leftAligned ? NSTextAlignmentLeft : NSTextAlignmentCenter;
+    }];
 }
 
 - (void)setWindowTitleIcon:(NSImage *)icon {
@@ -802,10 +951,8 @@ typedef struct {
 }
 
 - (CGFloat)tabviewWidth {
-    if ([self tabBarShouldBeVisible] &&
-        [iTermPreferences intForKey:kPreferenceKeyTabPosition] == PSMTab_LeftTab)  {
-        return _leftTabBarWidth;
-    }
+    assert([iTermPreferences intForKey:kPreferenceKeyTabPosition] != PSMTab_LeftTab ||
+           ![self tabBarShouldBeVisible]);
 
     CGFloat width;
     if (self.shouldShowToolbelt && !_delegate.exitingLionFullscreen) {
@@ -1080,7 +1227,7 @@ typedef struct {
     }
     NSRect tabBarFrame = NSMakeRect(_delegate.haveLeftBorder ? 1 : 0,
                                     decorationHeights.bottom,
-                                    [self tabviewWidth],
+                                    _leftTabBarWidth,
                                     [thisWindow.contentView frame].size.height - decorationHeights.bottom - decorationHeights.top);
     self.tabBarControl.insets = [self.delegate tabBarInsets];
     [self setTabBarFrame:tabBarFrame];
@@ -1163,6 +1310,9 @@ typedef struct {
     self.window.movableByWindowBackground = !hideWindowTitleLabel;
     _windowNumberLabel.hidden = ![self.delegate rootTerminalViewWindowNumberLabelShouldBeVisible];
     _standardWindowButtonsView.frame = [self frameForStandardWindowButtons];
+    if (@available(macOS 10.14, *)) {
+        [self updateTitleAndBorderViews];
+    }
 }
 
 - (void)layoutSubviews {
@@ -1233,7 +1383,7 @@ typedef struct {
 
 - (CGFloat)leftTabBarWidthForPreferredWidth:(CGFloat)preferredWidth contentWidth:(CGFloat)contentWidth {
     const CGFloat minimumWidth = [self minimumTabBarWidth];
-    const CGFloat maximumWidth = round(contentWidth / 3);
+    const CGFloat maximumWidth = MAX(1, contentWidth - [iTermAdvancedSettingsModel terminalMargin] * 2 - 10);
     return MAX(MIN(maximumWidth, preferredWidth), minimumWidth);
 }
 
@@ -1246,16 +1396,8 @@ typedef struct {
 }
 
 - (void)willShowTabBar {
-    const CGFloat minimumWidth = 50;
-    // Given that the New window width (N) = Tab bar width (T) + Content Size (C)
-    // Given that T < N/3 (by leftTabBarWidthForPreferredWidth):
-    // T <= N / 3
-    // T <= 1/3(T+C)
-    // T <= T/3 + C/3
-    // 2/3T <= C/3
-    // T <= C/2
-    const CGFloat maximumWidth = round(self.bounds.size.width / 2);
-    _leftTabBarWidth = MAX(MIN(maximumWidth, _leftTabBarPreferredWidth), minimumWidth);
+    _leftTabBarWidth = [self leftTabBarWidthForPreferredWidth:_leftTabBarPreferredWidth
+                                                 contentWidth:self.bounds.size.width];
 }
 
 #pragma mark - Status Bar Layout

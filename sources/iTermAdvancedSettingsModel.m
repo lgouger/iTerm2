@@ -179,6 +179,7 @@ DEFINE_BOILERPLATE(name, NSString *, kiTermAdvancedSettingTypeString, theDefault
 
 #define SECTION_TABS @"Tabs: "
 
+DEFINE_BOOL(openProfilesInNewWindow, NO, SECTION_TABS @"Choosing a profile from the “Profiles” menu opens a new window.\nYou must restart iTerm2 after changing this setting for it to take effect.");
 DEFINE_BOOL(useUnevenTabs, NO, SECTION_TABS @"Uneven tab widths allowed.");
 DEFINE_INT(minTabWidth, 75, SECTION_TABS @"Minimum tab width when using uneven tab widths.");
 DEFINE_INT(minCompactTabWidth, 60, SECTION_TABS @"Minimum tab width when using uneven tab widths for compact tabs.");
@@ -202,8 +203,10 @@ DEFINE_FLOAT(defaultTabBarHeight, 24, SECTION_TABS @"Default tab bar height")
 DEFINE_BOOL(doubleClickTabToEdit, YES, SECTION_TABS @"Should double-clicking a tab open a window to edit its title?");
 DEFINE_FLOAT(minimumTabLabelWidth, 35, SECTION_TABS @"Minimum width for tab labels.\nThe activity/bell icon will be hidden when the space for the label drops below this size (in points)");
 DEFINE_BOOL(disregardDockSettingToOpenTabsInsteadOfWindows, YES, SECTION_TABS @"Ignore System Preferences > Dock > Prefer tabs when opening documents?\nWhen set to No, asking to open a window will open a tab instead when system preferences is configured to prefer tabs over windows. When set to Yes, asking to open a window may open a tab instead.");
-DEFINE_BOOL(convertTabDragToWindowDragForSolitaryTabInCompactOrMinimalTheme, YES, SECTION_TABS @"In the Minimal and Compact themes when there is a single tab and the tab bar is visible, should tab drags automatically be converted to window drags?");
+DEFINE_BOOL(convertTabDragToWindowDragForSolitaryTabInCompactOrMinimalTheme, YES, SECTION_TABS @"In the Minimal and Compact themes when there is a single tab and the tab bar is visible, should dragging the tab bar move the window?");
 DEFINE_BOOL(highVisibility, YES, SECTION_TABS @"High Contrast modes maximize visibility.\nWhen enabled, the dark high-contrast theme emphasizes visibility over beauty.");
+DEFINE_BOOL(drawBottomLineForHorizontalTabBar, YES, SECTION_TABS @"Draw bottom line for horizontal tabbar in Regular, Dark and Light theme?");
+DEFINE_BOOL(disableTabBarTooltips, NO, SECTION_TABS @"Disable tab bar tooltips?");
 
 #pragma mark Mouse
 
@@ -243,6 +246,7 @@ DEFINE_FLOAT(fractionOfCharacterSelectingNextNeighbor, 0.35, SECTION_MOUSE @"Fra
 #define SECTION_TERMINAL @"Terminal: "
 
 DEFINE_BOOL(traditionalVisualBell, NO, SECTION_TERMINAL @"Visual bell flashes the whole screen, not just a bell icon.");
+DEFINE_FLOAT(indicatorFlashInitialAlpha, 0.5, SECTION_TERMINAL @"Initial alpha value when flashing the visual bell or search wraparound indicator");
 DEFINE_FLOAT(timeBetweenBlinks, 0.5, SECTION_TERMINAL @"Cursor blink speed (seconds).");
 DEFINE_BOOL(doNotSetCtype, NO, SECTION_TERMINAL @"Never set the CTYPE environment variable.");
 // For these, 1 is more aggressive and 0 turns the feature off:
@@ -272,6 +276,7 @@ DEFINE_BOOL(detectPasswordInput, YES, SECTION_TERMINAL @"Show key at cursor at p
 DEFINE_BOOL(tabsWrapAround, NO, SECTION_TERMINAL @"Tabs wrap around to the next line.\nThis is useful for preserving tabs for later copying to the pasteboard. It breaks backward compatibility and may cause layout problems with programs that don’t expect this behavior.");
 DEFINE_STRING(sshSchemePath, @"ssh", SECTION_TERMINAL @"Command to run when handling an ssh:// URL.");
 DEFINE_INT(defaultTabStopWidth, 8, SECTION_TERMINAL @"Default tab stop width for new sessions.");
+DEFINE_BOOL(convertItalicsToReverseVideoForTmux, YES, SECTION_TERMINAL @"Convert italics to reverse video in tmux integration?");
 
 #pragma mark Hotkey
 
@@ -371,6 +376,7 @@ DEFINE_BOOL(conservativeURLGuessing, NO, SECTION_SEMANTIC_HISTORY @"URLs must co
 DEFINE_STRING(trailingPunctuationMarks, @"!?…)].\"';:,", SECTION_SEMANTIC_HISTORY @"Characters to ignore at the end of a URL");
 DEFINE_STRING(defaultURLScheme, @"https", SECTION_SEMANTIC_HISTORY @"Default URL scheme");
 DEFINE_BOOL(restrictSemanticHistoryPrefixAndSuffixToLogicalWindow, YES, SECTION_SEMANTIC_HISTORY @"Respect soft boundaries for computing the prefix and suffix text passed to semantic history commands?\nDue to a long-standing bug this did not used to be respected. Soft boundaries were always respected for deciding what text was clicked on, but the prefix and suffix did not. If you have a semantic history command that depends on the bug, you can switch this off to get the pre-3.1.2 behavior.");
+DEFINE_BOOL(enableSemanticHistoryOnNetworkMounts, NO, SECTION_SEMANTIC_HISTORY @"Enable semantic history for network-mounted filesystems?\nOnly enable this if you know your network-mounted filesystems are really fast and reliable. A slow filesystem may cause the entire iTerm2 app to hang.");
 
 #pragma mark - Debugging
 
@@ -479,6 +485,7 @@ DEFINE_SETTABLE_BOOL(promptForPasteWhenNotAtPrompt, PromptForPasteWhenNotAtPromp
 DEFINE_BOOL(excludeBackgroundColorsFromCopiedStyle, NO, SECTION_PASTEBOARD @"Exclude background colors when text is copied with color and font style?");
 DEFINE_BOOL(includePasteHistoryInAdvancedPaste, YES, SECTION_PASTEBOARD @"Include paste history in the advanced paste menu.");
 DEFINE_INT(alwaysWarnBeforePastingOverSize, -1, SECTION_PASTEBOARD @"When pasting more than this many characters, require confirmation.\nSet to -1 to disable warning.\nCharacters are counted in UTF-16.");
+DEFINE_BOOL(saveToPasteHistoryWhenSecureInputEnabled, NO, SECTION_PASTEBOARD @"Save to paste history when secure keyboard input is enabled?");
 
 #pragma mark - Tip of the day
 
@@ -531,6 +538,8 @@ DEFINE_BOOL(workAroundNumericKeypadBug, YES, SECTION_EXPERIMENTAL @"Treat the eq
 DEFINE_BOOL(tmuxVariableWindowSizesSupported, NO, SECTION_EXPERIMENTAL @"Allow variable window sizes in tmux integration");
 DEFINE_BOOL(aggressiveBaseCharacterDetection, NO, SECTION_EXPERIMENTAL @"Detect base unicode characters with lookup table.\nApple's algorithm for segmenting composed characters makes bad choices, such as for Tamil. Enable this to reduce text overlapping.");
 DEFINE_BOOL(accelerateUploads, YES, SECTION_EXPERIMENTAL @"Make uploads with it2ul really fast.");
+DEFINE_BOOL(escapeWithQuotes, NO, SECTION_EXPERIMENTAL @"Escape file names with single quotes instead of backslashes.\nThis is intended for users of xonsh, which does not accept backslash escaping.");
+DEFINE_BOOL(dismemberScrollView, NO, SECTION_EXPERIMENTAL @"Dismember scroll view for better GPU performance?\nThis was a dangerous hack that was necessary in 10.14 for performance but seems not to be needed in 10.15. This setting only affects macOS 10.15 and later.");
 
 #pragma mark - Scripting
 #define SECTION_SCRIPTING @"Scripting: "

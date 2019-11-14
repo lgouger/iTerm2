@@ -42,6 +42,12 @@ class Tab:
         self.__root.update_session(session)
 
     @property
+    def window(self) -> 'iterm2.Window':
+        """Returns the containing window."""
+        # Note: App sets get_window on Tab when it's created.
+        return Tab.get_window(self)
+
+    @property
     def tmux_connection_id(self):
         return self.__tmux_connection_id
 
@@ -97,6 +103,10 @@ class Tab:
         return session
 
     async def async_select(self, order_window_front: bool=True) -> None:
+        """Deprecated in favor of `async_activate`."""
+        await async_activate(order_window_front)
+
+    async def async_activate(self, order_window_front: bool=True) -> None:
         """
         Selects this tab.
 
