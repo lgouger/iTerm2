@@ -2823,27 +2823,6 @@ static void SetAgainstGrainDim(BOOL isVertical, NSSize *dest, CGFloat value) {
     }
 }
 
-+ (PTYTab *)openTabWithArrangement:(NSDictionary*)arrangement
-                        inTerminal:(NSWindowController<iTermWindowController> *)term
-                   hasFlexibleView:(BOOL)hasFlexible
-                           viewMap:(NSDictionary<NSNumber *, SessionView *> *)viewMap
-                        sessionMap:(NSDictionary<NSString *, PTYSession *> *)sessionMap {
-    PTYTab *theTab = [PTYTab tabWithArrangement:arrangement
-                                     inTerminal:term
-                                hasFlexibleView:hasFlexible
-                                        viewMap:viewMap
-                                     sessionMap:sessionMap
-                                 tmuxController:nil];
-    if ([[theTab sessionViews] count] == 0) {
-        return nil;
-    }
-
-    [term appendTab:theTab];
-    [theTab didAddToTerminal:term
-             withArrangement:arrangement];
-    return theTab;
-}
-
 // Uses idMap_ to reconstitute the TAB_ARRANGEMENT_SESSION elements of an arrangement including their
 // contents.
 - (NSDictionary *)arrangementNodeWithContents:(BOOL)includeContents fromArrangementNode:(NSDictionary *)node {
@@ -5869,6 +5848,10 @@ typedef struct {
 
 - (void)sessionJobDidChange:(PTYSession *)session {
     [self.delegate tabHasNontrivialJobDidChange:self];
+}
+
+- (void)sessionRevealActionsTool {
+    [self.delegate tabRevealActionsTool:self];
 }
 
 #pragma mark - iTermObject

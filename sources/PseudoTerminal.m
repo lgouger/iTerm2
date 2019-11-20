@@ -442,6 +442,7 @@ static BOOL iTermWindowTypeIsCompact(iTermWindowType windowType) {
     NSArray *_screenConfigurationAtTimeOfForceFrame;
     NSRect _forceFrame;
     NSTimeInterval _forceFrameUntil;
+    BOOL _deallocing;
 }
 
 @synthesize scope = _scope;
@@ -594,7 +595,7 @@ static BOOL iTermWindowTypeIsCompact(iTermWindowType windowType) {
                    hotkeyWindowType:(iTermHotkeyWindowType)hotkeyWindowType
                             profile:(Profile *)profile {
     self = [self initWithWindowNibName:@"PseudoTerminal"];
-    NSAssert(self, @"initWithWindowNibName returned nil");
+    ITUpgradedNSAssert(self, @"initWithWindowNibName returned nil");
     if (self) {
         [self finishInitializationWithSmartLayout:smartLayout
                                        windowType:windowType
@@ -1111,6 +1112,7 @@ static BOOL iTermWindowTypeIsCompact(iTermWindowType windowType) {
 ITERM_WEAKLY_REFERENCEABLE
 
 - (void)iterm_dealloc {
+    _deallocing = YES;
     [_contentView shutdown];
 
     [self closeInstantReplayWindow];
@@ -2262,6 +2264,10 @@ ITERM_WEAKLY_REFERENCEABLE
 
 - (void)setWindowTitle:(NSString *)title {
     DLog(@"setWindowTitle:%@", title);
+    if (_deallocing) {
+        // This uses -weakSelf and can be called during dealloc. Doing so is a crash.
+        return;
+    }
     if (title == nil) {
         // title can be nil during loadWindowArrangement
         title = @"";
@@ -3056,8 +3062,7 @@ ITERM_WEAKLY_REFERENCEABLE
         if (sessions) {
             sessionMap = [PTYTab sessionMapWithArrangement:tabArrangement sessions:sessions];
         }
-        if (![PTYTab openTabWithArrangement:tabArrangement
-                                 inTerminal:self
+        if (![self openTabWithArrangement:tabArrangement
                             hasFlexibleView:NO
                                     viewMap:nil
                                  sessionMap:sessionMap]) {
@@ -8193,6 +8198,31 @@ static CGFloat iTermDimmingAmount(PSMTabBarControl *tabView) {
     return minWidth;
 }
 
+- (PTYTab *)openTabWithArrangement:(NSDictionary*)arrangement
+                   hasFlexibleView:(BOOL)hasFlexible
+                           viewMap:(NSDictionary<NSNumber *, SessionView *> *)viewMap
+                        sessionMap:(NSDictionary<NSString *, PTYSession *> *)sessionMap {
+    PTYTab *theTab = [PTYTab tabWithArrangement:arrangement
+                                     inTerminal:self
+                                hasFlexibleView:hasFlexible
+                                        viewMap:viewMap
+                                     sessionMap:sessionMap
+                                 tmuxController:nil];
+    if ([[theTab sessionViews] count] == 0) {
+        return nil;
+    }
+
+    if (hasFlexible) {
+        // Tmux tab
+        [self appendTab:theTab];
+    } else {
+        [self addTabAtAutomaticallyDeterminedLocation:theTab];
+    }
+    [theTab didAddToTerminal:self
+             withArrangement:arrangement];
+    return theTab;
+}
+
 - (void)appendTab:(PTYTab*)aTab {
     [self insertTab:aTab atIndex:[_contentView.tabView numberOfTabViewItems]];
 }
@@ -9778,11 +9808,10 @@ static CGFloat iTermDimmingAmount(PSMTabBarControl *tabView) {
                                              synchronous:NO
                                               completion:nil];
     } else {
-        [PTYTab openTabWithArrangement:self.currentTab.arrangement
-                            inTerminal:self
-                       hasFlexibleView:self.currentTab.isTmuxTab
-                               viewMap:nil
-                            sessionMap:nil];
+        [self openTabWithArrangement:self.currentTab.arrangement
+                     hasFlexibleView:self.currentTab.isTmuxTab
+                             viewMap:nil
+                          sessionMap:nil];
     }
 }
 
@@ -9842,7 +9871,7 @@ static CGFloat iTermDimmingAmount(PSMTabBarControl *tabView) {
     if (self.tabs.count < 2) {
         return nil;
     }
-    NSAssert([self.tabs containsObject:aTab], @"Called on wrong window");
+    ITUpgradedNSAssert([self.tabs containsObject:aTab], @"Called on wrong window");
     NSTabViewItem *aTabViewItem = aTab.tabViewItem;
     NSPoint point = [[self window] frame].origin;
     point.x += 10;
@@ -10580,6 +10609,15 @@ static CGFloat iTermDimmingAmount(PSMTabBarControl *tabView) {
     }
     if ([[self superclass] instancesRespondToSelector:_cmd]) {
         [super controlTextDidChange:aNotification];
+    }
+}
+
+- (void)tabRevealActionsTool:(PTYTab *)tab {
+    if (!self.shouldShowToolbelt) {
+        [self toggleToolbeltVisibility:nil];
+    }
+    if (![iTermToolbeltView shouldShowTool:kActionsToolName]) {
+        [iTermToolbeltView toggleShouldShowTool:kActionsToolName];
     }
 }
 

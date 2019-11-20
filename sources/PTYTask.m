@@ -12,6 +12,8 @@
 #import "TaskNotifier.h"
 #import "iTermAdvancedSettingsModel.h"
 #import "iTermLSOF.h"
+#import "iTermLegacyJobManager.h"
+#import "iTermMonoServerJobManager.h"
 #import "iTermOpenDirectory.h"
 #import "iTermOrphanServerAdopter.h"
 #import "NSDictionary+iTerm.h"
@@ -34,61 +36,6 @@
 #include <unistd.h>
 #include <util.h>
 
-#define CTRLKEY(c) ((c)-'A'+1)
-
-NSString *kCoprocessStatusChangeNotification = @"kCoprocessStatusChangeNotification";
-
-static NSSize PTYTaskClampViewSize(NSSize viewSize) {
-    return NSMakeSize(MAX(0, MIN(viewSize.width, USHRT_MAX)),
-                      MAX(0, MIN(viewSize.height, USHRT_MAX)));
-}
-
-static void
-setup_tty_param(iTermTTYState *ttyState,
-                VT100GridSize gridSize,
-                NSSize viewSize,
-                BOOL isUTF8) {
-    struct termios *term = &ttyState->term;
-    struct winsize *win = &ttyState->win;
-
-    memset(term, 0, sizeof(struct termios));
-    memset(win, 0, sizeof(struct winsize));
-
-    // UTF-8 input will be added on demand.
-    term->c_iflag = ICRNL | IXON | IXANY | IMAXBEL | BRKINT | (isUTF8 ? IUTF8 : 0);
-    term->c_oflag = OPOST | ONLCR;
-    term->c_cflag = CREAD | CS8 | HUPCL;
-    term->c_lflag = ICANON | ISIG | IEXTEN | ECHO | ECHOE | ECHOK | ECHOKE | ECHOCTL;
-
-    term->c_cc[VEOF] = CTRLKEY('D');
-    term->c_cc[VEOL] = -1;
-    term->c_cc[VEOL2] = -1;
-    term->c_cc[VERASE] = 0x7f;           // DEL
-    term->c_cc[VWERASE] = CTRLKEY('W');
-    term->c_cc[VKILL] = CTRLKEY('U');
-    term->c_cc[VREPRINT] = CTRLKEY('R');
-    term->c_cc[VINTR] = CTRLKEY('C');
-    term->c_cc[VQUIT] = 0x1c;           // Control+backslash
-    term->c_cc[VSUSP] = CTRLKEY('Z');
-    term->c_cc[VDSUSP] = CTRLKEY('Y');
-    term->c_cc[VSTART] = CTRLKEY('Q');
-    term->c_cc[VSTOP] = CTRLKEY('S');
-    term->c_cc[VLNEXT] = CTRLKEY('V');
-    term->c_cc[VDISCARD] = CTRLKEY('O');
-    term->c_cc[VMIN] = 1;
-    term->c_cc[VTIME] = 0;
-    term->c_cc[VSTATUS] = CTRLKEY('T');
-
-    term->c_ispeed = B38400;
-    term->c_ospeed = B38400;
-
-    NSSize safeViewSize = PTYTaskClampViewSize(viewSize);
-    win->ws_row = gridSize.height;
-    win->ws_col = gridSize.width;
-    win->ws_xpixel = safeViewSize.width;
-    win->ws_ypixel = safeViewSize.height;
-}
-
 static void HandleSigChld(int n) {
     // This is safe to do because write(2) is listed in the sigaction(2) man page
     // as allowed in a signal handler. Calling a method is *NOT* safe since something might
@@ -103,24 +50,15 @@ static void HandleSigChld(int n) {
 @implementation PTYTaskLock
 @end
 
-@interface PTYTask ()
+@interface PTYTask ()<iTermTask>
 @property(atomic, assign) BOOL hasMuteCoprocess;
 @property(atomic, assign) BOOL coprocessOnlyTaskIsDead;
 @property(atomic, retain) NSFileHandle *logHandle;
 @property(nonatomic, copy) NSString *logPath;
+@property(atomic, readwrite) int fd;
 @end
 
-typedef struct {
-    VT100GridSize gridSize;
-    NSSize viewSize;
-} PTYTaskSize;
-
 @implementation PTYTask {
-    NSString *_tty;
-    pid_t _serverPid;  // -1 when servers are not in use.
-    pid_t _serverChildPid;  // -1 when servers are not in use.
-    pid_t _childPid;  // -1 when servers are in use; otherwise is pid of child.
-    int fd;
     int status;
     NSString* path;
     BOOL hasOutput;
@@ -137,24 +75,24 @@ typedef struct {
     int _spinsNeeded;
     BOOL _paused;
 
-    int _socketFd;  // File descriptor for unix domain socket connected to server. Only safe to close after server is dead.
-
     PTYTaskSize _desiredSize;
     NSTimeInterval _timeOfLastSizeChange;
     BOOL _rateLimitedSetSizeToDesiredSizePending;
     BOOL _haveBumpedProcessCache;
+    id<iTermJobManager> _jobManager;
 }
 
 - (instancetype)init {
     self = [super init];
     if (self) {
-        _serverPid = (pid_t)-1;
-        _socketFd = -1;
-        _childPid = (pid_t)-1;
-        fd = -1;
-        _serverChildPid = -1;
         writeBuffer = [[NSMutableData alloc] init];
         writeLock = [[NSLock alloc] init];
+        if ([iTermAdvancedSettingsModel runJobsInServers]) {
+            _jobManager = [[iTermMonoServerJobManager alloc] init];
+        } else {
+            _jobManager = [[iTermLegacyJobManager alloc] init];
+        }
+        self.fd = -1;
     }
     return self;
 }
@@ -164,17 +102,9 @@ typedef struct {
 
     // TODO: The use of killpg seems pretty sketchy. It takes a pgid_t, not a
     // pid_t. Are they guaranteed to always be the same for process group
-    // leaders?
-    if (_childPid > 0) {
-        // Terminate an owned child.
-        [[iTermProcessCache sharedInstance] unregisterTrackedPID:_childPid];
-        killpg(_childPid, SIGHUP);
-    } else if (_serverChildPid) {
-        [[iTermProcessCache sharedInstance] unregisterTrackedPID:_serverChildPid];
-        // Kill a server-owned child.
-        // TODO: Don't want to do this when Sparkle is upgrading.
-        killpg(_serverChildPid, SIGHUP);
-    }
+    // leaders? It is not clear from git history why killpg is used here and
+    // not in other places. I suspect it's what we ought to use everywhere.
+    [_jobManager killWithMode:iTermJobManagerKillingModeProcessGroup];
     if (_tmuxClientProcessID) {
         [[iTermProcessCache sharedInstance] unregisterTrackedPID:_tmuxClientProcessID.intValue];
     }
@@ -188,8 +118,8 @@ typedef struct {
 }
 
 - (NSString *)description {
-    return [NSString stringWithFormat:@"<%@: %p child pid=%d server-child pid=%d, filedesc=%d tmux pid=%@>",
-            NSStringFromClass([self class]), self, _serverChildPid, _serverPid, fd, _tmuxClientProcessID];
+    return [NSString stringWithFormat:@"<%@: %p jobManager=%@ tmuxClientProcessID=%@>",
+            NSStringFromClass([self class]), self, _jobManager, _tmuxClientProcessID];
 }
 
 #pragma mark - APIs
@@ -208,24 +138,30 @@ typedef struct {
     [[TaskNotifier sharedInstance] unblock];
 }
 
-- (BOOL)pidIsChild {
-    return _serverChildPid == -1 && _childPid != -1;
+- (pid_t)pidToWaitOn {
+    return _jobManager.pidToWaitOn;
 }
 
-- (pid_t)serverPid {
-    return _serverPid;
+- (BOOL)isSessionRestorationPossible {
+    return _jobManager.isSessionRestorationPossible;
+}
+
+- (NSString *)sessionRestorationIdentifier {
+    return _jobManager.sessionRestorationIdentifier;
 }
 
 - (int)fd {
-    return fd;
+    assert(_jobManager);
+    return _jobManager.fd;
+}
+
+- (void)setFd:(int)fd {
+    assert(_jobManager);
+    _jobManager.fd = fd;
 }
 
 - (pid_t)pid {
-    if (_serverChildPid != -1) {
-        return _serverChildPid;
-    } else {
-        return _childPid;
-    }
+    return _jobManager.externallyVisiblePid;
 }
 
 - (int)status {
@@ -283,9 +219,9 @@ typedef struct {
 - (BOOL)passwordInput {
     struct termios termAttributes;
     if ([iTermAdvancedSettingsModel detectPasswordInput] &&
-        fd > 0 &&
-        isatty(fd) &&
-        tcgetattr(fd, &termAttributes) == 0) {
+        self.fd > 0 &&
+        isatty(self.fd) &&
+        tcgetattr(self.fd, &termAttributes) == 0) {
         return !(termAttributes.c_lflag & ECHO) && (termAttributes.c_lflag & ICANON);
     } else {
         return NO;
@@ -415,17 +351,8 @@ typedef struct {
     }
 }
 
-- (void)sendSignal:(int)signo toServer:(BOOL)toServer {
-    if (toServer && _serverPid != -1) {
-        DLog(@"Sending signal to server %@", @(_serverPid));
-        kill(_serverPid, signo);
-    } else if (_serverChildPid != -1) {
-        [[iTermProcessCache sharedInstance] unregisterTrackedPID:_serverChildPid];
-        kill(_serverChildPid, signo);
-    } else if (_childPid >= 0) {
-        [[iTermProcessCache sharedInstance] unregisterTrackedPID:_childPid];
-        kill(_childPid, signo);
-    }
+- (void)killWithMode:(iTermJobManagerKillingMode)mode {
+    [_jobManager killWithMode:mode];
     if (_tmuxClientProcessID) {
         [[iTermProcessCache sharedInstance] unregisterTrackedPID:_tmuxClientProcessID.intValue];
     }
@@ -437,7 +364,7 @@ typedef struct {
         return;
     }
 
-    NSSize safeViewSize = PTYTaskClampViewSize(viewSize);
+    NSSize safeViewSize = iTermTTYClampWindowSize(viewSize);
     _desiredSize.gridSize = size;
     _desiredSize.viewSize = safeViewSize;
 
@@ -447,10 +374,13 @@ typedef struct {
 - (void)stop {
     self.paused = NO;
     [self stopLogging];
-    [self sendSignal:SIGHUP toServer:NO];
-    [self killServerIfRunning];
+    [self killWithMode:iTermJobManagerKillingModeRegular];
 
-    if (fd >= 0) {
+    // Ensure the server is broken out of accept()ing for future connections
+    // in case the child doesn't die right away.
+    [self killWithMode:iTermJobManagerKillingModeBrokenPipe];
+
+    if (self.fd >= 0) {
         [self closeFileDescriptor];
         [[TaskNotifier sharedInstance] deregisterTask:self];
         // Require that it spin twice so we can be completely sure that the task won't get called
@@ -470,7 +400,7 @@ typedef struct {
         // being passed a half-broken fd. We must change it because after this
         // function returns, a new task may be created with this fd and then
         // the select thread wouldn't know which task a fd belongs to.
-        fd = -1;
+        self.fd = -1;
     }
     if (self.isCoprocessOnly) {
         self.coprocessOnlyTaskIsDead = YES;
@@ -519,7 +449,7 @@ typedef struct {
     char buffer[MAXRW * iterations];
     for (int i = 0; i < iterations; ++i) {
         // Only read up to MAXRW*iterations bytes, then release control
-        ssize_t n = read(fd, buffer + bytesRead, MAXRW);
+        ssize_t n = read(self.fd, buffer + bytesRead, MAXRW);
         if (n < 0) {
             // There was a read error.
             if (errno != EAGAIN && errno != EINTR) {
@@ -559,7 +489,7 @@ typedef struct {
     if (length > MAXRW) {
         length = MAXRW;
     }
-    ssize_t written = write(fd, [writeBuffer mutableBytes], length);
+    ssize_t written = write(self.fd, [writeBuffer mutableBytes], length);
 
     // No data?
     if ((written < 0) && (!(errno == EAGAIN || errno == EINTR))) {
@@ -607,65 +537,31 @@ typedef struct {
     }
 }
 
-- (BOOL)tryToAttachToServerWithProcessId:(pid_t)thePid {
+- (void)attachToServer:(iTermFileDescriptorServerConnection)serverConnection {
+    [_jobManager attachToServer:serverConnection withProcessID:nil task:self];
+}
+
+- (BOOL)tryToAttachToServerWithProcessId:(pid_t)thePid tty:(NSString *)tty {
     if (![iTermAdvancedSettingsModel runJobsInServers]) {
         return NO;
     }
-    if (_serverChildPid != -1) {
+    if (_jobManager.hasJob) {
         return NO;
     }
 
     // TODO: This server code is super scary so I'm NSLog'ing it to make it easier to recover
     // logs. These should eventually become DLog's and the log statements in the server should
     // become LOG_DEBUG level.
-    DLog(@"tryToAttachToServerWithProcessId: Attempt to connect to server for pid %d", (int)thePid);
+    DLog(@"tryToAttachToServerWithProcessId: Attempt to connect to server for pid %d, tty %@", (int)thePid, tty);
     iTermFileDescriptorServerConnection serverConnection = iTermFileDescriptorClientRun(thePid);
     if (!serverConnection.ok) {
         NSLog(@"Failed with error %s", serverConnection.error);
         return NO;
     } else {
         DLog(@"Succeeded.");
-        [self attachToServer:serverConnection];
-
-        // Prevent any future attempt to connect to this server as an orphan.
-        char buffer[PATH_MAX + 1];
-        iTermFileDescriptorSocketPath(buffer, sizeof(buffer), thePid);
-        [[iTermOrphanServerAdopter sharedInstance] removePath:[NSString stringWithUTF8String:buffer]];
-        [[iTermProcessCache sharedInstance] setNeedsUpdate:YES];
+        [_jobManager attachToServer:serverConnection withProcessID:@(thePid) task:self];
+        [self setTty:tty];
         return YES;
-    }
-}
-
-- (void)attachToServer:(iTermFileDescriptorServerConnection)serverConnection {
-    assert([iTermAdvancedSettingsModel runJobsInServers]);
-    fd = serverConnection.ptyMasterFd;
-    _serverPid = serverConnection.serverPid;
-    _serverChildPid = serverConnection.childPid;
-    if (_serverChildPid > 0) {
-        [[iTermProcessCache sharedInstance] registerTrackedPID:_serverChildPid];
-    }
-    _socketFd = serverConnection.socketFd;
-    [[TaskNotifier sharedInstance] registerTask:self];
-}
-
-// Sends a signal to the server. This breaks it out of accept()ing forever when iTerm2 quits.
-- (void)killServerIfRunning {
-    if (_serverPid >= 0) {
-        // This makes the server unlink its socket and exit immediately.
-        kill(_serverPid, SIGUSR1);
-
-        // Mac OS seems to have a bug in waitpid. I've seen a case where the child has exited
-        // (ps shows it in parens) but when the parent calls waitPid it just hangs. Rather than
-        // wait here, I'll add the server to the deadpool. The TaskNotifier thread can wait
-        // on it when it spins. I hope in this weird case that waitpid doesn't take long to run
-        // and that it's rare enough that the zombies don't pile up. Not much else I can do.
-        [[TaskNotifier sharedInstance] waitForPid:_serverPid];
-
-        // Don't want to leak these. They exist to let the server know when iTerm2 crashes, but if
-        // the server is dead it's not needed any more.
-        close(_socketFd);
-        _socketFd = -1;
-        NSLog(@"File descriptor server exited with status %d", status);
     }
 }
 
@@ -762,20 +658,6 @@ typedef struct {
     argv[max + 1] = NULL;
 }
 
-- (void)showFailedToCreateTempSocketError {
-    NSAlert *alert = [[NSAlert alloc] init];
-    alert.messageText = @"Error";
-    alert.informativeText = [NSString stringWithFormat:@"An error was encountered while creating a temporary file with mkstemps. Verify that %@ exists and is writable.", NSTemporaryDirectory()];
-    [alert addButtonWithTitle:@"OK"];
-    [alert runModal];
-}
-
-- (void)failedToForkWithEnvironment:(char **)newEnviron program:(NSString *)progpath {
-    DLog(@"Unable to fork %@: %s", progpath, strerror(errno));
-    [[iTermNotificationController sharedInstance] notify:@"Unable to fork!" withDescription:@"You may have too many processes already running."];
-    [self freeEnvironment:newEnviron];
-}
-
 - (void)freeEnvironment:(char **)newEnviron {
     for (int j = 0; newEnviron[j]; j++) {
         free(newEnviron[j]);
@@ -783,82 +665,15 @@ typedef struct {
     free(newEnviron);
 }
 
-- (void)finishHandshakeWithJobInServer:(const iTermForkState *)forkStatePtr
-                              ttyState:(const iTermTTYState *)ttyStatePtr
-                           synchronous:(BOOL)synchronous
-                            completion:(void (^)(void))completion {
-    iTermForkState forkState = *forkStatePtr;
-    iTermTTYState ttyState = *ttyStatePtr;
-    DLog(@"Begin handshake");
-    int connectionFd = forkState.connectionFd;
-    int deadmansPipeFd = forkState.deadMansPipe[0];
-    // This takes about 200ms on a fast machine so pop off to a background queue to do it.
-    if (!synchronous) {
-        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-            iTermFileDescriptorServerConnection serverConnection = iTermFileDescriptorClientRead(connectionFd,
-                                                                                                 deadmansPipeFd);
-            dispatch_async(dispatch_get_main_queue(), ^{
-                [self didCompleteHandshakeWithForkState:forkState
-                                               ttyState:ttyState
-                                       serverConnection:serverConnection
-                                             completion:completion];
-            });
-        });
-    } else {
-        iTermFileDescriptorServerConnection serverConnection = iTermFileDescriptorClientRead(connectionFd,
-                                                                                             deadmansPipeFd);
-        [self didCompleteHandshakeWithForkState:forkState
-                                       ttyState:ttyState
-                               serverConnection:serverConnection
-                                     completion:completion];
-    }
-}
-
-- (void)didCompleteHandshakeWithForkState:(iTermForkState)state
-                                 ttyState:(const iTermTTYState)ttyState
-                         serverConnection:(iTermFileDescriptorServerConnection)serverConnection
-                               completion:(void (^)(void))completion {
-    DLog(@"Handshake complete");
-    close(state.deadMansPipe[0]);
-    if (serverConnection.ok) {
-        // We intentionally leave connectionFd open. If iTerm2 stops unexpectedly then its closure
-        // lets the server know it should call accept(). We now have two copies of the master PTY
-        // file descriptor. Let's close the original one because attachToServer: will use the
-        // copy in serverConnection.
-        close(fd);
-        DLog(@"close fd");
-        fd = -1;
-
-        // The serverConnection has the wrong server PID because the connection was made prior
-        // to fork(). Update serverConnection with the real server PID.
-        serverConnection.serverPid = state.pid;
-
-        // Connect this task to the server's PIDs and file descriptor.
-        DLog(@"attaching...");
-        [self attachToServer:serverConnection];
-        DLog(@"attached. Set nonblocking");
-        self.tty = [NSString stringWithUTF8String:ttyState.tty];
-        fcntl(fd, F_SETFL, O_NONBLOCK);
-    } else {
-        close(fd);
-        DLog(@"Server died immediately!");
-        [_delegate taskDiedImmediately];
-    }
-    DLog(@"fini");
-    if (completion) {
-        completion();
-    }
-}
-
 - (NSString *)tty {
     @synchronized([PTYTaskLock class]) {
-        return _tty;
+        return _jobManager.tty;
     }
 }
 
 - (void)setTty:(NSString *)tty {
     @synchronized([PTYTaskLock class]) {
-        _tty = [tty copy];
+        _jobManager.tty = tty;
     }
     if ([NSThread isMainThread]) {
         [self.delegate taskDidChangeTTY:self];
@@ -872,52 +687,6 @@ typedef struct {
             }
         });
     }
-}
-
-- (void)finishLaunchingDirectChild:(iTermTTYState *)ttyState {
-    self.tty = [NSString stringWithUTF8String:ttyState->tty];
-    fcntl(fd, F_SETFL, O_NONBLOCK);
-    [[TaskNotifier sharedInstance] registerTask:self];
-}
-
-- (void)didForkParent:(const iTermForkState *)forkState
-           newEnviron:(char **)newEnviron
-             ttyState:(iTermTTYState *)ttyState
-          synchronous:(BOOL)synchronous
-           completion:(void (^)(void))completion {
-    DLog(@"free environment");
-    [self freeEnvironment:newEnviron];
-
-    // Make sure the master side of the pty is closed on future exec() calls.
-    DLog(@"fcntl");
-    fcntl(fd, F_SETFD, fcntl(fd, F_GETFD) | FD_CLOEXEC);
-
-    if (forkState->connectionFd > 0) {
-        // Jobs run in servers. The client and server connected to each other
-        // before forking. The server will send us the child pid now. We don't
-        // really need the rest of the stuff in serverConnection since we already know
-        // it, but that's ok.
-        [self finishHandshakeWithJobInServer:forkState
-                                    ttyState:ttyState
-                                 synchronous:synchronous
-                                  completion:completion];
-    } else {
-        // Jobs are direct children of iTerm2
-        [self finishLaunchingDirectChild:ttyState];
-        if (completion) {
-            completion();
-        }
-    }
-}
-
-- (NSString *)pathToNewUnixDomainSocket {
-    // Create a temporary filename for the unix domain socket. It'll only exist for a moment.
-    NSString *tempPath = [[NSWorkspace sharedWorkspace] temporaryFileNameWithPrefix:@"iTerm2-temp-socket."
-                                                                             suffix:@""];
-    if (tempPath == nil) {
-        [self showFailedToCreateTempSocketError];
-    }
-    return tempPath;
 }
 
 - (void)reallyLaunchWithPath:(NSString *)progpath
@@ -936,7 +705,7 @@ typedef struct {
     }
 
     iTermTTYState ttyState;
-    setup_tty_param(&ttyState, gridSize, viewSize, isUTF8);
+    iTermTTYStateInit(&ttyState, gridSize, viewSize, isUTF8);
 
     [self setCommand:progpath];
     env = [self environmentBySettingShell:env];
@@ -968,70 +737,51 @@ typedef struct {
     // Note: stringByStandardizingPath will automatically call stringByExpandingTildeInPath.
     const char *initialPwd = [[[env objectForKey:@"PWD"] stringByStandardizingPath] UTF8String];
     DLog(@"initialPwd=%s", initialPwd);
-    iTermForkState forkState = {
-        .connectionFd = -1,
-        .deadMansPipe = { 0, 0 },
-    };
 
-    const BOOL runJobsInServers = [iTermAdvancedSettingsModel runJobsInServers];
-    BOOL closeFileDescriptors = !runJobsInServers;
-    if (runJobsInServers) {
-        // Create a temporary filename for the unix domain socket. It'll only exist for a moment.
-        DLog(@"get path to UDS");
-        NSString *unixDomainSocketPath = [self pathToNewUnixDomainSocket];
-        DLog(@"done");
-        if (unixDomainSocketPath == nil) {
-            [self freeEnvironment:newEnviron];
-            if (completion != nil) {
-                completion();
-            }
-            return;
-        }
+    [_jobManager forkAndExecWithTtyState:&ttyState
+                                 argpath:argpath
+                                    argv:argv
+                              initialPwd:initialPwd
+                              newEnviron:newEnviron
+                             synchronous:synchronous
+                                    task:self
+                              completion:
+     ^(iTermJobManagerForkAndExecStatus status) {
+         [self freeEnvironment:newEnviron];
+         switch (status) {
+             case iTermJobManagerForkAndExecStatusSuccess:
+                 // Parent
+                 [self setTty:self->_jobManager.tty];
+                 DLog(@"finished succesfully");
+                 break;
 
-        // Begin listening on that path as a unix domain socket.
-        DLog(@"fork");
+             case iTermJobManagerForkAndExecStatusTempFileError:
+                 [self showFailedToCreateTempSocketError];
+                 break;
 
-        fd = iTermForkAndExecToRunJobInServer(&forkState,
-                                              &ttyState,
-                                              unixDomainSocketPath,
-                                              argpath,
-                                              argv,
-                                              closeFileDescriptors,
-                                              initialPwd,
-                                              newEnviron);
-        // If you get here you're the parent.
-        _serverPid = forkState.pid;
-    } else {
-        fd = iTermForkAndExecToRunJobDirectly(&forkState,
-                                              &ttyState,
-                                              argpath,
-                                              argv,
-                                              closeFileDescriptors,
-                                              initialPwd,
-                                              newEnviron);
-        // If you get here you're the parent.
-        _childPid = forkState.pid;
-        if (_childPid > 0) {
-            [[iTermProcessCache sharedInstance] registerTrackedPID:_childPid];
-        }
-    }
+             case iTermJobManagerForkAndExecStatusFailedToFork:
+                 DLog(@"Unable to fork %@: %s", progpath, strerror(errno));
+                 [[iTermNotificationController sharedInstance] notify:@"Unable to fork!"
+                                                      withDescription:@"You may have too many processes already running."];
+                 break;
 
-    if (forkState.pid < (pid_t)0) {
-        // Error
-        [self failedToForkWithEnvironment:newEnviron program:progpath];
-        if (completion != nil) {
-            completion();
-        }
-        return;
-    }
+             case iTermJobManagerForkAndExecStatusTaskDiedImmediately:
+                 [self->_delegate taskDiedImmediately];
+                 break;
+         }
+         if (completion != nil) {
+             completion();
+         }
+     }];
 
-    // Parent
-    DLog(@"done forking");
-    [self didForkParent:&forkState
-             newEnviron:newEnviron
-               ttyState:&ttyState
-            synchronous:synchronous
-             completion:completion];
+}
+
+- (void)showFailedToCreateTempSocketError {
+    NSAlert *alert = [[NSAlert alloc] init];
+    alert.messageText = @"Error";
+    alert.informativeText = [NSString stringWithFormat:@"An error was encountered while creating a temporary file with mkstemps. Verify that %@ exists and is writable.", NSTemporaryDirectory()];
+    [alert addButtonWithTitle:@"OK"];
+    [alert runModal];
 }
 
 #pragma mark I/O
@@ -1070,8 +820,8 @@ typedef struct {
 }
 
 - (void)closeFileDescriptor {
-    if (fd != -1) {
-        close(fd);
+    if (self.fd != -1) {
+        close(self.fd);
     }
 }
 
@@ -1101,19 +851,7 @@ typedef struct {
     DLog(@"Set size of %@ to %@ cells, %@ px", _delegate, VT100GridSizeDescription(_desiredSize.gridSize), NSStringFromSize(_desiredSize.viewSize));
     _timeOfLastSizeChange = [NSDate timeIntervalSinceReferenceDate];
 
-    struct winsize winsize;
-    ioctl(fd, TIOCGWINSZ, &winsize);
-    if (winsize.ws_col != _desiredSize.gridSize.width ||
-        winsize.ws_row != _desiredSize.gridSize.height ||
-        winsize.ws_xpixel != _desiredSize.viewSize.width ||
-        winsize.ws_ypixel != _desiredSize.viewSize.height) {
-        DLog(@"Actually setting the size");
-        winsize.ws_col = _desiredSize.gridSize.width;
-        winsize.ws_row = _desiredSize.gridSize.height;
-        winsize.ws_xpixel = _desiredSize.viewSize.width;
-        winsize.ws_ypixel = _desiredSize.viewSize.height;
-        ioctl(fd, TIOCSWINSZ, &winsize);
-    }
+    iTermSetTerminalSize(self.fd, _desiredSize);
 }
 
 #pragma mark Process Tree

@@ -197,7 +197,7 @@ static iTermController *gSharedInstance;
         while ([_terminalWindows count] > 0) {
             [[_terminalWindows objectAtIndex:0] close];
         }
-        NSAssert([_terminalWindows count] == 0, @"Expected terminals to be gone");
+        ITUpgradedNSAssert([_terminalWindows count] == 0, @"Expected terminals to be gone");
         [_terminalWindows release];
     }
 
@@ -1307,10 +1307,8 @@ static iTermController *gSharedInstance;
     assert([iTermAdvancedSettingsModel runJobsInServers]);
     for (iTermRestorableSession *restorableSession in _restorableSessions) {
         for (PTYSession *aSession in restorableSession.sessions) {
-            if (aSession.shell.serverPid != -1) {
-                [aSession.shell sendSignal:SIGKILL toServer:YES];
-            }
-            [aSession.shell sendSignal:SIGHUP toServer:YES];
+            // Ensure servers are dead.
+            [aSession.shell killWithMode:iTermJobManagerKillingModeForceUnrestorable];
         }
     }
 }

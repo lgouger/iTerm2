@@ -1422,7 +1422,8 @@ ITERM_WEAKLY_REFERENCEABLE
                 pid_t serverPid = [arrangement[SESSION_ARRANGEMENT_SERVER_PID] intValue];
                 DLog(@"Try to attach to pid %d", (int)serverPid);
                 // serverPid might be -1 if the user turned on session restoration and then quit.
-                if (serverPid != -1 && [aSession tryToAttachToServerWithProcessId:serverPid]) {
+                if (serverPid != -1 && [aSession tryToAttachToServerWithProcessId:serverPid
+                                                                              tty:arrangement[SESSION_ARRANGEMENT_TTY]]) {
                     DLog(@"Success!");
 
                     if ([arrangement[SESSION_ARRANGEMENT_IS_TMUX_GATEWAY] boolValue]) {
@@ -1433,7 +1434,6 @@ ITERM_WEAKLY_REFERENCEABLE
 
                     runCommand = NO;
                     attachedToServer = YES;
-                    aSession.shell.tty = arrangement[SESSION_ARRANGEMENT_TTY];
                     shouldEnterTmuxMode = ([arrangement[SESSION_ARRANGEMENT_IS_TMUX_GATEWAY] boolValue] &&
                                            arrangement[SESSION_ARRANGEMENT_TMUX_GATEWAY_SESSION_NAME] != nil &&
                                            arrangement[SESSION_ARRANGEMENT_TMUX_GATEWAY_SESSION_ID] != nil);
@@ -1679,13 +1679,14 @@ ITERM_WEAKLY_REFERENCEABLE
     return YES;
 }
 
-- (BOOL)tryToAttachToServerWithProcessId:(pid_t)serverPid {
+- (BOOL)tryToAttachToServerWithProcessId:(pid_t)serverPid
+                                     tty:(NSString *)tty {
     if (![iTermAdvancedSettingsModel runJobsInServers]) {
         DLog(@"Failing to attach because run jobs in servers is off");
         return NO;
     }
     DLog(@"Try to attach...");
-    if ([_shell tryToAttachToServerWithProcessId:serverPid]) {
+    if ([_shell tryToAttachToServerWithProcessId:serverPid tty:tty]) {
         @synchronized(self) {
             _registered = YES;
         }
@@ -2171,7 +2172,11 @@ ITERM_WEAKLY_REFERENCEABLE
         [self replaceTerminatedShellWithNewInstance];
     } else {
         _shouldRestart = YES;
-        [_shell sendSignal:SIGKILL toServer:NO];
+        // We don't use a regular (SIGHUP) kill here because we must ensure
+        // servers get killed on user-initiated quit. If we just HUP the shell
+        // then the server won't notice until it becomes attached as an orphan
+        // on the next launch. See issue 6369.
+        [_shell killWithMode:iTermJobManagerKillingModeForce];
     }
 }
 
@@ -2866,7 +2871,8 @@ ITERM_WEAKLY_REFERENCEABLE
         DLog(@"  brokenPipe: Already exited");
         return;
     }
-    [_shell killServerIfRunning];
+    // Ensure we don't leak the unix domain socket file descriptor.
+    [_shell killWithMode:iTermJobManagerKillingModeBrokenPipe];
     if ([self shouldPostUserNotification] &&
         [iTermProfilePreferences boolForKey:KEY_SEND_SESSION_ENDED_ALERT inProfile:self.profile]) {
         [[iTermNotificationController sharedInstance] notify:@"Session Ended"
@@ -4445,8 +4451,8 @@ ITERM_WEAKLY_REFERENCEABLE
     if (includeContents && !self.isTmuxClient) {
         // These values are used for restoring sessions after a crash. It's only saved when contents
         // are included since saved window arrangements have no business knowing the process id.
-        if ([iTermAdvancedSettingsModel runJobsInServers] && !_shell.pidIsChild) {
-            result[SESSION_ARRANGEMENT_SERVER_PID] = @(_shell.serverPid);
+        if ([iTermAdvancedSettingsModel runJobsInServers] && _shell.isSessionRestorationPossible) {
+            result[SESSION_ARRANGEMENT_SERVER_PID] = _shell.sessionRestorationIdentifier;
             if (self.tty) {
                 result[SESSION_ARRANGEMENT_TTY] = self.tty;
             }
@@ -11582,6 +11588,10 @@ scrollToFirstResult:(BOOL)scrollToFirstResult {
 
 - (void)statusBarPerformAction:(iTermAction *)action {
     [self applyAction:action];
+}
+
+- (void)statusBarRevealActionsTool {
+    [self.delegate sessionRevealActionsTool];
 }
 
 #pragma mark - iTermMetaFrustrationDetectorDelegate

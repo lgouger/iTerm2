@@ -7,6 +7,8 @@
 
 #import "PTYTask.h"
 
+#import "iTermTTYState.h"
+
 #include <util.h>
 
 typedef struct {
@@ -15,12 +17,6 @@ typedef struct {
     int deadMansPipe[2];
     int numFileDescriptorsToPreserve;
 } iTermForkState;
-
-typedef struct {
-    struct termios term;
-    struct winsize win;
-    char tty[PATH_MAX];
-} iTermTTYState;
 
 int iTermForkAndExecToRunJobInServer(iTermForkState *forkState,
                                      iTermTTYState *ttyState,

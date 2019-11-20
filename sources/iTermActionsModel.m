@@ -6,6 +6,7 @@
 //
 
 #import "iTermActionsModel.h"
+#import "iTermKeyBindingMgr.h"
 #import "iTermNotificationCenter+Protected.h"
 #import "NSArray+iTerm.h"
 #import "NSIndexSet+iTerm.h"
@@ -50,6 +51,12 @@ static NSString *const iTermActionsUserDefaultsKey = @"Actions";
         return NO;
     }
     return [self.dictionaryValue isEqual:other.dictionaryValue];
+}
+
+- (NSString *)displayString {
+    NSDictionary *dict = @{ iTermKeyBindingDictionaryKeyAction: @(_action),
+                            iTermKeyBindingDictionaryKeyParameter: _parameter ?: @"" };
+    return [iTermKeyBindingMgr formatAction:dict];
 }
 
 @end
@@ -108,6 +115,14 @@ static NSString *const iTermActionsUserDefaultsKey = @"Actions";
     return [_actions indexOfObjectPassingTest:^BOOL(iTermAction * _Nonnull action, NSUInteger idx, BOOL * _Nonnull stop) {
         return action.identifier == identifier;
     }];
+}
+
+- (iTermAction *)actionWithIdentifier:(NSInteger)identifier {
+    const NSInteger i = [self indexOfActionWithIdentifier:identifier];
+    if (i == NSNotFound) {
+        return nil;
+    }
+    return _actions[i];
 }
 
 - (void)moveActionsWithIdentifiers:(NSArray<NSNumber *> *)identifiers

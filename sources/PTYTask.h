@@ -1,13 +1,16 @@
 // Implements the interface to the pty session.
 
 #import <Foundation/Foundation.h>
+
 #import "iTermFileDescriptorClient.h"
+#import "iTermTTYState.h"
 #import "VT100GridTypes.h"
 
-extern NSString *kCoprocessStatusChangeNotification;
+#import <termios.h>
 
 @class Coprocess;
 @class iTermProcessInfo;
+@protocol iTermTask;
 @class PTYTab;
 @class PTYTask;
 
@@ -29,6 +32,48 @@ extern NSString *kCoprocessStatusChangeNotification;
 - (void)taskDidChangeTTY:(PTYTask *)task;
 @end
 
+typedef NS_ENUM(NSUInteger, iTermJobManagerForkAndExecStatus) {
+    iTermJobManagerForkAndExecStatusSuccess,
+    iTermJobManagerForkAndExecStatusTempFileError,
+    iTermJobManagerForkAndExecStatusFailedToFork,
+    iTermJobManagerForkAndExecStatusTaskDiedImmediately
+};
+
+typedef NS_ENUM(NSUInteger, iTermJobManagerKillingMode) {
+    iTermJobManagerKillingModeRegular,            // SIGHUP, child only
+    iTermJobManagerKillingModeForce,              // SIGKILL, child only
+    iTermJobManagerKillingModeForceUnrestorable,  // SIGKILL to server if available. SIGHUP to child always.
+    iTermJobManagerKillingModeProcessGroup,       // SIGHUP to process group
+    iTermJobManagerKillingModeBrokenPipe,         // Removes unix domain socket and file descriptor for it. Ensures server is waitpid()ed on. This does not directly kill the child process.
+};
+
+@protocol iTermJobManager<NSObject>
+
+@property (nonatomic) int fd;
+@property (nonatomic, copy) NSString *tty;
+@property (nonatomic, readonly) pid_t externallyVisiblePid;
+@property (nonatomic, readonly) BOOL hasJob;
+@property (nonatomic, readonly) id sessionRestorationIdentifier;
+@property (nonatomic, readonly) pid_t pidToWaitOn;
+@property (nonatomic, readonly) BOOL isSessionRestorationPossible;
+
+- (void)forkAndExecWithTtyState:(iTermTTYState *)ttyStatePtr
+                        argpath:(const char *)argpath
+                           argv:(const char **)argv
+                     initialPwd:(const char *)initialPwd
+                     newEnviron:(char **)newEnviron
+                    synchronous:(BOOL)synchronous
+                           task:(id<iTermTask>)task
+                     completion:(void (^)(iTermJobManagerForkAndExecStatus))completion;
+
+- (void)attachToServer:(iTermFileDescriptorServerConnection)serverConnection
+         withProcessID:(NSNumber *)thePid
+                  task:(id<iTermTask>)task;
+
+- (void)killWithMode:(iTermJobManagerKillingMode)mode;
+
+@end
+
 @interface PTYTask : NSObject
 
 @property(atomic, readonly) BOOL hasMuteCoprocess;
@@ -36,8 +81,8 @@ extern NSString *kCoprocessStatusChangeNotification;
 
 // No reading or writing allowed for now.
 @property(atomic, assign) BOOL paused;
-@property(nonatomic, readonly) BOOL pidIsChild;
-@property(nonatomic, readonly) pid_t serverPid;
+@property(nonatomic, readonly) BOOL isSessionRestorationPossible;
+@property(nonatomic, readonly) id sessionRestorationIdentifier;
 
 // Tmux sessions are coprocess-only tasks. They have no file descriptor or pid,
 // but they may have a coprocess that needs TaskNotifier to read, write, and wait on.
@@ -46,9 +91,8 @@ extern NSString *kCoprocessStatusChangeNotification;
 
 @property(atomic, readonly) int fd;
 @property(atomic, readonly) pid_t pid;
-@property(atomic, readonly) int status;
 // Externally, only PTYSession should assign to this when reattaching to a server.
-@property(atomic, copy) NSString *tty;
+@property(atomic, readonly) NSString *tty;
 @property(atomic, readonly) NSString *path;
 @property(atomic, readonly) NSString *getWorkingDirectory;
 @property(atomic, readonly) BOOL logging;
@@ -84,8 +128,6 @@ extern NSString *kCoprocessStatusChangeNotification;
 
 - (void)writeTask:(NSData*)data;
 
-- (void)sendSignal:(int)signo toServer:(BOOL)toServer;
-
 // Cause the slave to receive a SIGWINCH and change the tty's window size. If `size` equals the
 // tty's current window size then no action is taken.
 - (void)setSize:(VT100GridSize)size viewSize:(NSSize)viewSize;
@@ -105,15 +147,14 @@ extern NSString *kCoprocessStatusChangeNotification;
 // If [iTermAdvancedSettingsModel runJobsInServers] is on, then try for up to
 // |timeout| seconds to connect to the server. Returns YES on success.
 // If successful, it will be wired up as the task's file descriptor and process.
-- (BOOL)tryToAttachToServerWithProcessId:(pid_t)thePid;
+- (BOOL)tryToAttachToServerWithProcessId:(pid_t)thePid tty:(NSString *)tty;
 
 // Wire up the server as the task's file descriptor and process. The caller
 // will have connected to the server to get this info. Requires
 // [iTermAdvancedSettingsModel runJobsInServers].
 - (void)attachToServer:(iTermFileDescriptorServerConnection)serverConnection;
 
-// Clients should call this from tha main thread on a broken pipe.
-- (void)killServerIfRunning;
+- (void)killWithMode:(iTermJobManagerKillingMode)mode;
 
 - (void)registerAsCoprocessOnlyTask;
 - (void)writeToCoprocessOnlyTask:(NSData *)data;
